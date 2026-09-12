@@ -3,7 +3,6 @@ use std::path::PathBuf;
 use super::{App, send_event};
 use crate::{
     event::{AppEvent, NavigationEvent, PlaybackEvent},
-    playback::scan_local_music,
     service::ApiEndpoint,
     state::{ContentState, Page},
 };
@@ -36,10 +35,10 @@ impl App {
             self.state.navigation.content_is_search = false;
             self.state.navigation.clear_breadcrumb();
             self.state.navigation.set_content(ContentState::Loading);
+            let service = self.service.clone();
             let cache = self.service.cache().clone();
             let ttl = self.config.cache.content_cache_ttl;
             let sender = self.state.events.sender();
-            let music_dir = dirs::home_dir().unwrap_or_default().join("Music");
 
             tokio::spawn(async move {
                 if ttl > 0
@@ -48,11 +47,7 @@ impl App {
                     send_event(&sender, NavigationEvent::ContentLoaded(cached).into());
                     return;
                 }
-                let songs = tokio::task::spawn_blocking(move || scan_local_music(&music_dir))
-                    .await
-                    .unwrap_or_default();
-                let state =
-                    ContentState::Songs(songs.into_iter().map(std::sync::Arc::new).collect());
+                let state = service.load_local_music().await;
                 let state = if ttl > 0 {
                     let cache_clone = cache.clone();
                     tokio::task::spawn_blocking(move || {
