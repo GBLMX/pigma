@@ -29,7 +29,6 @@ use ncm_api::SongList;
 use ratatui::{DefaultTerminal, Frame, layout::Rect, widgets::TableState};
 use ratatui_image::picker::Picker;
 use reqwest::Client;
-use splash::send_event;
 
 use crate::{
     cache::CacheManager,

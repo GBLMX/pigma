@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use super::{App, send_event};
+use super::{App, event::send_event};
 use crate::{
     event::{AppEvent, NavigationEvent, PlaybackEvent},
     service::ApiEndpoint,

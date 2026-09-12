@@ -1,7 +1,7 @@
 //! Lyrics pipeline: loads lyrics for the playing song (NCM API or sonar
 //! provider fallback) and emits `LyricsLoaded` for the playback state.
 
-use super::{App, send_event};
+use super::{App, event::send_event};
 use crate::{
     event::{Event, PlaybackEvent},
     playback::{LyricLine, parse_lyric_lines},

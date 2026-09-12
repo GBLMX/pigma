@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use super::{App, send_event};
+use super::{App, event::send_event};
 use crate::{
     event::{NavigationEvent, PlaybackEvent},
     playback::{NCM_SEARCH_QUEUE_KEY, THIRD_PARTY_QUEUE_KEY},

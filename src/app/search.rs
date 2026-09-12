@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use super::{
     App,
+    event::send_event,
     search_core::{search_ncm, search_sonar},
-    send_event,
 };
 use crate::{
     event::NavigationEvent,

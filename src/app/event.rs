@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use crossterm::event::Event as CrosstermEvent;
-use tokio::time::sleep;
+use tokio::{sync::mpsc::UnboundedSender, time::sleep};
 
 use super::App;
 use crate::{
@@ -12,6 +12,14 @@ use crate::{
     input,
     state::{CommandAction, ContentState},
 };
+
+/// Send an app event on the event loop channel, logging a dropped-receiver
+/// failure instead of panicking. Shared by the spawn-and-notify pipelines.
+pub(super) fn send_event(tx: &UnboundedSender<Event>, event: Event) {
+    if tx.send(event).is_err() {
+        log::error!("Failed to send event: receiver dropped");
+    }
+}
 
 impl App {
     pub(super) async fn handle_events(&mut self) -> color_eyre::Result<()> {
