@@ -3,6 +3,7 @@
 
 mod builder;
 mod content;
+mod cover;
 mod event;
 mod login;
 mod navigation;
