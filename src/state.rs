@@ -21,7 +21,6 @@ pub use splash::*;
 
 // --- Private Internal Imports ---
 use crate::{config::BorderConfig, event::EventHandler};
-use ratatui::layout::Rect;
 use serde::{Deserialize, Serialize};
 
 /// Top-level screens the TUI can be on.
@@ -71,6 +70,22 @@ impl Default for PaginationInfo {
     }
 }
 
+pub struct State {
+    pub running: bool,
+    pub events: EventHandler,
+    pub border: BorderConfig,
+    pub splash: SplashState,
+    pub login: LoginState,
+    pub navigation: NavigationState,
+    pub command_panel: CommandPanel,
+    pub help: HelpState,
+    pub offline: bool,
+    pub tick: u64,
+    pub last_tick: Instant,
+    pub toast_msg: String,
+    pub toast_time: Option<Instant>,
+}
+
 #[cfg(test)]
 mod pagination_tests {
     use super::PaginationInfo;
@@ -96,23 +111,4 @@ mod pagination_tests {
 
         assert_eq!(pagination.next_offset(), u32::MAX);
     }
-}
-
-pub struct State {
-    pub running: bool,
-    pub events: EventHandler,
-    pub border: BorderConfig,
-    pub splash: SplashState,
-    pub login: LoginState,
-    pub navigation: NavigationState,
-    pub command_panel: CommandPanel,
-    pub help: HelpState,
-    pub offline: bool,
-    pub tick: u64,
-    pub last_tick: Instant,
-    pub toast_msg: String,
-    pub toast_time: Option<Instant>,
-    /// Layout rect of the player bar, cached by the draw pass (`ui::draw`) and
-    /// consumed by mouse input to hit-test volume scrolling on the player bar.
-    pub playerbar_area: Rect,
 }

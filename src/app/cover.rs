@@ -16,8 +16,8 @@ impl App {
         let service = self.service.clone();
         let sender = self.state.events.sender();
         if sonar::is_sonar_song_id(song_id) {
-            let finder = self.finder.clone();
-            let registry = self.sonar_songs.clone();
+            let finder = self.search.finder.clone();
+            let registry = self.search.sonar_songs.clone();
             tokio::spawn(async move {
                 let Some((lyric_lines, tlyric_lines)) =
                     service.load_sonar_lyrics(song_id, finder, &registry).await
@@ -50,8 +50,8 @@ impl App {
         let picker = self.picker.clone();
         let cache = self.service.cache().clone();
         let cover_http = self.cover_http.clone();
-        let finder = self.finder.clone();
-        let registry = self.sonar_songs.clone();
+        let finder = self.search.finder.clone();
+        let registry = self.search.sonar_songs.clone();
 
         tokio::spawn(async move {
             // Mark whose cover we are loading; a stale loader for a

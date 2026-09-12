@@ -9,30 +9,32 @@ mod login;
 mod navigation;
 mod search;
 mod search_core;
+mod snapshot;
 mod splash;
 mod theme;
 
-pub use search_core::{SearchEngine, SearchResults};
+pub use search_core::{SearchEngine, SearchHost, SearchResults};
+
+use snapshot::IpcState;
 
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use ncm_api::SongList;
 use ratatui::{DefaultTerminal, Frame, layout::Rect, widgets::TableState};
 use ratatui_image::picker::Picker;
 use reqwest::Client;
-use sonar::{SonarFinder, Song};
 use splash::send_event;
 
 use crate::{
     cache::CacheManager,
     config::{Config, ThemeRegistry},
     event::{AuthEvent, EventHandler},
-    ipc::{IpcEvent, QueueSnapshot, StatusSnapshot},
+    ipc::IpcEvent,
     playback::{NCM_SEARCH_QUEUE_KEY, PlaybackEngine, THIRD_PARTY_QUEUE_KEY},
     service::{ApiEndpoint, ApiService},
     state::{
@@ -51,35 +53,19 @@ pub struct App {
     pub theme_registry: ThemeRegistry,
     pub service: ApiService,
     pub picker: Picker,
-    /// Blocking HTTP client for cover downloads (honours the proxy config).
+    /// Async HTTP client for cover downloads (honours the proxy config).
     pub cover_http: Client,
-    /// Shared sonar finder used for per-provider search and playback fallback.
-    pub finder: Arc<SonarFinder>,
-    /// Original sonar songs for search results, keyed by synthetic song id.
-    pub sonar_songs: Arc<Mutex<HashMap<u64, Arc<Song>>>>,
-    /// Registry of recently searched songs (NCM and sonar) keyed by song id,
-    /// shared with the IPC `search` engine so `pigma msg play <id>` can enqueue
-    /// and play a search result that is not in the playback queue.
-    pub search_results: SearchResults,
-    /// Cross-provider search engine serving `pigma msg search <keyword>`.
-    pub searcher: Arc<SearchEngine>,
+    /// Search subsystem: sonar finder/registry, IPC result registry and engine.
+    pub search: SearchHost,
     /// Song ID set of the user's "我喜欢的音乐" playlist, sharing the same `Arc` as `PlaybackEngine`.
     pub liked_ids: Arc<Mutex<HashSet<u64>>>,
     /// Playlists whose full tracks have already been merged into the playback queue for lazy pagination, avoiding repeated Enter presses refetching/truncating the queue.
     queued_playlists: HashSet<u64>,
-    /// Live playback snapshot served to `pigma status` over the IPC socket.
-    pub status: Arc<Mutex<StatusSnapshot>>,
-    /// Live playback queue served to `pigma status -L` over the IPC socket.
-    pub queue: Arc<Mutex<QueueSnapshot>>,
-    /// Fan-out channel for snapshot changes, consumed by the IPC `subscribe`
-    /// handler so long-running clients get event push.
-    status_tx: tokio::sync::broadcast::Sender<StatusSnapshot>,
-    /// When the last snapshot was broadcast; discrete changes fire immediately,
-    /// position refresh (playing) is throttled to once per second.
-    last_status_broadcast: Instant,
-    /// Last queue version the `queue` snapshot was built from; rebuilds only on
-    /// change instead of cloning the whole queue every event-loop iteration.
-    last_queue_version: u64,
+    /// IPC snapshot subsystem: status/queue snapshots, broadcast fan-out and
+    /// their freshness bookkeeping (see `snapshot.rs`).
+    ipc: IpcState,
+    /// Playerbar hit-test rect of the last draw, used by mouse input handling.
+    pub playerbar_area: Rect,
     /// Guards the startup splash branch: `login_status` is requested exactly
     /// once, so later events (IPC, mouse...) cannot spawn duplicate requests
     /// that would double-toast and re-fetch liked IDs.
@@ -189,7 +175,6 @@ impl App {
             last_tick: Instant::now(),
             toast_msg: String::new(),
             toast_time: None,
-            playerbar_area: Rect::default(),
         };
         state.navigation.search.providers = search_providers;
         let search_results: SearchResults = Arc::new(Mutex::new(HashMap::new()));
@@ -201,7 +186,6 @@ impl App {
             config.search_limit as usize,
             state.navigation.search.providers.clone(),
         ));
-        let (status_tx, _status_rx) = tokio::sync::broadcast::channel(16);
         Ok(Self {
             config,
             service: service.clone(),
@@ -222,19 +206,16 @@ impl App {
             theme_registry,
             picker,
             cover_http,
-            finder,
-            sonar_songs,
-            search_results,
-            searcher,
+            search: SearchHost {
+                finder,
+                sonar_songs,
+                results: search_results,
+                engine: searcher,
+            },
             liked_ids,
             queued_playlists: HashSet::new(),
-            status: Arc::new(Mutex::new(StatusSnapshot::default())),
-            queue: Arc::new(Mutex::new(QueueSnapshot::default())),
-            status_tx,
-            last_status_broadcast: Instant::now(),
-            // Force the first `update_status_snapshot` to populate the queue,
-            // e.g. when a session is restored from disk during engine startup.
-            last_queue_version: u64::MAX,
+            ipc: IpcState::new(),
+            playerbar_area: Rect::default(),
             login_status_requested: false,
         })
     }
@@ -262,45 +243,6 @@ impl App {
         self.toast(format!("   {:.0}%", new * 100.0));
     }
 
-    /// Refresh the IPC status snapshot from the live playback state. The status
-    /// (current song + progress) is cheap and rebuilt each loop; the full queue
-    /// listing is only rebuilt when the queue actually changed.
-    ///
-    /// A snapshot change is broadcast to IPC `subscribe` clients immediately;
-    /// while a track is playing the position also advances, but that refresh is
-    /// throttled to once per second so the daemon does not spam subscribers at
-    /// the event-loop rate.
-    fn update_status_snapshot(&mut self) {
-        let snapshot = StatusSnapshot::from_playback(&self.playback.state);
-        let mut changed = false;
-        if let Ok(mut stored) = self.status.lock() {
-            changed = stored.meaningfully_differs(&snapshot);
-            *stored = snapshot.clone();
-        }
-        let elapsed = self.last_status_broadcast.elapsed();
-        let position_stale =
-            snapshot.playing && !snapshot.paused && elapsed >= Duration::from_secs(1);
-        if changed || position_stale {
-            self.last_status_broadcast = Instant::now();
-            let _ = self.status_tx.send(snapshot);
-        }
-        let version = self.playback.queue_version();
-        if version != self.last_queue_version {
-            self.last_queue_version = version;
-            if let Ok(mut queue) = self.queue.lock() {
-                *queue = QueueSnapshot {
-                    current_index: self.playback.queue_current_index(),
-                    songs: self
-                        .playback
-                        .queue_songs()
-                        .iter()
-                        .map(|s| crate::ipc::QueueEntry::from_song(s))
-                        .collect(),
-                };
-            }
-        }
-    }
-
     /// Apply a control request received over the IPC socket (`pigma msg`).
     async fn handle_ipc_event(&mut self, event: IpcEvent) {
         match event {
@@ -322,7 +264,8 @@ impl App {
                     // playback source resolves via `sonar_songs`).
                     if !self.playback.play_song_by_id(id)
                         && let Some(song) = self
-                            .search_results
+                            .search
+                            .results
                             .lock()
                             .ok()
                             .and_then(|m| m.get(&id).cloned())
@@ -416,11 +359,11 @@ impl App {
     pub async fn run(mut self, mut terminal: DefaultTerminal) -> color_eyre::Result<()> {
         self.start_splash_boot();
         let _ipc_guard = crate::ipc::start_server(
-            Arc::clone(&self.status),
-            Arc::clone(&self.queue),
-            self.status_tx.clone(),
+            Arc::clone(&self.ipc.status),
+            Arc::clone(&self.ipc.queue),
+            self.ipc.status_tx.clone(),
             self.state.events.sender(),
-            Arc::clone(&self.searcher),
+            Arc::clone(&self.search.engine),
         );
         while self.state.running {
             self.update_status_snapshot();
@@ -485,11 +428,11 @@ impl App {
     ) -> color_eyre::Result<()> {
         self.state.navigation.page = Page::Main;
         let _ipc_guard = crate::ipc::start_server(
-            Arc::clone(&self.status),
-            Arc::clone(&self.queue),
-            self.status_tx.clone(),
+            Arc::clone(&self.ipc.status),
+            Arc::clone(&self.ipc.queue),
+            self.ipc.status_tx.clone(),
             self.state.events.sender(),
-            Arc::clone(&self.searcher),
+            Arc::clone(&self.search.engine),
         );
 
         // Resolve the user session from cookies so login-gated endpoints like
