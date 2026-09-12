@@ -6,6 +6,7 @@ mod content;
 mod cover;
 mod event;
 mod login;
+mod lyrics;
 mod navigation;
 mod search;
 mod search_core;
