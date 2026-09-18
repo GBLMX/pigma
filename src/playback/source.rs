@@ -15,7 +15,7 @@ use stream_download::{
 use tokio::sync::mpsc;
 
 #[cfg(all(target_os = "linux", target_env = "gnu"))]
-use super::engine::mem_rss_kb;
+use crate::utils::process::mem_rss_kb;
 use super::{
     player::{AudioInput, AudioReader, SharedReader},
     stream_client::HeadersClient,

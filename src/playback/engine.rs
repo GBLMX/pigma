@@ -7,6 +7,9 @@ mod queueing;
 mod session;
 mod transport;
 
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+use crate::utils::process::mem_rss_kb;
+
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -30,20 +33,6 @@ use crate::{
     event::{Event, PlaybackEvent},
     service::ApiService,
 };
-
-/// Read the current RSS in KB from /proc/self/status.
-#[cfg(all(target_os = "linux", target_env = "gnu"))]
-pub(super) fn mem_rss_kb() -> u64 {
-    std::fs::read_to_string("/proc/self/status")
-        .ok()
-        .and_then(|s| {
-            s.lines()
-                .find(|l| l.starts_with("VmRSS:"))
-                .and_then(|l| l.split_whitespace().nth(1))
-                .and_then(|v| v.parse().ok())
-        })
-        .unwrap_or(0)
-}
 
 /// Fixed queue key (display name) shared by every third-party (sonar) search
 /// queue; all such songs are stored in the single `thirdparty_source.json`.

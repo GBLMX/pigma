@@ -14,7 +14,7 @@ use rodio::{
 use tokio::sync::mpsc;
 
 #[cfg(all(target_os = "linux", target_env = "gnu"))]
-use super::engine::mem_rss_kb;
+use crate::utils::process::mem_rss_kb;
 use crate::event::{Event, PlaybackEvent};
 
 /// Progress ticks (~200ms each) the position may stay frozen while playing
