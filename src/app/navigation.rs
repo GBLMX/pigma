@@ -394,19 +394,4 @@ impl App {
             send_event(&sender, NavigationEvent::NavSelect(api).into());
         }
     }
-
-    /// Breadcrumb key for the current page: the last breadcrumb level's
-    /// subtitle, falling back to the focused nav item's name. Distinct pages
-    /// get distinct playback queues.
-    pub(super) fn current_queue_key(&self) -> String {
-        let nav = &self.state.navigation;
-        if let Some(sub) = nav.nav.subtitle.as_deref().filter(|s| !s.trim().is_empty()) {
-            return sub.to_string();
-        }
-        nav.nav
-            .selected_name()
-            .filter(|n| !n.is_empty())
-            .map(str::to_string)
-            .unwrap_or_else(|| "默认队列".into())
-    }
 }

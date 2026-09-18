@@ -152,7 +152,7 @@ impl App {
                     self.playback
                         .append_and_play_key(NCM_SEARCH_QUEUE_KEY, &songs[pos..=pos], 0);
                 } else {
-                    let key = self.current_queue_key();
+                    let key = self.state.navigation.current_queue_key();
                     let lazy_id = self
                         .state
                         .navigation
