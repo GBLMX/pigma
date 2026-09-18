@@ -218,7 +218,12 @@ impl NavigationState {
     /// subtitle, falling back to the focused nav item's name. Distinct pages
     /// get distinct playback queues.
     pub fn current_queue_key(&self) -> String {
-        if let Some(sub) = self.nav.subtitle.as_deref().filter(|s| !s.trim().is_empty()) {
+        if let Some(sub) = self
+            .nav
+            .subtitle
+            .as_deref()
+            .filter(|s| !s.trim().is_empty())
+        {
             return sub.to_string();
         }
         self.nav

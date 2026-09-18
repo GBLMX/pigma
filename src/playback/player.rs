@@ -13,9 +13,9 @@ use rodio::{
 };
 use tokio::sync::mpsc;
 
+use crate::event::{Event, PlaybackEvent};
 #[cfg(all(target_os = "linux", target_env = "gnu"))]
 use crate::utils::process::mem_rss_kb;
-use crate::event::{Event, PlaybackEvent};
 
 /// Progress ticks (~200ms each) the position may stay frozen while playing
 /// before we assume the audio stream is dead (e.g. Bluetooth device removed on
