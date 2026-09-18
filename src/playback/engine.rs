@@ -3,6 +3,7 @@
 //! [`queueing`], queue identity & persistence in [`session`], and transport
 //! controls in [`transport`].
 
+mod heartbeat;
 mod queueing;
 mod session;
 mod transport;
