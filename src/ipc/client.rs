@@ -5,9 +5,11 @@ use std::path::Path;
 use color_eyre::eyre::{OptionExt, WrapErr};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
-use super::path::resolve_socket_path;
-use super::protocol::{IpcRequest, MsgAction};
-use super::snapshot::{QueueSnapshot, SearchEntry, StatusSnapshot};
+use super::{
+    path::resolve_socket_path,
+    protocol::{IpcRequest, MsgAction},
+    snapshot::{QueueSnapshot, SearchEntry, StatusSnapshot},
+};
 
 /// The stream a client connects with (Unix socket on unix, named pipe on
 /// Windows).

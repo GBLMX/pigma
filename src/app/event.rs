@@ -9,9 +9,9 @@ use crate::{
         AppEvent, AuthEvent, CommandEvent, CommandPanelAction, Event, NavigationEvent,
         PlaybackEvent, SplashEvent,
     },
+    input,
     ipc::IpcEvent,
     playback::{NCM_SEARCH_QUEUE_KEY, THIRD_PARTY_QUEUE_KEY},
-    input,
     state::{CommandAction, ContentState},
 };
 

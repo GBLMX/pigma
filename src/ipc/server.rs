@@ -12,9 +12,11 @@ use tokio::{
 
 use crate::event::{AppEvent, Event};
 
-use super::path::resolve_socket_path;
-use super::protocol::{IpcEvent, IpcRequest};
-use super::snapshot::{QueueSnapshot, StatusSnapshot};
+use super::{
+    path::resolve_socket_path,
+    protocol::{IpcEvent, IpcRequest},
+    snapshot::{QueueSnapshot, StatusSnapshot},
+};
 
 /// The stream accepted by the server (Unix socket on unix, named pipe on
 /// Windows).

@@ -86,7 +86,11 @@ impl App {
     /// queue without starting playback. Shared by the daemon bootstrap
     /// (`--daemon`) and the IPC `pigma msg switch-list` action. Returns whether
     /// songs were loaded.
-    pub(super) async fn load_endpoint(&mut self, api_str: &str, playlist_index: Option<usize>) -> bool {
+    pub(super) async fn load_endpoint(
+        &mut self,
+        api_str: &str,
+        playlist_index: Option<usize>,
+    ) -> bool {
         let api = ApiEndpoint::parse(api_str).unwrap_or(ApiEndpoint::RecommendSongs);
         let uid = self.state.navigation.user.as_ref().map(|u| u.uid);
         let content = self

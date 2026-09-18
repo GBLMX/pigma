@@ -1,11 +1,7 @@
 //! Socket-path resolution: the default Unix socket under the cache dir, the
 //! Windows named pipe, and the thread-local / process-wide overrides.
 
-use std::{
-    cell::RefCell,
-    path::PathBuf,
-    sync::OnceLock,
-};
+use std::{cell::RefCell, path::PathBuf, sync::OnceLock};
 
 #[cfg(unix)]
 use crate::utils::pigma_cache_dir;
