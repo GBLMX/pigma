@@ -24,7 +24,7 @@ mod topbar;
 
 use std::{sync::Arc, time::Duration};
 
-use ratatui::Frame;
+use ratatui::{Frame, style::Style, widgets::Block};
 
 use crate::{
     app::App,
@@ -52,6 +52,17 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let area = f.area();
 
     let colors = App::resolve_theme(&app.config, &app.theme_registry);
+
+    // Paint the theme's background over the whole frame before anything else.
+    //
+    // Without this, every cell the theme does not explicitly paint keeps the terminal's own
+    // colours — so a light theme in a dark terminal renders as thin light-grey text on a dark
+    // screen: half a theme, which reads as no theme at all (and is what the loading list after
+    // a song switch looked like). Themes are the app's visual identity, background included.
+    f.render_widget(
+        Block::default().style(Style::default().bg(colors.bg)),
+        f.area(),
+    );
 
     let bs = BlockStyle {
         colors,
@@ -378,6 +389,62 @@ mod contrast_audit {
                 setup(&mut app);
                 audit(&format!("{name} / {view}"), &mut app, &theme);
             }
+        }
+    }
+}
+
+/// The theme has to own the background, not just the text colours.
+#[cfg(test)]
+mod theme_background {
+    use ratatui::{Terminal, backend::TestBackend, style::Color};
+
+    use crate::{app::App, config::Config};
+
+    /// Every cell that draws something must sit on the theme's background.
+    ///
+    /// Spreading foreground colours over the terminal's own background is half a theme, and it
+    /// reads as none: a light theme in a dark terminal came out as thin light-grey text on a
+    /// dark screen, which is what the list looked like right after a song switch.
+    #[tokio::test]
+    async fn drawn_cells_never_borrow_the_terminals_background() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        for name in ["default", "github-light", "gruvbox-light", "tokyo-night"] {
+            let config = Config {
+                default_theme: name.to_string(),
+                ..Config::default()
+            };
+            let mut app = match App::new(config, false) {
+                Ok(app) => app,
+                Err(e) => panic!("{name}: {e}"),
+            };
+            // The main page with its content still loading: what a song switch shows.
+            app.state.navigation.page = crate::state::Page::Main;
+            app.state.navigation.content = crate::state::ContentState::Loading.into();
+
+            let mut terminal = Terminal::new(TestBackend::new(80, 20)).expect("backend");
+            terminal.draw(|f| super::draw(f, &mut app)).expect("draw");
+            let buffer = terminal.backend().buffer().clone();
+
+            let mut borrowed = Vec::new();
+            for y in 0..buffer.area.height {
+                for x in 0..buffer.area.width {
+                    let cell = &buffer[(x, y)];
+                    // Blank cells are skipped: the transparent borders are deliberate, and they
+                    // draw nothing.
+                    if cell.symbol().trim().is_empty() {
+                        continue;
+                    }
+                    if cell.bg == Color::Reset {
+                        borrowed.push((x, y, cell.symbol().to_string()));
+                    }
+                }
+            }
+            assert!(
+                borrowed.is_empty(),
+                "{name}: {} cells draw on the terminal's background, e.g. {:?}",
+                borrowed.len(),
+                &borrowed[..borrowed.len().min(6)]
+            );
         }
     }
 }
