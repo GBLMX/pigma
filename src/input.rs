@@ -3,6 +3,7 @@
 
 mod command;
 mod content;
+mod ex;
 mod help;
 mod hit;
 mod login;
@@ -38,6 +39,11 @@ pub fn handle_key_events(app: &mut App, key_event: KeyEvent) -> color_eyre::Resu
         }
     }
 
+    // The prompt owns every key while it is open, including the global shortcuts.
+    if app.state.prompt.active && ex::handle_ex_key(app, key_event) {
+        return Ok(());
+    }
+
     if key_event.code == KeyCode::Char('?') {
         app.state.help.toggle();
         return Ok(());
@@ -64,6 +70,12 @@ pub fn handle_key_events(app: &mut App, key_event: KeyEvent) -> color_eyre::Resu
     }
 
     if app.state.navigation.search.active && search::handle_search_key(app, key_event) {
+        return Ok(());
+    }
+
+    // Vim-style command line; `:` is Shift+; on most layouts, so no modifier check.
+    if key_event.code == KeyCode::Char(':') {
+        ex::open(app);
         return Ok(());
     }
 

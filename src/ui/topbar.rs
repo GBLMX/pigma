@@ -9,12 +9,16 @@ use ratatui::{
 use unicode_width::UnicodeWidthStr;
 
 use super::{BlockStyle, block::CornerBlock};
-use crate::{config::Theme, state::SearchState};
+use crate::{
+    config::Theme,
+    state::{PromptState, SearchState},
+};
 
 pub(super) fn draw(
     f: &mut Frame,
     user: Option<&LoginInfo>,
     search: &SearchState,
+    prompt: &PromptState,
     bs: &BlockStyle<'_>,
     area: Rect,
 ) {
@@ -22,6 +26,11 @@ pub(super) fn draw(
     let block = CornerBlock::from_color(bs, bs.colors.bg);
     let inner = block.inner(area);
     f.render_widget(block, area);
+
+    if prompt.active {
+        render_prompt(f, prompt, colors, inner);
+        return;
+    }
 
     if search.active {
         render_search(f, search, colors, inner);
@@ -79,6 +88,39 @@ pub(super) fn draw(
 
     let right_line = right_line.alignment(Alignment::Right);
     f.render_widget(Paragraph::new(right_line), chunks[2]);
+}
+
+fn render_prompt(f: &mut Frame, prompt: &PromptState, colors: &Theme, area: Rect) {
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Length(1), Constraint::Min(1)])
+        .split(area);
+
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            ":",
+            Style::default()
+                .fg(colors.accent)
+                .add_modifier(Modifier::BOLD),
+        ))),
+        chunks[0],
+    );
+
+    let display = if prompt.input.value.is_empty() {
+        Line::from(Span::styled(
+            "命令（Tab 补全，Enter 执行，Esc 取消）",
+            Style::default().fg(colors.muted),
+        ))
+    } else {
+        Line::from(Span::styled(
+            prompt.input.value.as_str(),
+            Style::default().fg(colors.text),
+        ))
+    };
+    f.render_widget(Paragraph::new(display), chunks[1]);
+    prompt
+        .input
+        .show_cursor_at(f, chunks[1].x, chunks[1].y, true, false);
 }
 
 fn render_search(f: &mut Frame, search: &SearchState, colors: &Theme, area: Rect) {

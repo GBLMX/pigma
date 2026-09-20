@@ -75,6 +75,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
                 f,
                 app.state.navigation.user.as_ref(),
                 &app.state.navigation.search,
+                &app.state.prompt,
                 &bs,
                 lay.topbar,
             );

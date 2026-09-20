@@ -6,6 +6,7 @@ pub mod content;
 pub mod help;
 pub mod login;
 pub mod navigation;
+pub mod prompt;
 pub mod search;
 pub mod splash;
 
@@ -16,6 +17,7 @@ pub use content::*;
 pub use help::*;
 pub use login::*;
 pub use navigation::*;
+pub use prompt::*;
 pub use search::*;
 pub use splash::*;
 
@@ -95,6 +97,8 @@ pub struct State {
     pub content_offset: usize,
     /// Progress bar rect, for click-to-seek.
     pub gauge_area: Rect,
+    /// The vim-style `:` command line.
+    pub prompt: PromptState,
 }
 
 #[cfg(test)]

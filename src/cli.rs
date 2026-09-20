@@ -314,7 +314,7 @@ fn parse_msg_action(
 /// Parse a volume value. A leading `+`/`-` is a delta (percent) applied via
 /// `adjust_volume`, matching the TUI's `+`/`-` keys; a bare number is an
 /// absolute volume percent.
-fn parse_volume(value: &str) -> color_eyre::Result<MsgAction> {
+pub(crate) fn parse_volume(value: &str) -> color_eyre::Result<MsgAction> {
     let err = || color_eyre::eyre::eyre!("invalid volume `{value}`");
     if let Some(delta) = value.strip_prefix('+').or_else(|| value.strip_prefix('-')) {
         let number: f64 = delta.parse().map_err(|_| err())?;
