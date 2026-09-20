@@ -56,9 +56,9 @@ pub(super) fn draw(
     let inner = block.inner(area);
     f.render_widget(block.block_padding(Padding::vertical(1)), area);
 
-    let Some(song) = &player.current_song else {
+    if player.current_song.is_none() {
         return;
-    };
+    }
 
     let Some(lyrics) = &player.lyrics else {
         return;
@@ -72,8 +72,10 @@ pub(super) fn draw(
         return;
     }
 
-    let dur_secs = song.duration as f64 / 1000.0;
-    let cur_ms = player.progress * dur_secs * 1000.0;
+    // The position, not `progress × duration`: the fraction was divided by whichever total
+    // the decoder reported, so multiplying it back by the metadata's duration scales the whole
+    // lyric timeline by a constant — lines that run at a steady but wrong rate.
+    let cur_ms = player.position_secs * 1000.0;
     let cur = find_current_line(lyrics, cur_ms);
 
     let h = inner.height as usize;
@@ -105,11 +107,12 @@ pub(super) fn draw(
                 gradient,
             ));
         } else {
+            // Theme colours, not fixed greys: a hardcoded grey cannot follow a light theme.
             let d = i.abs_diff(cur);
             let style = if d <= 2 {
-                Style::default().fg(Color::Rgb(136, 136, 136))
+                Style::default().fg(colors.muted)
             } else {
-                Style::default().fg(Color::Rgb(85, 85, 85))
+                Style::default().fg(colors.border)
             };
             lines.push(Line::from(text).style(style).alignment(Alignment::Center));
         }
@@ -119,14 +122,14 @@ pub(super) fn draw(
         {
             let t_style = if i == cur {
                 Style::default()
-                    .fg(Color::Rgb(180, 180, 180))
+                    .fg(colors.text)
                     .add_modifier(Modifier::ITALIC)
             } else {
                 let d = i.abs_diff(cur);
                 if d <= 2 {
-                    Style::default().fg(Color::Rgb(100, 100, 100))
+                    Style::default().fg(colors.muted)
                 } else {
-                    Style::default().fg(Color::Rgb(60, 60, 60))
+                    Style::default().fg(colors.border)
                 }
             };
             lines.push(

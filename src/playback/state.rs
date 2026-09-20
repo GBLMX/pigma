@@ -6,7 +6,14 @@ use super::{cover::CoverState, lyrics::LyricLine, mode::PlayMode, pitch::Note};
 
 #[derive(Debug, Clone)]
 pub struct PlaybackState {
+    /// Playback position as a fraction of the track, for the progress bar.
     pub progress: f64,
+    /// The same position in seconds. Anything that has to line up with the recording — the
+    /// lyrics, the karaoke sweep — needs this and not the fraction: turning the fraction back
+    /// into a time means multiplying by a duration, and if that duration is not the one the
+    /// fraction was divided by (the decoder's total vs the metadata's), the whole timeline is
+    /// scaled by a constant — lyrics that run at a steady but wrong rate.
+    pub position_secs: f64,
     pub volume: f64,
     pub paused: bool,
     pub playing: bool,
@@ -29,6 +36,7 @@ impl Default for PlaybackState {
     fn default() -> Self {
         Self {
             progress: 0.0,
+            position_secs: 0.0,
             volume: 0.65,
             paused: false,
             playing: false,
@@ -66,14 +74,16 @@ impl PlaybackState {
                 .map(|s| s.duration as f64 / 1000.0)
                 .unwrap_or(0.0),
         };
+        self.position_secs = position.as_secs_f64();
         if total_secs > 0.0 {
-            self.progress = (position.as_secs_f64() / total_secs).clamp(0.0, 1.0);
+            self.progress = (self.position_secs / total_secs).clamp(0.0, 1.0);
         }
     }
 
     /// Resets progress. Returns `true` if the caller should advance to the next song.
     pub(super) fn on_finished(&mut self) -> bool {
         self.progress = 0.0;
+        self.position_secs = 0.0;
         // When the track ends but nothing advances it (e.g. an empty queue winding down),
         // exit the seeking poll loop as a safety net.
         self.seeking = false;
@@ -107,5 +117,57 @@ impl PlaybackState {
             self.lyrics = Some(lyrics);
             self.translated_lyrics = Some(translated_lyrics);
         }
+    }
+}
+
+#[cfg(test)]
+mod progress_tests {
+    use super::*;
+
+    /// The lyrics and the karaoke sweep have to line up with the recording, so they need the
+    /// position itself. `progress` is a fraction of whichever total the decoder reported;
+    /// turning it back into a time with the metadata's duration rescales the whole track, which
+    /// is what made the lyrics run at a steady but wrong rate.
+    #[test]
+    fn on_progress_keeps_the_position_the_fraction_could_not_recover() {
+        let mut state = PlaybackState::default();
+        // The decoder reports 210s, the NetEase metadata says 200s.
+        state.on_progress(
+            Duration::from_secs_f64(60.0),
+            Some(Duration::from_secs_f64(210.0)),
+        );
+
+        assert!(
+            (state.position_secs - 60.0).abs() < 1e-9,
+            "the position itself is what callers need, got {}",
+            state.position_secs
+        );
+
+        // What the old path produced: 60/210 × 200 = 57.1s, three seconds behind the voice
+        // here and drifting by ~1.4s per minute everywhere.
+        let reconstructed = state.progress * 200.0;
+        assert!(
+            reconstructed < 58.0,
+            "this test is pointless if the two totals agree: {reconstructed}"
+        );
+    }
+
+    /// With no decoder total the fraction falls back to the metadata, and both agree.
+    #[test]
+    fn progress_falls_back_to_the_metadata_duration() {
+        let mut state = PlaybackState::default();
+        state.on_progress(Duration::from_secs_f64(50.0), None);
+        assert_eq!(state.position_secs, 50.0);
+        assert_eq!(
+            state.progress, 0.0,
+            "no song and no total: nothing to divide by"
+        );
+
+        state.on_progress(
+            Duration::from_secs_f64(50.0),
+            Some(Duration::from_secs_f64(100.0)),
+        );
+        assert!((state.progress - 0.5).abs() < 1e-9);
+        assert_eq!(state.position_secs, 50.0);
     }
 }

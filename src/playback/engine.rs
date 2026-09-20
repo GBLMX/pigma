@@ -442,6 +442,7 @@ impl PlaybackEngine {
             mode::create_strategy(&self.state.mode, self.queue.len(), self.queue.current_index);
         self.state.current_song = self.queue.current_song().cloned();
         self.state.progress = 0.0;
+        self.state.position_secs = 0.0;
         self.state.playing = false;
         self.state.paused = false;
         self.state.seeking = false;
@@ -616,6 +617,7 @@ impl PlaybackEngine {
         self.state.paused = false;
         self.state.current_song = None;
         self.state.progress = 0.0;
+        self.state.position_secs = 0.0;
         // Playback has stopped; exit the 32ms seeking poll loop, otherwise the event loop
         // would spin forever.
         self.state.seeking = false;
@@ -638,6 +640,7 @@ impl PlaybackEngine {
             self.state.paused = false;
             self.state.current_song = None;
             self.state.progress = 0.0;
+            self.state.position_secs = 0.0;
             // Same as above: after stopping we must exit the seeking poll to avoid a 32ms
             // busy loop.
             self.state.seeking = false;
@@ -828,6 +831,13 @@ impl PlaybackEngine {
                 if saved.current_index.is_some() {
                     self.state.current_song = self.queue.current_song().cloned();
                     self.state.progress = saved.progress;
+                    // Best effort for a restored session: the next progress tick replaces it.
+                    self.state.position_secs = self
+                        .state
+                        .current_song
+                        .as_ref()
+                        .map(|s| saved.progress * s.duration as f64 / 1000.0)
+                        .unwrap_or(0.0);
                 }
             }
         }
