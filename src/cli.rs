@@ -427,7 +427,29 @@ fn parse_daemon_endpoint(
     Ok((value.to_string(), None))
 }
 
+/// Restore the default `SIGPIPE` disposition for the CLI subcommands.
+///
+/// Rust ignores `SIGPIPE` at startup, so writing to a closed pipe fails instead of ending the
+/// process — and `println!` turns a failed stdout write into a panic. Under the release profile's
+/// `panic = "abort"` that panic is `SIGABRT` plus a core dump: `boxpigma msg list | head` dumped
+/// core where every other Unix tool would have exited quietly. The TUI is deliberately not
+/// covered: it must keep running so it can restore the terminal.
+#[cfg(unix)]
+fn exit_on_broken_pipe() {
+    // SAFETY: setting a signal disposition to the default has no preconditions to uphold.
+    unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL) };
+}
+
+#[cfg(not(unix))]
+fn exit_on_broken_pipe() {}
+
 pub async fn run_cli(mut cli: Cli) -> color_eyre::Result<Option<App>> {
+    // A subcommand prints and exits, so it must not inherit the ignored `SIGPIPE` (see
+    // `exit_on_broken_pipe`). The TUI path below is deliberately left as it is.
+    if cli.command.is_some() {
+        exit_on_broken_pipe();
+    }
+
     let socket = match &cli.command {
         Some(Command::Status {
             socket: cmd_socket, ..
