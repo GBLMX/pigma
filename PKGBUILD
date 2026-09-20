@@ -13,8 +13,8 @@ license=('Apache-2.0')
 provides=("${_pkgname}")
 conflicts=("${_pkgname}")
 source=("${_pkgname}-${pkgver}.tar.gz::${url}/releases/download/v${pkgver}/${_pkgname}-x86_64-unknown-linux-gnu.tar.gz")
-# Checksum of the release asset referenced above; the release workflow recomputes it from
-# the published asset on every tag, so it cannot go stale in the AUR package.
+# Checksum of the release asset referenced above. Nothing computes this automatically: bump it
+# together with `pkgver` (`curl -sSL <the asset> | sha256sum`), or `makepkg` will refuse.
 sha256sums=('be7f64dbc6f57f7f859e53cb3de6be9411c81a201022904f11ba5a6310f67857')
 
 package() {

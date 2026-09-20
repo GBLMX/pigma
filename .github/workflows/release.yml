@@ -148,50 +148,6 @@ jobs:
           body_path: release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  aur-release:
-    name: Publish to AUR
-    needs: release
-    # Fork-only: this pushes GBLMX's own package, so it must not run in a repo that is
-    # not ours (upstream publishes `boxpigma-bin` from the same job name in its own repo).
-    if: startsWith(github.ref, 'refs/tags/') && github.repository == 'GBLMX/pigma' # 只有在推送 tag 发布时才触发 AUR 更新
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v7
-
-      - name: Set up SSH Webkey
-        uses: webfactory/ssh-agent@v0.10.0
-        with:
-          ssh-private-key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
-
-      - name: Add AUR to known_hosts
-        run: |
-          mkdir -p ~/.ssh
-          ssh-keyscan aur.archlinux.org >> ~/.ssh/known_hosts
-      - name: Update Version in PKGBUILD
-        run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
-          sed -i "s/^pkgver=.*/pkgver=$VERSION/" ./PKGBUILD
-      - name: Fill in the source checksum
-        # The asset only exists once the `release` job above has published it, so the
-        # checksum is computed here instead of being committed: an AUR `-bin` package
-        # should verify what it downloads rather than ship sha256sums=('SKIP').
-        run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
-          ASSET="boxpigma-x86_64-unknown-linux-gnu.tar.gz"
-          curl -sSfLO "https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/${ASSET}"
-          SUM=$(sha256sum "${ASSET}" | cut -d' ' -f1)
-          sed -i "s/^sha256sums=.*/sha256sums=('${SUM}')/" ./PKGBUILD
-          grep -E '^(pkgver|sha256sums)=' ./PKGBUILD
-      - name: Publish AUR package
-        uses: KSXGitHub/github-actions-deploy-aur@v3
-        with:
-          pkgname: 'boxpigma-gblmx-bin'
-          pkgbuild: './PKGBUILD'
-          commit_username: 'GitHub Actions'
-          commit_email: 'actions@github.com'
-          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
-
   homebrew-tap:
     name: Update Homebrew tap
     needs: release

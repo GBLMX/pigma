@@ -21,7 +21,6 @@ boxpigma 把网易云音乐与本地音频播放带进终端：流式播放、�
 - [Install](#install)
   - [Linux / macOS](#linux--macos)
   - [Windows](#windows)
-  - [AUR](#aur)
   - [从源码](#从源码)
 - [Usage](#usage)
   - [快捷键](#快捷键)
@@ -100,7 +99,7 @@ RSS 大致是**二进制体积 + 约 3 MB**（1.0 的二进制 11.1 MB），换�
 | | |
 | --- | --- |
 | **上游** | [akirco/pigma](https://github.com/akirco/pigma) —— 作者 akirco，Apache-2.0。原始版权与许可声明见 [LICENSE](./LICENSE)，**未作改动** |
-| **本仓库** | GBLMX 的 fork，由 GBLMX 维护。这里的提交、[releases](https://github.com/GBLMX/pigma/releases) 与 AUR 包 `boxpigma-gblmx-bin` 都由本仓库负责，与原作者无关；上游是否采纳这些改动、上游自身的维护计划，本仓库不代表也不承诺 |
+| **本仓库** | GBLMX 的 fork，由 GBLMX 维护。这里的提交与 [releases](https://github.com/GBLMX/pigma/releases) 都由本仓库负责，与原作者无关；上游是否采纳这些改动、上游自身的维护计划，本仓库不代表也不承诺 |
 | **向上游贡献** | 上游的 [CONTRIBUTING](./CONTRIBUTING.md) 仍然适用。本仓库的 `main` 已与上游分叉，向上游提 PR 请从独立分支（如 `feat/...`）出发，不要从 `main` |
 
 相对上游 `21c380d`（v0.2.14），本仓库自带的改动分两类 —— 这个划分决定了同步方式（见 CONTRIBUTING 的「与上游同步」一节）。
@@ -122,7 +121,6 @@ RSS 大致是**二进制体积 + 约 3 MB**（1.0 的二进制 11.1 MB），换�
 - **外观**：符号预设（`nerd`／`unicode`／`ascii`，不装 Nerd Font 也能用）· 按终端能力降级真彩色 · 依据终端背景自动选明/暗主题 · **背景也由主题绘制**（此前只给文字上色，浅色主题在深色终端上会变成零星灰字）· 内置 20 套主题 + `[themes.<名>]` 继承式自定义 · 高亮行的前景色按对比度自动选取，浅色主题下也读得出来
 - **新增**：频谱可视化 · 音高读数（自实现 YIN，无新增依赖）· 鼠标交互（点击 seek／切区／播放控制／模式／喜欢／静音）· vim 风格 `:` 命令行与 Tab 补全（密码/短信登录、退出登录、签到）· 听歌打卡（播满约 30 秒即上报，与官方客户端口径一致；短于 30 秒的歌以播完为准）· **歌词四种显示样式**（`:lyrics window|one_line|flow|plain`）· 歌词严格按解码位置对轴 · 终端开关：`mouse`／`cursor_style`／`[notify]` 桌面通知 · 随仓库提供的性能基准
 - **终端协议**：kitty 图形协议封面（可用 `[playerbar] image_protocol` 强制）· 同步刷新（整帧一次性呈现，也是 kitty 放图的规范要求）· kitty 键盘协议（`Esc` 不再被读成 `Alt+<key>`）· 括号粘贴 · 封面协议以**终端的回答**为准，tmux 内自动回退 · kitty 的桌面通知用其自有的 `OSC 99`（标题与正文分开、Base64 负载、`f=` 声明应用名），其余终端保持 `OSC 9` 逐字节不变
-- **打包**：AUR `boxpigma-gblmx-bin`（独立包名，发布时带真实校验和）
 
 **注意：**
 
@@ -211,18 +209,6 @@ bin install https://github.com/GBLMX/pigma
 
 从 [releases](https://github.com/GBLMX/pigma/releases) 下载 `boxpigma-x86_64-pc-windows-msvc.zip`（或 `aarch64` 版），解包后把 `boxpigma.exe` 放进 `%PATH%`。
 
-### AUR
-
-```sh
-yay -S boxpigma-gblmx-bin      # 或 paru -S boxpigma-gblmx-bin
-```
-
-
-> ⚠️ **首次发布前需要两步**（之后每次 release 工作流都会自动更新它）：
-> 1. 把本机 AUR 公钥（`~/.ssh/aur.pub`）的内容贴进 AUR 的 **My Account → SSH Public Key**；
-> 2. 把**对应的私钥**写进本仓库的 `AUR_SSH_PRIVATE_KEY` secret。
->
-> AUR **允许用推送创建新包** —— 克隆一个还不存在的 pkgbase 会得到 `warning: You appear to have cloned an empty repository`，这是预期行为（见 [AUR submission guidelines](https://wiki.archlinux.org/title/AUR_submission_guidelines#Creating_package_repositories)）。
 
 ### 从源码
 
