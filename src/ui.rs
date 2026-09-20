@@ -24,7 +24,7 @@ mod topbar;
 
 use std::{sync::Arc, time::Duration};
 
-use ratatui::{Frame, layout::Rect, style::Style, widgets::Block};
+use ratatui::{Frame, layout::Rect, style::Style, widgets::Fill};
 
 use crate::{
     app::App,
@@ -65,7 +65,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     // screen: half a theme, which reads as no theme at all (and is what the loading list after
     // a song switch looked like). Themes are the app's visual identity, background included.
     f.render_widget(
-        Block::default().style(Style::default().bg(bs.colors.bg)),
+        Fill::new(" ").style(Style::default().bg(bs.colors.bg)),
         f.area(),
     );
 
