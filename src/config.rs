@@ -234,40 +234,48 @@ impl Config {
             return;
         }
         let content = self.to_toml();
+        if content.is_empty() {
+            log::error!("Refusing to overwrite config.toml with an empty document");
+            return;
+        }
         if let Err(e) = fs::write(dir.join("config.toml"), content) {
             log::error!("Failed to write config.toml: {e}");
         }
     }
 
     fn to_toml(&self) -> String {
-        let mut doc = toml_edit::ser::to_string_pretty(self)
-            .unwrap()
-            .parse::<toml_edit::DocumentMut>()
-            .unwrap();
-        // Make navigation implicit
-        doc["navigation"].as_table_mut().unwrap().set_implicit(true);
+        let Ok(pretty) = toml_edit::ser::to_string_pretty(self) else {
+            log::error!("failed to serialize config to TOML");
+            return String::new();
+        };
+        let Ok(mut doc) = pretty.parse::<toml_edit::DocumentMut>() else {
+            return pretty;
+        };
 
-        // Iterate over each section and convert items to inline table arrays
-        let sections = doc["navigation"]["sections"]
-            .as_array_of_tables_mut()
-            .unwrap();
-
-        for section in sections.iter_mut() {
-            utils::format::convert_aot_to_inline(section, "items", "\n  ");
+        // Every step below is best-effort: `serde` may omit these tables (or serialize them
+        // as plain arrays instead of arrays-of-tables, e.g. when the user clears
+        // `navigation.sections` or `columns.songs`), which must not panic.
+        if let Some(nav) = doc.get_mut("navigation").and_then(|v| v.as_table_mut()) {
+            nav.set_implicit(true);
+            if let Some(sections) = nav
+                .get_mut("sections")
+                .and_then(|v| v.as_array_of_tables_mut())
+            {
+                for section in sections.iter_mut() {
+                    utils::format::convert_aot_to_inline(section, "items", "\n  ");
+                }
+            }
         }
 
-        let columns = doc["columns"].as_table_mut().unwrap();
-        columns.set_implicit(true);
-
-        let overrides = columns["overrides"].as_table_mut().unwrap();
-        overrides.set_implicit(true);
-
-        utils::format::convert_all_aot_to_inline(overrides, "\n  ");
-
-        let columns = doc["columns"].as_table_mut().unwrap();
-        utils::format::convert_aot_to_inline(columns, "songs", "\n  ");
-        utils::format::convert_aot_to_inline(columns, "songlist", "\n  ");
-        columns.set_implicit(true);
+        if let Some(columns) = doc.get_mut("columns").and_then(|v| v.as_table_mut()) {
+            columns.set_implicit(true);
+            if let Some(overrides) = columns.get_mut("overrides").and_then(|v| v.as_table_mut()) {
+                overrides.set_implicit(true);
+                utils::format::convert_all_aot_to_inline(overrides, "\n  ");
+            }
+            utils::format::convert_aot_to_inline(columns, "songs", "\n  ");
+            utils::format::convert_aot_to_inline(columns, "songlist", "\n  ");
+        }
 
         doc.to_string()
     }
@@ -285,5 +293,17 @@ mod tests {
             toml.contains("save_on_play = true"),
             "missing save_on_play in default config:\n{toml}"
         );
+    }
+
+    /// A cleared `navigation.sections` / `columns.songs` is serialized as an empty array
+    /// rather than an array of tables, which used to panic inside `to_toml`.
+    #[test]
+    fn to_toml_survives_empty_sections_and_columns() {
+        let mut cfg = Config::default();
+        cfg.navigation.sections.clear();
+        cfg.columns.songs.clear();
+
+        let toml = cfg.to_toml();
+        assert!(!toml.is_empty(), "config serialization produced nothing");
     }
 }
