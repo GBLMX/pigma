@@ -1,4 +1,8 @@
-use std::{collections::HashMap, str::FromStr, sync::LazyLock};
+use std::{
+    collections::{HashMap, HashSet},
+    str::FromStr,
+    sync::{LazyLock, Mutex, OnceLock},
+};
 
 use palette::{LinLuma, Srgb, color_difference::Wcag21RelativeContrast, white_point::D65};
 use ratatui::style::Color;
@@ -370,10 +374,30 @@ impl Theme {
             "border" => self.border,
             "error" => self.error,
             _ => {
-                log::warn!("Unknown theme field: \"{name}\", falling back to accent");
+                if report_unknown_field_once(name) {
+                    log::warn!("Unknown theme field: \"{name}\", falling back to accent");
+                }
                 self.accent
             }
         }
+    }
+}
+
+/// Whether this unknown field name still needs reporting.
+///
+/// [`Theme::field_color`] is called from the render path with names taken out of the user's
+/// config, so an unknown name used to write one warning **per frame** — the user's
+/// `unfilled_color_cached = "warning"` produced five log lines a second, and the log file grew
+/// without bound again. The lookup has to stay on the render path (that is how config-driven
+/// colours work), but the warning only has to be said once per name per run.
+fn report_unknown_field_once(name: &str) -> bool {
+    static REPORTED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    let reported = REPORTED.get_or_init(Default::default);
+    match reported.lock() {
+        Ok(mut reported) => reported.insert(name.to_string()),
+        // A poisoned lock means some other thread panicked while reporting; stay quiet rather
+        // than panicking here as well.
+        Err(_) => false,
     }
 }
 
@@ -797,6 +821,24 @@ accent = "#ffffff"
         assert!(
             registry.get("orphan").is_none(),
             "an unknown base is ignored"
+        );
+    }
+}
+
+#[cfg(test)]
+mod unknown_field_tests {
+    use super::*;
+
+    #[test]
+    fn an_unknown_field_falls_back_to_accent_and_is_reported_once() {
+        let theme = Theme::default();
+        let name = "__definitely_not_a_theme_field__";
+        assert_eq!(theme.field_color(name), theme.accent, "兜底应是 accent");
+        assert_eq!(theme.field_color(name), theme.accent, "第二次仍应兜底");
+        assert!(!report_unknown_field_once(name), "同一个名字第二次不应再报");
+        assert!(
+            report_unknown_field_once("__another_unknown_field__"),
+            "不同的名字仍应各报一次"
         );
     }
 }
