@@ -53,7 +53,7 @@ NCM 协议加密与签名、`:` 小语法解析、缓存淘汰与索引策略、
 | --- | --- |
 | 新增 crate | **7 个**（`tracing-appender`、`tracing-log` + `crossbeam-channel`、`crossbeam-utils`、`phf`、`phf_shared`、`symlink`），lock 增加 80 行 |
 | 本来就在 lock 里、只是改为直接依赖 | `tracing`、`tracing-subscriber`（经 color-eyre 的 `tracing-error`）、`palette`、`base64` |
-| 二进制体积 | 10,800,688 B → **11,145,688 B**（**+337 KB / +3.2%**），含整条日志栈 |
+| 二进制体积 | 10,800,688 B → **11,145,688 B**（**+345,000 B ≈ +337 KiB / +3.2%**），含整条日志栈 |
 | 性能 | **无回退**：分析帧 129.57 µs（30 fps 占单核 0.389%）、playerbar 整帧 79.15 µs（0.237%）、fft 2048 点 21.76 µs、封面 488–583 µs/首 —— 可由 `cargo test --release --lib -- --ignored --nocapture` 复现 |
 | 自写代码 | 净减少：日志实现整体删除、颜色数学三处合并为一处、`Block` 铺底与手绘字形被替换 |
 
