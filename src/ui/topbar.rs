@@ -106,15 +106,18 @@ fn render_prompt(f: &mut Frame, prompt: &PromptState, colors: &Theme, area: Rect
         chunks[0],
     );
 
+    // The whole command line is `accent`, the same blue as the `:` that introduces it: the
+    // typed text used to be `text` (a dark grey) and the hint `muted`, which read as two
+    // different greys next to the coloured prompt.
     let display = if prompt.input.value.is_empty() {
         Line::from(Span::styled(
             "命令（Tab 补全，Enter 执行，Esc 取消）",
-            Style::default().fg(colors.muted),
+            Style::default().fg(colors.accent),
         ))
     } else {
         Line::from(Span::styled(
             prompt.input.value.as_str(),
-            Style::default().fg(colors.text),
+            Style::default().fg(colors.accent),
         ))
     };
     f.render_widget(Paragraph::new(display), chunks[1]);
@@ -181,5 +184,50 @@ fn render_search(f: &mut Frame, search: &SearchState, colors: &Theme, area: Rect
         ])
         .alignment(Alignment::Right);
         f.render_widget(Paragraph::new(provider), chunks[2]);
+    }
+}
+
+#[cfg(test)]
+mod prompt_colour {
+    use ratatui::{Terminal, backend::TestBackend};
+
+    use super::*;
+
+    /// Everything the command line shows is the same blue as the `:` in front of it. The
+    /// typed text used to be a dark grey and the hint `muted`, which read as two unrelated
+    /// greys right next to the coloured prompt.
+    #[test]
+    fn the_text_after_the_colon_is_accent_coloured() {
+        let colors = Theme::default();
+        for typed in ["", "theme github-light"] {
+            let mut prompt = PromptState::default();
+            prompt.input.value = typed.to_string();
+
+            let mut terminal = Terminal::new(TestBackend::new(40, 1)).expect("backend");
+            terminal
+                .draw(|f| render_prompt(f, &prompt, &colors, f.area()))
+                .expect("draw");
+            let buffer = terminal.backend().buffer().clone();
+
+            assert_eq!(buffer[(0, 0)].fg, colors.accent, "the colon itself");
+            let mut cells = 0;
+            // x = 0 is the colon; everything after it belongs to the command line.
+            for x in 1..buffer.area.width {
+                let cell = &buffer[(x, 0)];
+                if cell.symbol().trim().is_empty() {
+                    continue;
+                }
+                assert_eq!(
+                    cell.fg, colors.accent,
+                    "typed {typed:?}: ({x},0) draws {:?}, not the prompt colour",
+                    cell.fg
+                );
+                cells += 1;
+            }
+            assert!(
+                cells > 0,
+                "typed {typed:?}: nothing rendered after the colon"
+            );
+        }
     }
 }
