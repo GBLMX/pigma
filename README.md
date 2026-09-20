@@ -61,15 +61,25 @@ boxpigma 的核心目标是把网易云音乐和本地音频播放的体验带�
 | **本仓库** | GBLMX 的 fork，由 GBLMX 维护。这里的提交、[releases](https://github.com/GBLMX/pigma/releases) 与 AUR 包 `boxpigma-gblmx-bin` 都由本仓库负责，与原作者无关；上游是否采纳这些改动、上游自身的维护计划，本仓库不代表也不承诺 |
 | **向上游贡献** | 上游的 [CONTRIBUTING](./CONTRIBUTING.md) 仍然适用。本仓库的 `main` 已与上游分叉，向上游提 PR 请从独立分支（如 `feat/...`）出发，不要从 `main` |
 
-相对上游 `21c380d`（v0.2.14），本仓库自带的改动：
+相对上游 `21c380d`（v0.2.14），本仓库自带的改动分两类 —— 这个划分决定了同步方式（见 CONTRIBUTING 的「与上游同步」一节）。
 
+**一、结构性差异**（上游不会覆盖；每次同步必然冲突，冲突时保留本仓库版本）
+
+- **项目身份**：包名与二进制名 `boxpigma`（上游为 `pigma`），配置目录 `~/.config/boxpigma`、缓存目录 `~/.cache/boxpigma`、IPC socket `boxpigma.sock` 与 Windows 命名管道一并改名；首次运行会把旧的 `pigma` 目录整体接管过来（搬不动就继续用旧目录），不丢配置与缓存
 - **构建**：两个 crate 收进一个 Cargo workspace —— 依赖版本统一（rustls 三份规格合一）、`cargo test/clippy --workspace` 覆盖全部成员，CI 增加 ubuntu 与成员检查
-- **修复**：下载缓存条目只在流完成后记录 · 默认日志级别改为 INFO · 清空的 `sections`/`columns` 序列化不再 panic · eapi 非 2xx 只告警 · IPC socket 权限收窄到属主 · `.gitignore` 忽略调试残留
+- **日志栈**：`tracing` + `tracing-appender`（按天轮转、保留最近 7 个、行内带模块路径与本地时间）；135 处 `log::*!` 由 `tracing-log` 桥接，调用点无需改动
+- **UI 内部结构**：页面分发、页面按键与键位表合并为一张表（新增一个页面从改 9 个文件降到 2 个）；铺底色改用 `Fill`
+- **主题内部**：WCAG 亮度与对比度改用 `palette`，全仓只剩一处颜色数学；`default_theme = "random"` 每次启动随机挑一个、`:theme random` 立刻重掷；主题名排序固定，`:theme` 循环顺序不再随进程变化
+- **启动画面**：字形取自 FIGlet 字体 `Calvin S`，一次渲染后作为常量内嵌（运行时不带字体依赖）
 - **配置**：`config_version` 版本号，旧文件加载时自动升级并把原文件备份为 `config.toml.bak-v0`
+
+**二、增量差异**（可被上游采纳或替代；挑上游提交时优先看这一类）
+
+- **修复**：下载缓存条目只在流完成后记录 · 默认日志级别改为 INFO · 清空的 `sections`/`columns` 序列化不再 panic · eapi 非 2xx 只告警 · IPC socket 权限收窄到属主 · `.gitignore` 忽略调试残留 · 搜索、封面、音频流补齐连接与读超时（音频流刻意**不加**总超时，否则会截断正在播放的下载）
 - **播放**：解析失败按类型分类（网络失败重试一次、无版权/无地址直接走兜底源），不再靠错误字符串前缀判断
 - **外观**：符号预设（`nerd`／`unicode`／`ascii`，不装 Nerd Font 也能用）· 按终端能力降级真彩色 · 依据终端背景自动选明/暗主题 · **背景也由主题绘制**（此前只给文字上色，浅色主题在深色终端上会变成零星灰字）· 内置 20 套主题 + `[themes.<名>]` 继承式自定义 · 高亮行的前景色按对比度自动选取，浅色主题下也读得出来
 - **新增**：频谱可视化 · 音高读数（自实现 YIN，无新增依赖）· 鼠标交互（点击 seek／切区／播放控制／模式／喜欢／静音）· vim 风格 `:` 命令行与 Tab 补全（密码/短信登录、退出登录、签到）· 听歌打卡（播满约 30 秒即上报，与官方客户端口径一致；短于 30 秒的歌以播完为准）· **歌词四种显示样式**（`:lyrics window|one_line|flow|plain`）· 歌词严格按解码位置对轴 · 终端开关：`mouse`／`cursor_style`／`[notify]` 桌面通知 · 随仓库提供的性能基准
-- **终端协议**：kitty 图形协议封面（可用 `[playerbar] image_protocol` 强制）· 同步刷新（整帧一次性呈现，也是 kitty 放图的规范要求）· kitty 键盘协议（`Esc` 不再被读成 `Alt+<key>`）· 括号粘贴 · 封面协议以**终端的回答**为准，tmux 内自动回退
+- **终端协议**：kitty 图形协议封面（可用 `[playerbar] image_protocol` 强制）· 同步刷新（整帧一次性呈现，也是 kitty 放图的规范要求）· kitty 键盘协议（`Esc` 不再被读成 `Alt+<key>`）· 括号粘贴 · 封面协议以**终端的回答**为准，tmux 内自动回退 · kitty 的桌面通知用其自有的 `OSC 99`（标题与正文分开、Base64 负载、`f=` 声明应用名），其余终端保持 `OSC 9` 逐字节不变
 - **打包**：AUR `boxpigma-gblmx-bin`（独立包名，发布时带真实校验和）
 
 **注意：**

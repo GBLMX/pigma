@@ -128,6 +128,35 @@ cat /proc/<pid>/task/*/wchan                      # 内核视角：线程卡在�
 
 ---
 
+## 与上游同步（仅维护者）
+
+本仓库是 [akirco/pigma](https://github.com/akirco/pigma) 的 fork，但**不再整体合并上游**：下面这些位置是"我们的地盘"，上游的改动落进去必然冲突，逐条解冲突的代价远大于收益。
+
+| 结构性差异（冲突时保留本仓库版本） | 位置 |
+| --- | --- |
+| 包名与二进制名 `boxpigma` | `Cargo.toml`、`src/main.rs` 的 `use boxpigma::`、`tests/`、`.github/workflows/release.yml`、`PKGBUILD` |
+| 配置/缓存/socket 路径与旧目录接管 | `src/utils/path.rs`（含 `pigma` → `boxpigma` 的迁移逻辑） |
+| 日志栈 `tracing` + `tracing-appender` | `src/logger.rs`（135 处 `log::*!` 由 `tracing-log` 桥接，调用点不必改动） |
+| 页面表（绘制/布局/按键三处分发合一） | `src/state/page.rs`、`src/ui.rs`、`src/layout.rs` |
+| 主题内部（`palette` 对比度、`random`、稳定排序） | `src/config/theme.rs`、`src/app/theme.rs` |
+| 启动画面字形（FIGlet `Calvin S` 的渲染结果） | `src/ui/splash.rs` |
+
+同步方式是**按提交挑**，不合并：
+
+```bash
+git fetch upstream
+git log --oneline upstream/main ^main     # 上游有哪些我们还没有的提交
+git cherry-pick <commit>                  # 一次一个，冲突面就限于这一个提交
+```
+
+挑之前先看这个提交有没有碰到上表里的文件：碰了就要按"本仓库版本优先"解一次冲突，并确认行为没有退化。挑完必须跑：
+
+```bash
+cargo test --workspace --all-features && cargo clippy --workspace --all-targets
+```
+
+协议与 API 那一层（`crates/ncm-api`、`crates/sonar`）的上游改动通常最值得挑 —— 它们对着的是线上服务。
+
 ## 发布流程（仅维护者）
 
 当收集到足够的变更后，维护者会执行以下步骤发布新版本：
