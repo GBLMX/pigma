@@ -84,16 +84,24 @@ impl App {
     ) -> color_eyre::Result<Arc<SonarFinder>> {
         let mut sources: Vec<sonar::SonarSource> = Vec::new();
         for name in &config.source_fallback.providers {
-            let source = match name.as_str() {
-                "kuwo" => sonar::SonarSource::Kuwo,
-                "kugou" => sonar::SonarSource::Kugou,
-                "bilivideo" => sonar::SonarSource::BiliVideo,
-                "youtube" => sonar::SonarSource::Youtube,
-                _ => continue,
-            };
-            if !sources.contains(&source) {
-                sources.push(source);
+            match sonar::SonarSource::from_name(name) {
+                Some(source) if !sources.contains(&source) => sources.push(source),
+                Some(_) => {}
+                None => log::warn!(
+                    "unknown [source_fallback] provider {name:?}; expected one of {}",
+                    sonar::SonarSource::ALL
+                        .iter()
+                        .map(sonar::SonarSource::as_str)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
             }
+        }
+        if sources.is_empty() {
+            // A typo in the provider list must not silently disable the fallback
+            // sources; fall back to the defaults and say so.
+            log::warn!("no valid [source_fallback] providers configured; using defaults");
+            sources = sonar::SonarSource::ALL.to_vec();
         }
         let search_config = sonar::SearchConfig::new()
             .with_providers(sources)
