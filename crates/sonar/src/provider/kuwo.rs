@@ -3,7 +3,7 @@ use crate::model::{
     PlayUrlResult, Quality, SearchQuery, SearchResult, SonarSource, Song, SongMeta, make_song_id,
 };
 use crate::provider::SonarProvider;
-use crate::provider::{PRIORITY_KUWO, build_client};
+use crate::provider::build_client;
 use async_trait::async_trait;
 use reqwest::Client;
 use serde_json::Value;
@@ -134,10 +134,6 @@ impl SonarProvider for KuwoProvider {
             size: None,
             bitrate: None,
         })
-    }
-
-    fn priority(&self) -> u8 {
-        PRIORITY_KUWO
     }
 
     async fn get_lyrics(&self, song: &Song) -> Result<Option<String>> {

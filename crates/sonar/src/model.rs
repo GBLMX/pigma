@@ -174,11 +174,75 @@ pub enum SonarSource {
 
 impl fmt::Display for SonarSource {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Which proxy configuration applies to a source's requests.
+///
+/// Domestic services are reachable directly from mainland China while YouTube is
+/// not; keeping this on the source means a new provider declares it exactly once
+/// instead of the finder growing another `match`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProxyKind {
+    /// Domestic sources (kugou, kuwo, bilivideo, and future Chinese services).
+    Domestic,
+    /// Sources that normally require a proxy in mainland China.
+    Youtube,
+}
+
+impl SonarSource {
+    /// Every supported source, in default priority order (highest first).
+    ///
+    /// Adding a source means extending this list and registering it in
+    /// [`crate::provider::registry`]; a unit test keeps the two in sync.
+    pub const ALL: &'static [SonarSource] = &[
+        SonarSource::Kugou,
+        SonarSource::Kuwo,
+        SonarSource::Youtube,
+        SonarSource::BiliVideo,
+    ];
+
+    /// Stable lowercase name used in configuration, IPC payloads and logs.
+    pub const fn as_str(&self) -> &'static str {
         match self {
-            SonarSource::Kugou => write!(f, "kugou"),
-            SonarSource::Kuwo => write!(f, "kuwo"),
-            SonarSource::BiliVideo => write!(f, "bilivideo"),
-            SonarSource::Youtube => write!(f, "youtube"),
+            SonarSource::Kugou => "kugou",
+            SonarSource::Kuwo => "kuwo",
+            SonarSource::BiliVideo => "bilivideo",
+            SonarSource::Youtube => "youtube",
+        }
+    }
+
+    /// Parse a source from its configuration name.
+    ///
+    /// Case-insensitive, so both the `[source_fallback] providers` spelling and
+    /// serde's variant name are accepted.
+    pub fn from_name(name: &str) -> Option<Self> {
+        let name = name.trim();
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|source| source.as_str().eq_ignore_ascii_case(name))
+    }
+
+    /// Default search/fallback priority: lower ranks higher.
+    ///
+    /// [`crate::provider::SonarProvider`] implementations default to this value,
+    /// so a source declares its rank exactly once.
+    pub const fn default_priority(&self) -> u8 {
+        match self {
+            SonarSource::Kugou => 10,
+            SonarSource::Kuwo => 20,
+            SonarSource::Youtube => 30,
+            SonarSource::BiliVideo => 40,
+        }
+    }
+
+    /// Which proxy setting applies to this source.
+    pub const fn proxy_kind(&self) -> ProxyKind {
+        match self {
+            SonarSource::Kugou | SonarSource::Kuwo | SonarSource::BiliVideo => ProxyKind::Domestic,
+            SonarSource::Youtube => ProxyKind::Youtube,
         }
     }
 }

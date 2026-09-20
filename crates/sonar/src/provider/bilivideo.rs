@@ -4,7 +4,7 @@ use crate::model::{
     PlayUrlResult, Quality, SearchQuery, SearchResult, SonarSource, Song, SongMeta, make_song_id,
 };
 use crate::provider::SonarProvider;
-use crate::provider::{PRIORITY_BILIVIDEO, build_client};
+use crate::provider::build_client;
 use async_trait::async_trait;
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -248,9 +248,5 @@ impl SonarProvider for BiliVideoProvider {
             size: None,
             bitrate: None,
         })
-    }
-
-    fn priority(&self) -> u8 {
-        PRIORITY_BILIVIDEO
     }
 }

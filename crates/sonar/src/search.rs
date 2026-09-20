@@ -1,9 +1,6 @@
 use crate::error::Result;
-use crate::model::{SearchQuery, SearchResult, SonarSource, Song};
-use crate::provider::{
-    SonarProvider, bilivideo::BiliVideoProvider, kugou::KugouProvider, kuwo::KuwoProvider,
-    youtube::YoutubeProvider,
-};
+use crate::model::{ProxyKind, SearchQuery, SearchResult, SonarSource, Song};
+use crate::provider::{SonarProvider, build_providers};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -106,12 +103,7 @@ impl Default for SearchConfig {
     fn default() -> Self {
         Self {
             mode: SearchMode::BestScore,
-            providers: vec![
-                SonarSource::Kugou,
-                SonarSource::Kuwo,
-                SonarSource::BiliVideo,
-                SonarSource::Youtube,
-            ],
+            providers: SonarSource::ALL.to_vec(),
             enable_flac: true,
             timeout_ms: 10000,
             max_results_per_provider: 30,
@@ -168,6 +160,17 @@ impl SearchConfig {
         self.youtube_proxy = proxy.into();
         self
     }
+
+    /// Proxy URL that applies to `kind` (see [`SonarSource::proxy_kind`]).
+    ///
+    /// Providers resolve their proxy through this, so registering a source does
+    /// not require the finder to know which proxy it needs.
+    pub fn proxy_for(&self, kind: ProxyKind) -> &str {
+        match kind {
+            ProxyKind::Domestic => &self.search_proxy,
+            ProxyKind::Youtube => &self.youtube_proxy,
+        }
+    }
 }
 
 /// Aggregates the configured providers and runs searches across them
@@ -182,26 +185,10 @@ impl SonarFinder {
     /// providers by priority (highest first). Providers that report
     /// [`SonarProvider::enabled`] `false` are skipped.
     pub fn new(config: SearchConfig) -> Result<Self> {
-        let mut providers: Vec<Arc<dyn SonarProvider>> = Vec::new();
-
-        for source in &config.providers {
-            let provider: Arc<dyn SonarProvider> = match source {
-                SonarSource::Kugou => Arc::new(KugouProvider::with_proxy(
-                    config.enable_flac,
-                    &config.search_proxy,
-                )?),
-                SonarSource::Kuwo => Arc::new(KuwoProvider::with_proxy(&config.search_proxy)?),
-                SonarSource::BiliVideo => {
-                    Arc::new(BiliVideoProvider::with_proxy(&config.search_proxy)?)
-                }
-                SonarSource::Youtube => {
-                    Arc::new(YoutubeProvider::with_proxy(&config.youtube_proxy)?)
-                }
-            };
-            if provider.enabled() {
-                providers.push(provider);
-            }
-        }
+        // Construction lives in the provider registry (see
+        // [`crate::provider::registry`]), so adding a source does not require
+        // touching the finder.
+        let mut providers = build_providers(&config)?;
 
         providers.sort_by_key(|p| std::cmp::Reverse(p.priority()));
 
