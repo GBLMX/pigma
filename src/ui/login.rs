@@ -509,8 +509,11 @@ mod tests {
         let buf = terminal.backend().buffer().clone();
         (0..buf.area.height)
             .map(|y| {
+                // A wide glyph (CJK) covers two cells and leaves the second one empty; empty
+                // cells are skipped so a word is not split apart in the flattened text.
                 (0..buf.area.width)
-                    .map(|x| buf[(x, y)].symbol().to_string())
+                    .filter(|x| !buf[(*x, y)].symbol().is_empty())
+                    .map(|x| buf[(x, y)].symbol())
                     .collect::<String>()
             })
             .collect::<Vec<_>>()
