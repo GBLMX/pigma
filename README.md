@@ -217,7 +217,12 @@ bin install https://github.com/GBLMX/pigma
 yay -S boxpigma-gblmx-bin      # 或 paru -S boxpigma-gblmx-bin
 ```
 
-> ⚠️ 该 AUR 包**尚未注册**：AUR 不允许用推送创建新包，需要先在 [aur.archlinux.org](https://aur.archlinux.org/) 注册包名，之后本仓库的 release 工作流才会自动更新它。
+
+> ⚠️ **首次发布前需要两步**（之后每次 release 工作流都会自动更新它）：
+> 1. 把本机 AUR 公钥（`~/.ssh/aur.pub`）的内容贴进 AUR 的 **My Account → SSH Public Key**；
+> 2. 把**对应的私钥**写进本仓库的 `AUR_SSH_PRIVATE_KEY` secret。
+>
+> AUR **允许用推送创建新包** —— 克隆一个还不存在的 pkgbase 会得到 `warning: You appear to have cloned an empty repository`，这是预期行为（见 [AUR submission guidelines](https://wiki.archlinux.org/title/AUR_submission_guidelines#Creating_package_repositories)）。
 
 ### 从源码
 

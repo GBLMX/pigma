@@ -1,0 +1,13 @@
+pkgbase = boxpigma-gblmx-bin
+	pkgdesc = A netease cloud music client (GBLMX fork build)
+	pkgver = 1.1.0
+	pkgrel = 1
+	url = https://github.com/GBLMX/pigma
+	arch = x86_64
+	license = Apache-2.0
+	provides = boxpigma
+	conflicts = boxpigma
+	source = boxpigma-1.1.0.tar.gz::https://github.com/GBLMX/pigma/releases/download/v1.1.0/boxpigma-x86_64-unknown-linux-gnu.tar.gz
+	sha256sums = be7f64dbc6f57f7f859e53cb3de6be9411c81a201022904f11ba5a6310f67857
+
+pkgname = boxpigma-gblmx-bin

@@ -7,14 +7,15 @@ pkgdesc="A netease cloud music client (GBLMX fork build)"
 arch=('x86_64')
 url="https://github.com/GBLMX/pigma"
 license=('Apache-2.0')
-# Upstream's `boxpigma-bin` also provides `boxpigma`, so these entries cover it too: both
-# packages install /usr/bin/boxpigma and cannot be installed side by side.
+# The binary is installed as /usr/bin/boxpigma (upstream's name), so this declares what it
+# really provides and conflicts with anything else that owns it. Note that upstream has no AUR
+# package: `boxpigma-bin` does not exist there.
 provides=("${_pkgname}")
 conflicts=("${_pkgname}")
 source=("${_pkgname}-${pkgver}.tar.gz::${url}/releases/download/v${pkgver}/${_pkgname}-x86_64-unknown-linux-gnu.tar.gz")
 # Checksum of the release asset referenced above; the release workflow recomputes it from
 # the published asset on every tag, so it cannot go stale in the AUR package.
-sha256sums=('b4dd555f853a6d541f920d0e5384d476e373acbcd34d724f0af756a4a4343fcb')
+sha256sums=('be7f64dbc6f57f7f859e53cb3de6be9411c81a201022904f11ba5a6310f67857')
 
 package() {
     install -Dm755 "${srcdir}/${_pkgname}" "${pkgdir}/usr/bin/${_pkgname}"
