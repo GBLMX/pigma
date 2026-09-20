@@ -178,6 +178,15 @@ pub(super) fn draw_queue_table(
             let prefix = if is_playing { "\u{25b6}" } else { " " };
             let num = format!("{}{:02}", prefix, i + 1);
 
+            // A cell's own style beats the row highlight's, so the foreground the row was
+            // styled with has to be set on the cells too: `muted` on `accent` is nearly
+            // invisible in the light themes.
+            let fg = if is_playing || is_selected {
+                colors.on_accent()
+            } else {
+                colors.muted
+            };
+
             let row_style = if is_playing {
                 Style::default()
                     .fg(colors.surface)
@@ -196,10 +205,10 @@ pub(super) fn draw_queue_table(
             format_duration_into(song.duration, &mut dur_buf);
 
             Row::new(vec![
-                Cell::from(num).style(Style::default().fg(colors.muted)),
-                Cell::from(song.name.as_str()).style(Style::default().fg(colors.muted)),
-                Cell::from(song.singer.as_str()).style(Style::default().fg(colors.muted)),
-                Cell::from(dur_buf).style(Style::default().fg(colors.muted)),
+                Cell::from(num).style(Style::default().fg(fg)),
+                Cell::from(song.name.as_str()).style(Style::default().fg(fg)),
+                Cell::from(song.singer.as_str()).style(Style::default().fg(fg)),
+                Cell::from(dur_buf).style(Style::default().fg(fg)),
             ])
             .height(1)
             .style(row_style)

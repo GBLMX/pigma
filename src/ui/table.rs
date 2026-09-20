@@ -49,8 +49,10 @@ pub(super) fn render_table(
 
     match table_mode {
         TableMode::Row => {
+            // The highlight wins over the cells' own styles, so the readable colour has to
+            // be named here: `bg` on `accent` is nearly invisible in the light palettes.
             let row_style = Style::default()
-                .fg(colors.bg)
+                .fg(colors.on_accent())
                 .bg(colors.accent)
                 .add_modifier(Modifier::BOLD);
 
@@ -60,7 +62,7 @@ pub(super) fn render_table(
         }
         TableMode::Cell => {
             let cell_highlight = Style::default()
-                .fg(colors.bg)
+                .fg(colors.on_accent())
                 .bg(colors.accent)
                 .add_modifier(Modifier::BOLD);
 
@@ -71,4 +73,104 @@ pub(super) fn render_table(
     }
 
     render_scrollbar(f, row_count, sel, scrollbar_area, colors.muted);
+}
+
+#[cfg(test)]
+mod selection_readability {
+    use ratatui::{Terminal, backend::TestBackend, buffer::Buffer, widgets::TableState};
+
+    use super::*;
+
+    fn columns() -> Vec<ColumnDef> {
+        vec![ColumnDef {
+            header: "TITLE".into(),
+            field: "title".into(),
+            width: None,
+            min_width: None,
+            ratio: None,
+        }]
+    }
+
+    fn render_selected(name: &str) -> (Buffer, Theme) {
+        let colors = crate::config::ThemeRegistry::new(Default::default())
+            .get(name)
+            .cloned()
+            .unwrap_or_default();
+        // The rows are dimmed with `muted` exactly like the real builders do.
+        let rows: Vec<Row> = (0..3)
+            .map(|i| {
+                Row::new(vec![
+                    Cell::from(format!("row{i}")).style(Style::default().fg(colors.muted)),
+                ])
+            })
+            .collect();
+
+        let mut state = TableState::default();
+        state.select(Some(1));
+
+        let mut terminal = Terminal::new(TestBackend::new(24, 5)).expect("backend");
+        terminal
+            .draw(|f| {
+                render_table(
+                    f,
+                    &columns(),
+                    rows,
+                    &mut state,
+                    TableMode::Row,
+                    &colors,
+                    f.area(),
+                    3,
+                    1,
+                );
+            })
+            .expect("draw");
+        (terminal.backend().buffer().clone(), colors)
+    }
+
+    /// The highlight style is applied over the cells, so its colour is the one a reader
+    /// sees — `bg` on `accent` measured 1.06-1.57:1 in the light palettes, which is how the
+    /// selected row became invisible there while looking fine in the dark ones.
+    #[test]
+    fn the_selected_row_is_readable_on_its_highlight() {
+        for name in [
+            "github-light",
+            "gruvbox-light",
+            "one-light",
+            "solarized-light",
+            "catppuccin-latte",
+            "default",
+            "dracula",
+        ] {
+            let (buffer, colors) = render_selected(name);
+            let y = 2; // header row, then the selected one
+            let mut cells = 0;
+            for x in 0..buffer.area.width.saturating_sub(1) {
+                let cell = &buffer[(x, y)];
+                if cell.symbol().trim().is_empty() {
+                    continue;
+                }
+                assert_eq!(
+                    cell.fg,
+                    colors.on_accent(),
+                    "{name}: ({x},{y}) draws {:?} on {:?}",
+                    cell.fg,
+                    cell.bg
+                );
+                assert_eq!(
+                    cell.bg, colors.accent,
+                    "{name}: ({x},{y}) lost the highlight"
+                );
+                cells += 1;
+            }
+            assert!(cells > 0, "{name}: the selected row rendered nothing");
+        }
+    }
+
+    /// Rows that are not selected keep the dim look they always had.
+    #[test]
+    fn unselected_rows_stay_dimmed() {
+        let (buffer, colors) = render_selected("github-light");
+        assert_eq!(buffer[(0, 1)].fg, colors.muted);
+        assert_eq!(buffer[(0, 3)].fg, colors.muted);
+    }
 }

@@ -307,6 +307,37 @@ impl Theme {
 
     /// Convert every true-color token to the terminal's palette.
     ///
+    /// The theme's own colour that stays readable when drawn on top of [`Self::accent`].
+    ///
+    /// The selected table row is painted with `accent` as its background, but its cells
+    /// keep whatever colour their column asked for — and dimmed columns are [`Self::muted`],
+    /// which on `accent` is nearly invisible in the light palettes (github-light measures
+    /// 1.2:1, gruvbox-light 1.05:1). Whichever of the palette's two extremes is further
+    /// from `accent` keeps this true for user-written themes as well, instead of assuming
+    /// `bg` is the right one.
+    pub fn on_accent(&self) -> Color {
+        let Some(accent) = relative_luminance(self.accent) else {
+            return self.bg;
+        };
+        let candidates = [
+            relative_luminance(self.bg).map(|l| (contrast_ratio(l, accent), self.bg)),
+            relative_luminance(self.text).map(|l| (contrast_ratio(l, accent), self.text)),
+            // Palettes where both anchors sit close to the accent (catppuccin-latte and
+            // one-light among the built-ins) cannot reach 3:1 with their own colours, and a
+            // row nobody can read is worse than a plain black-or-white highlight.
+            Some((contrast_ratio(0.0, accent), Color::Rgb(0, 0, 0))),
+            Some((contrast_ratio(1.0, accent), Color::Rgb(255, 255, 255))),
+        ];
+
+        candidates
+            .into_iter()
+            .flatten()
+            .filter(|(ratio, _)| *ratio >= 3.0)
+            .max_by(|(a, _), (b, _)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(_, color)| color)
+            .unwrap_or(self.bg)
+    }
+
     /// Applied once when a theme is loaded, so the render path keeps working with plain
     /// ratatui colors and nothing has to know about the terminal's capabilities.
     pub fn downsampled(self, mode: ColorMode) -> Self {
@@ -341,6 +372,29 @@ impl Theme {
             }
         }
     }
+}
+
+/// WCAG relative luminance, for colours that carry their own channels. Palette indices and
+/// named colours depend on the terminal's own palette, which the app cannot read.
+fn relative_luminance(color: Color) -> Option<f64> {
+    let Color::Rgb(r, g, b) = color else {
+        return None;
+    };
+    let channel = |c: u8| {
+        let c = f64::from(c) / 255.0;
+        if c <= 0.03928 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    Some(0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b))
+}
+
+/// WCAG contrast ratio between two relative luminances.
+fn contrast_ratio(a: f64, b: f64) -> f64 {
+    let (hi, lo) = if a > b { (a, b) } else { (b, a) };
+    (hi + 0.05) / (lo + 0.05)
 }
 
 /// Built-in themes, resolved once and down-sampled to the terminal's palette.
@@ -538,6 +592,37 @@ mod user_theme_tests {
 
     fn expected(color: &str) -> Color {
         downsample_color(cstr(color), *COLOR_MODE)
+    }
+
+    /// The selected table row is painted on `accent`, so the colour the theme picks for it
+    /// has to be readable there — this is what made the row vanish in the light palettes.
+    #[test]
+    fn on_accent_is_readable_for_every_builtin_theme() {
+        for name in builtin_themes().keys() {
+            let theme = builtin_themes().get(name).expect("theme");
+            let (Some(fg), Some(bg)) = (
+                relative_luminance(theme.on_accent()),
+                relative_luminance(theme.accent),
+            ) else {
+                continue; // palette-index themes: `on_accent` falls back to `bg` by design
+            };
+            let ratio = contrast_ratio(fg, bg);
+            // 3:1 is the WCAG bar for large text and UI parts, which is what a highlighted
+            // row is. That is the contract: whatever the palette looks like, the row drawn
+            // on `accent` stays readable.
+            assert!(
+                ratio >= 3.0,
+                "{name}: text on accent is {ratio:.2}:1, below the 3:1 readable minimum"
+            );
+        }
+    }
+
+    /// A palette that cannot be measured (named or indexed colours) keeps the old answer.
+    #[test]
+    fn on_accent_falls_back_for_palette_colours() {
+        let mut theme = Theme::terminal();
+        theme.bg = Color::Indexed(0);
+        assert_eq!(theme.on_accent(), theme.bg);
     }
 
     fn builtin(name: &str) -> &'static Theme {
