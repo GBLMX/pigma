@@ -17,6 +17,13 @@ pub struct SongInfo {
     pub album_id: u64,
     pub pic_url: String,
     pub duration: u64,
+    /// NetEase MV id for this song — `0` when it has none. The detail, album and artist
+    /// responses call the field `mv`; legacy `/weapi/search/get` results call it `mvid`.
+    ///
+    /// Kept out of the JSON while it is `0`, so a track without an MV serialises exactly as it
+    /// did before the field existed (see the `local_path` note above).
+    #[serde(default, skip_serializing_if = "mv_is_zero")]
+    pub mv: u64,
     pub copyright: SongCopyright,
     /// Where the file lives, for songs that came from disk (`scan_local_music`).
     ///
@@ -32,6 +39,11 @@ impl PartialEq for SongInfo {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
     }
+}
+
+/// `serde` helper: most songs have no MV (`mv == 0`).
+fn mv_is_zero(mv: &u64) -> bool {
+    *mv == 0
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -87,6 +99,12 @@ pub struct Lyrics {
 
 // --- Song parsing ---
 
+/// Turn one NetEase song object into [`SongInfo`].
+///
+/// The shapes differ per `context` (see the matches below), and the MV id is one more of those
+/// differences: the song detail / album / artist responses call it `mv`, while the legacy
+/// `/weapi/search/get` results used by [`SongContext::Search`] call the very same value `mvid`
+/// and have no `mv` at all. Either way it is `0` when the song has no MV.
 pub(crate) fn parse_song_info(v: &Value, context: SongContext) -> Result<SongInfo, String> {
     let name = str_val(v, "name");
 
@@ -181,6 +199,13 @@ pub(crate) fn parse_song_info(v: &Value, context: SongContext) -> Result<SongInf
     };
     let duration = u64_val(v, duration_field);
 
+    // `mvid` is what the legacy search shape calls `mv` (see the doc comment above).
+    let mv = v
+        .get("mv")
+        .or_else(|| v.get("mvid"))
+        .and_then(|song| song.as_u64())
+        .unwrap_or(0);
+
     let copyright = v
         .get("privilege")
         .map(|p| {
@@ -212,6 +237,7 @@ pub(crate) fn parse_song_info(v: &Value, context: SongContext) -> Result<SongInf
         album_id,
         pic_url,
         duration,
+        mv,
         copyright,
     })
 }
@@ -418,6 +444,44 @@ mod tests {
         });
         let song = parse_song_info(&v, SongContext::Usl).unwrap();
         assert_eq!(song.copyright, SongCopyright::Unavailable);
+    }
+
+    /// Live shapes: `/weapi/v3/song/detail` sends `mv` (347230 → 376199, 186016 → 0), while the
+    /// legacy `/weapi/search/get` sends the same information as `mvid`.
+    #[test]
+    fn test_parse_song_info_mv() {
+        let detail = json!({"id": 347230, "name": "海阔天空", "mv": 376199});
+        assert_eq!(
+            parse_song_info(&detail, SongContext::Usl).unwrap().mv,
+            376199
+        );
+
+        let without = json!({"id": 186016, "name": "晴天", "mv": 0});
+        assert_eq!(parse_song_info(&without, SongContext::Usl).unwrap().mv, 0);
+
+        let search = json!({"id": 1357375695, "name": "海阔天空", "mvid": 5501497});
+        assert_eq!(
+            parse_song_info(&search, SongContext::Search).unwrap().mv,
+            5501497
+        );
+
+        let absent = json!({"id": 1, "name": "Song"});
+        assert_eq!(parse_song_info(&absent, SongContext::Usl).unwrap().mv, 0);
+    }
+
+    /// A song without an MV must not grow an `mv` key over IPC; a song with one must keep it.
+    #[test]
+    fn the_mv_id_only_shows_up_when_there_is_one() {
+        let plain = json!({ "id": 7, "name": "Song" });
+        let song = parse_song_info(&plain, SongContext::Usl).unwrap();
+        let text = serde_json::to_string(&song).unwrap();
+        assert!(!text.contains("\"mv\""), "{text}");
+
+        let with_mv = json!({ "id": 7, "name": "Song", "mv": 376199 });
+        let song = parse_song_info(&with_mv, SongContext::Usl).unwrap();
+        let text = serde_json::to_string(&song).unwrap();
+        let back: SongInfo = serde_json::from_str(&text).unwrap();
+        assert_eq!(back.mv, 376199, "{text}");
     }
 
     /// `SongInfo` travels over IPC as JSON (queue snapshots). A track from the network must not

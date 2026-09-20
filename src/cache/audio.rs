@@ -171,6 +171,7 @@ impl CacheManager {
                 album_id: 0,
                 pic_url: entry.pic_url.clone(),
                 duration: entry.duration,
+                mv: 0,
                 copyright: ncm_api::SongCopyright::Unknown,
                 local_path: None,
             });

@@ -130,6 +130,7 @@ pub fn scan_local_music(dir: &std::path::Path) -> Vec<SongInfo> {
             album_id: 0,
             pic_url: String::new(),
             duration,
+            mv: 0,
             copyright: ncm_api::SongCopyright::Free,
             // The album field may now hold the album tag, so the file the track
             // plays from travels in its own field (see `playback::source`).
@@ -272,5 +273,62 @@ mod tests {
         assert_eq!(partial_song.duration, 1000);
 
         fs::remove_dir_all(&dir).ok();
+    }
+}
+
+/// `cargo test --release --lib -- --ignored --nocapture scan_bench`
+///
+/// What reading a music library costs. The scan is serial and parses every file's tags, so a
+/// few thousand tracks are the difference between "instant" and "wait for it" — this is the
+/// number that decides whether that is worth changing. The fixture is a farm of hard links to
+/// the test fixtures, so the files themselves stay in the page cache and the measurement is the
+/// tag parsing, not the disk.
+#[cfg(test)]
+mod scan_bench {
+    use std::{fs, path::PathBuf};
+
+    fn fixture_library(count: usize) -> PathBuf {
+        let dir = std::env::temp_dir().join("boxpigma-scan-bench");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("create fixture dir");
+        let sources: Vec<PathBuf> = [
+            "/tmp/localmusic/带标签的歌.flac",
+            "/tmp/localmusic/无标签的歌.mp3",
+        ]
+        .iter()
+        .map(PathBuf::from)
+        .filter(|p| p.is_file())
+        .collect();
+        assert!(!sources.is_empty(), "需要 /tmp/localmusic 下的素材");
+        for i in 0..count {
+            let src = &sources[i % sources.len()];
+            let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("bin");
+            let dst = dir.join(format!("track-{i:05}.{ext}"));
+            if fs::hard_link(src, &dst).is_err() {
+                fs::copy(src, &dst).expect("copy fallback");
+            }
+        }
+        dir
+    }
+
+    #[test]
+    #[ignore]
+    fn scanning_a_library_costs() {
+        let dir = fixture_library(300);
+        let songs = super::scan_local_music(&dir);
+        assert!(!songs.is_empty(), "扫描应当找到文件");
+        println!("  素材: {} 首（其中带标签/无标签交替）", songs.len());
+
+        let per_scan = crate::bench_util::time("扫描整个曲库（300 首）", 3, || {
+            std::hint::black_box(super::scan_local_music(&dir));
+        });
+        // Seconds at this scale read as "0.0", which hides what this number is for: the scan is
+        // cheap in CPU terms, so parallelising it would save tens of milliseconds, once.
+        println!(
+            "  → 折合每首 {:.2} µs；若按 5000 首估算约 {:.0} ms（当前串行）",
+            per_scan * 1e6 / 300.0,
+            per_scan * (5000.0 / 300.0) * 1000.0
+        );
+        let _ = fs::remove_dir_all(&dir);
     }
 }

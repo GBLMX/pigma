@@ -377,6 +377,7 @@ mod tests {
                 album_id: 0,
                 pic_url: String::new(),
                 duration: 60_000,
+                mv: 0,
                 copyright: ncm_api::SongCopyright::Free,
                 local_path: None,
             })),

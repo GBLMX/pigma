@@ -19,6 +19,7 @@ mod playlist;
 mod radio;
 mod search;
 mod song;
+mod video;
 
 const BASE_URL: &str = "https://music.163.com";
 const EAPI_BASE: &str = "https://music.163.com";

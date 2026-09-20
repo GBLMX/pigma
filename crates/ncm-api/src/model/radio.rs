@@ -24,6 +24,7 @@ pub(crate) fn parse_radio_programs(value: &Value) -> Result<Vec<SongInfo>, Strin
                 album_id: 0,
                 pic_url: v["coverUrl"].as_str().unwrap_or("").to_string(),
                 duration: v["duration"].as_u64().unwrap_or(0),
+                mv: main["mv"].as_u64().unwrap_or(0),
                 copyright: SongCopyright::Unknown,
                 local_path: None,
             })
@@ -84,6 +85,7 @@ pub(crate) fn parse_intelligence_songs(value: &Value) -> Result<Vec<SongInfo>, S
                     .unwrap_or("")
                     .to_string(),
                 duration: info["dt"].as_u64().unwrap_or(0),
+                mv: info["mv"].as_u64().unwrap_or(0),
                 copyright: SongCopyright::Unknown,
                 local_path: None,
             })

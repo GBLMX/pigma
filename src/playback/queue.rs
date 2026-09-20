@@ -174,6 +174,7 @@ mod tests {
             album_id: 0,
             pic_url: String::new(),
             duration: 0,
+            mv: 0,
             copyright: ncm_api::SongCopyright::Unknown,
             local_path: None,
         })

@@ -8,6 +8,7 @@ mod radio;
 mod singer;
 mod song;
 mod user;
+mod video;
 
 pub use album::{AlbumDetail, AlbumDetailDynamic};
 pub use discovery::{BannersInfo, HotSearchItem, SearchResult, TargetType, TopList};
@@ -15,6 +16,7 @@ pub use playlist::{PlayListDetail, PlayListDetailDynamic, SongList};
 pub use singer::{ArtistAlbum, ArtistDetail, SingerInfo};
 pub use song::{Lyrics, SongCopyright, SongInfo, SongUrl};
 pub use user::{CloudDiskResult, CloudUploadResult, LoginInfo, Msg};
+pub use video::{MvInfo, MvResolution, MvUrl};
 
 pub(crate) use album::{parse_album_detail, parse_album_detail_dynamic};
 pub(crate) use discovery::{parse_banners, parse_hot_search, parse_toplist};
@@ -28,6 +30,7 @@ pub(crate) use user::{
     parse_cloud_disk_songs, parse_cloud_upload, parse_daily_task, parse_login_info, parse_msg,
     parse_unikey,
 };
+pub(crate) use video::{parse_mv_detail, parse_mv_url};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum SongQuality {

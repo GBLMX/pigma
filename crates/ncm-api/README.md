@@ -68,7 +68,60 @@ pub struct SongInfo {
     pub album_id: u64,       // 专辑 ID
     pub pic_url: String,     // 封面图 URL
     pub duration: u64,       // 时长（毫秒）
+    pub mv: u64,             // MV ID（0 = 没有 MV；旧版搜索接口叫 mvid）
     pub copyright: SongCopyright,  // 版权状态
+}
+```
+
+</details>
+
+<details>
+<summary><b>MvInfo</b> — MV（音乐视频）信息</summary>
+
+```rust
+pub struct MvInfo {
+    pub id: u64,
+    pub name: String,           // 标题
+    pub artist_id: u64,
+    pub artist_name: String,
+    pub cover: String,          // 海报 URL
+    pub duration: u64,          // 时长（毫秒）
+    pub publish_time: String,   // 发布时间
+    pub desc: String,           // 简介（desc，缺失时用 briefDesc）
+    pub play_count: u64,
+    pub sub_count: u64,
+    pub share_count: u64,
+    pub like_count: u64,
+    pub comment_count: u64,
+    pub resolutions: Vec<MvResolution>,  // 该 MV 有的清晰度
+}
+```
+
+</details>
+
+<details>
+<summary><b>MvResolution</b> — MV 的一个清晰度</summary>
+
+```rust
+pub struct MvResolution {
+    pub resolution: u32,  // 竖向分辨率：240 / 480 / 720 / 1080
+    pub size: u64,        // 字节数（`/api/v1/mv/detail` 才会给，否则 0）
+    pub url: String,      // 签名直链（`/api/mv/detail` 才会给，否则为空）
+}
+```
+
+</details>
+
+<details>
+<summary><b>MvUrl</b> — MV 播放地址</summary>
+
+```rust
+pub struct MvUrl {
+    pub id: u64,
+    pub url: String,          // 直链（带 wsSecret / wsTime，有时效）
+    pub resolution: u32,      // 实际画质
+    pub size: u64,            // 字节数
+    pub expire_secs: u64,     // 直链有效期（秒）
 }
 ```
 
@@ -1406,6 +1459,82 @@ pub async fn new_albums(
 
 ```rust
 pub struct SongList { ... }
+```
+
+</details>
+
+---
+
+### MV (音乐视频)
+
+MV 的入口是歌曲上的 `mv` 字段（`SongInfo::mv`，`0` 表示这首歌没有 MV；旧版搜索接口把同一个值放在 `mvid` 里），链子是 **歌曲 → `mv_detail` → `mv_url`**。
+
+#### `mv_detail`
+
+```rust
+pub async fn mv_detail(&self, mv_id: u64) -> Result<MvInfo, NcmError>
+```
+
+获取 MV 详情（标题、海报、时长、歌手、发布时间、简介、各清晰度）。
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `mv_id` | `u64` | MV ID，来自 `SongInfo::mv` |
+
+<details>
+<summary>响应类型 MvInfo</summary>
+
+```rust
+pub struct MvInfo {
+    pub id: u64,
+    pub name: String,           // 标题
+    pub artist_id: u64,         // 歌手 ID
+    pub artist_name: String,    // 歌手名
+    pub cover: String,          // 海报 URL
+    pub duration: u64,          // 时长（毫秒）
+    pub publish_time: String,   // 发布时间，形如 "1993-09-09"
+    pub desc: String,           // 简介：服务端有 desc 就用 desc，否则用 briefDesc
+    pub play_count: u64,
+    pub sub_count: u64,
+    pub share_count: u64,
+    pub like_count: u64,        // /api/mv/detail 有，/api/v1/mv/detail 没有
+    pub comment_count: u64,
+    pub resolutions: Vec<MvResolution>,  // 该 MV 有的清晰度，升序
+}
+```
+
+</details>
+
+---
+
+#### `mv_url`
+
+```rust
+pub async fn mv_url(
+    &self,
+    mv_id: u64,
+    resolution: Option<u32>,
+) -> Result<Vec<MvUrl>, NcmError>
+```
+
+获取 MV 的播放直链与画质元数据。请求打到 `/api/song/enhance/play/mv/url`（`/api/mv/url` 已下线，现役 Web 播放器用的就是前者，参数同样是 `id` / `r`）。一次只回一个清晰度，所以列表里通常只有一条；服务端会把请求的画质**降到该 MV 实际拥有的最好画质**（要 1080 可能给 480）。这个 MV 没有可播放画质时返回 `NcmError::Message("这个 MV 没有可播放的清晰度")`。
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `mv_id` | `u64` | MV ID |
+| `resolution` | `Option<u32>` | 期望的竖向分辨率：`240` / `480` / `720` / `1080`；`None` 时按 `1080` 请求 |
+
+<details>
+<summary>响应类型 Vec&lt;MvUrl&gt;</summary>
+
+```rust
+pub struct MvUrl {
+    pub id: u64,
+    pub url: String,          // 直链，带 wsSecret / wsTime，有时效
+    pub resolution: u32,      // 实际画质（服务端可能降级）
+    pub size: u64,            // 字节数
+    pub expire_secs: u64,     // 直链有效期（秒）
+}
 ```
 
 </details>
