@@ -52,7 +52,7 @@ A NetEase Cloud Music (网易云音乐) or local audio playback TUI client built
 > 该项目仅供学习与研究使用.
 > 另外由于个人原因，该项目正在寻找维护人员，有兴趣联系
 
-**升级注意备份配置文件，当前自动备份迁移并没有写**
+**升级提示：`config.toml` 现在带 `config_version`，旧文件（没有该字段，按 v0 处理）在加载时会自动升级，并把原文件备份为 `config.toml.bak-v0`；反之，来自更新版本的配置文件按原样使用（未识别的字段忽略，不会被降级覆盖）。**
 
 **[配置参考](./config.example.toml)**
 
@@ -347,6 +347,20 @@ Config file location:
 - linux: `~/.config/pigma/config.toml`
 - macOS: `$HOME/Library/Application Support/pigma/config.tomnl`
 - windows:`RoamingAppData`
+
+### 配置版本与迁移
+
+`config.toml` 顶部写着 `config_version`（当前为 `1`）：
+
+```toml
+config_version = 1
+```
+
+- 缺少该字段的文件按 **v0**（引入版本号之前写下的）处理，加载时自动升级，并把原文件备份为
+  `config.toml.bak-v0`，升级结果在下次 `save()` 时写回；
+- 已经是当前版本的文件不会被迁移，也不会产生备份；
+- 来自更新版本的文件按原样使用，未识别的字段忽略（不会被旧版本覆盖降级）；
+- 字段改名/删除/语义变化时递增 `CONFIG_VERSION`，并在 `Config::migrate_from` 里加一步迁移。
 
 ### Columns Configuration
 

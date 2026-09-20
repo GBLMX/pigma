@@ -9,7 +9,7 @@ mod playerbar;
 pub mod theme;
 mod titles;
 
-use std::fs;
+use std::{fs, path::Path};
 
 pub use border::*;
 pub use cache::*;
@@ -22,9 +22,25 @@ pub use titles::*;
 
 use crate::{logger::Logger, utils, utils::GradientPreset};
 
+/// Schema version of `config.toml` written by this build.
+///
+/// Bump it whenever a field is renamed, removed, or changes meaning, and add the
+/// matching step in [`Config::migrate_from`].
+pub const CONFIG_VERSION: u32 = 1;
+
+/// `config_version` is absent from files written before versioning existed, and such a
+/// file must be treated as v0 rather than as "current" — otherwise a migration could
+/// never trigger.
+fn unversioned_config_version() -> u32 {
+    0
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
+    /// Schema version of the file this config was loaded from; written back on save.
+    #[serde(default = "unversioned_config_version")]
+    pub config_version: u32,
     pub default_theme: String,
     pub border: BorderConfig,
     pub seek_interval_secs: u32,
@@ -170,6 +186,7 @@ impl Default for SonarConfig {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            config_version: CONFIG_VERSION,
             default_theme: Theme::default().name,
             border: BorderConfig::default(),
             seek_interval_secs: 15,
@@ -195,36 +212,88 @@ impl Default for Config {
 
 impl Config {
     pub fn load() -> Self {
-        let config_dir = utils::pigma_config_dir();
-        let config_path = config_dir.join("config.toml");
+        Self::load_from(&utils::pigma_config_dir().join("config.toml"))
+    }
 
-        let default = Config::default();
-        let config = if config_path.exists() {
-            match fs::read_to_string(&config_path) {
+    /// Load a config from an explicit path, upgrading a file written by an older release.
+    ///
+    /// Split out of [`Config::load`] so the migration path is testable against a scratch
+    /// file instead of the user's real config.
+    pub fn load_from(config_path: &Path) -> Self {
+        let parsed: Option<Config> = if config_path.exists() {
+            match fs::read_to_string(config_path) {
                 Ok(content) => match toml_edit::de::from_str(&content) {
-                    Ok(cfg) => cfg,
+                    Ok(cfg) => Some(cfg),
                     Err(e) => {
                         log::warn!("Failed to parse config.toml: {e}, using defaults");
-                        default
+                        None
                     }
                 },
                 Err(e) => {
                     log::warn!("Failed to read config.toml: {e}, using defaults");
-                    default
+                    None
                 }
             }
         } else {
-            default
+            None
         };
 
+        let config = if let Some(mut cfg) = parsed {
+            cfg.migrate_from(config_path);
+            cfg
+        } else {
+            Config::default()
+        };
+
+        // Only a missing file is (re)created: a file that exists but failed to parse is
+        // left alone rather than overwritten with defaults.
         if !config_path.exists() {
-            let _ = fs::create_dir_all(&config_dir);
+            if let Some(dir) = config_path.parent() {
+                let _ = fs::create_dir_all(dir);
+            }
             let content = config.to_toml();
             if let Err(e) = fs::write(config_path, content) {
                 log::warn!("Failed to write default config: {e}");
             }
         }
         config
+    }
+
+    /// Upgrade a config parsed from disk to [`CONFIG_VERSION`].
+    ///
+    /// The previous file is copied to `config.toml.bak-v{old}` first, so a user can always
+    /// roll back; the upgraded config is written on the next `save()`. A file from a newer
+    /// build is left as it is (its unknown fields are ignored) instead of being downgraded.
+    fn migrate_from(&mut self, config_path: &Path) {
+        let from = self.config_version;
+        if from == CONFIG_VERSION {
+            return;
+        }
+        if from > CONFIG_VERSION {
+            log::warn!(
+                "config.toml is schema v{from}, this build understands v{CONFIG_VERSION}: \
+                 newer fields are ignored"
+            );
+            return;
+        }
+
+        let backup = config_path.with_extension(format!("toml.bak-v{from}"));
+        match fs::copy(config_path, &backup) {
+            Ok(_) => log::info!(
+                "config.toml schema v{from} → v{CONFIG_VERSION}（已备份到 {}）",
+                backup.display()
+            ),
+            Err(e) => log::warn!(
+                "config.toml schema v{from} → v{CONFIG_VERSION}（备份到 {} 失败: {e}）",
+                backup.display()
+            ),
+        }
+
+        // Steps run in order, each rewriting whatever the previous schema got wrong.
+        // There is no field to rewrite for v0 → v1 yet: files written before versioning
+        // existed load unchanged, and the version is recorded here so that the next
+        // migration can key off it.
+        self.config_version = CONFIG_VERSION;
     }
 
     pub fn save(&self) {
@@ -305,5 +374,65 @@ mod tests {
 
         let toml = cfg.to_toml();
         assert!(!toml.is_empty(), "config serialization produced nothing");
+    }
+
+    /// Scratch directory for the file-backed tests: they run in parallel, so the name
+    /// carries the test's own label.
+    fn scratch_dir(label: &str) -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("pigma-config-test-{}-{label}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("create scratch dir");
+        dir
+    }
+
+    /// A file written before versioning existed (no `config_version`) is upgraded in
+    /// memory, keeps its values, and is backed up so the user can roll back.
+    #[test]
+    fn legacy_config_is_migrated_and_backed_up() {
+        let dir = scratch_dir("legacy");
+        let path = dir.join("config.toml");
+        fs::write(&path, "default_theme = \"dracula\"\nsearch_limit = 42\n")
+            .expect("write legacy config");
+
+        let cfg = Config::load_from(&path);
+
+        assert_eq!(cfg.config_version, CONFIG_VERSION);
+        assert_eq!(cfg.default_theme, "dracula", "user values must survive");
+        assert_eq!(cfg.search_limit, 42, "user values must survive");
+        assert!(
+            dir.join("config.toml.bak-v0").exists(),
+            "the pre-versioning file must be backed up"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The startup path end to end: `save`/first-run output carries the current version and
+    /// is read back without triggering another migration.
+    #[test]
+    fn saved_config_round_trips_without_migrating_again() {
+        let dir = scratch_dir("roundtrip");
+        let path = dir.join("config.toml");
+        let written = Config {
+            default_theme: "dracula".into(),
+            search_limit: 42,
+            ..Config::default()
+        };
+        fs::write(&path, written.to_toml()).expect("write config");
+
+        let cfg = Config::load_from(&path);
+
+        assert_eq!(
+            cfg.config_version, CONFIG_VERSION,
+            "the written file must carry the current version"
+        );
+        assert_eq!(cfg.default_theme, "dracula", "values must survive");
+        assert_eq!(cfg.search_limit, 42, "values must survive");
+        assert!(
+            !dir.join(format!("config.toml.bak-v{CONFIG_VERSION}"))
+                .exists(),
+            "a config at the current version must not be migrated"
+        );
+        let _ = fs::remove_dir_all(&dir);
     }
 }
