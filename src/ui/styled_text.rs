@@ -235,11 +235,12 @@ mod bench {
     fn parsing_the_titles_on_each_draw_costs() {
         let theme = theme();
 
-        let per_frame = crate::bench_util::time("解析 6 条标题标记（现状）", 20000, || {
-            for title in TITLES {
-                std::hint::black_box(parse_styled(title, &theme));
-            }
-        });
+        let per_frame =
+            crate::bench_util::time("解析 6 条标题标记（现状）", 20000, || {
+                for title in TITLES {
+                    std::hint::black_box(parse_styled(title, &theme));
+                }
+            });
         println!(
             "  → 相当于每帧几十次调用时，约 {:.2}% 单核 @31 Hz",
             crate::bench_util::core_share(per_frame, 31.0)
@@ -250,11 +251,12 @@ mod bench {
         // closure, and `parse_styled` is a runtime call — a real cache would need `OnceLock`
         // keyed by the theme generation.)
         let parsed: Vec<Vec<Span>> = TITLES.iter().map(|t| parse_styled(t, &theme)).collect();
-        let per_frame_reused = crate::bench_util::time("复用已解析结果（缓存上限）", 20000, || {
-            for spans in &parsed {
-                std::hint::black_box(spans.clone());
-            }
-        });
+        let per_frame_reused =
+            crate::bench_util::time("复用已解析结果（缓存上限）", 20000, || {
+                for spans in &parsed {
+                    std::hint::black_box(spans.clone());
+                }
+            });
         println!(
             "  → 同样调用频率下约 {:.2}% 单核 @31 Hz（比值 {:.1}×）",
             crate::bench_util::core_share(per_frame_reused, 31.0),

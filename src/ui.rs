@@ -507,11 +507,7 @@ mod theme_background {
 mod frame_bench {
     use ratatui::{Terminal, backend::TestBackend};
 
-    use crate::{
-        app::App,
-        config::Config,
-        state::Page,
-    };
+    use crate::{app::App, config::Config, state::Page};
 
     #[tokio::test]
     #[ignore]
@@ -522,11 +518,10 @@ mod frame_bench {
         app.state.navigation.page = Page::Main;
 
         let mut terminal = Terminal::new(TestBackend::new(200, 50)).expect("backend");
-        let per_frame = crate::bench_util::time("空闲整帧（主页面，无播放）", 300, || {
-            terminal
-                .draw(|f| super::draw(f, &mut app))
-                .expect("draw");
-        });
+        let per_frame =
+            crate::bench_util::time("空闲整帧（主页面，无播放）", 300, || {
+                terminal.draw(|f| super::draw(f, &mut app)).expect("draw");
+            });
         // The loop is event-driven (`handle_events` blocks on the event stream unless the user is
         // dragging the seek bar), so this is NOT paid continuously while idle: it is what one
         // frame costs, and the analysis stream spends it about 30 times a second while playing.
