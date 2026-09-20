@@ -15,7 +15,8 @@ use crate::{
 
 pub(super) const LOGO: &[&str] = &[
     "█▀▀▀▄ ▄▀▀▀▄ █   █ █▀▀▀▄ ▀█▀ ▄▀▀▀▀ █▄ ▄█ ▄▀▀▀▄",
-    "█▄▄▄▀ █   █  ▀▄▀  █▄▄▄▀  █  █ ▀▀█ █ ▀ █ █▄▄▄█",
+    "█▀▀▀█ █   █ ▀▄ ▄▀ █▄▄▄▀  █  █     █ ▀ █ █   █",
+    "█   █ █   █ ▄▀ ▀▄ █      █  █ ▀▀█ █   █ █▄▄▄█",
     "█▄▄▄▀ ▀▄▄▄▀ █   █ █     ▄█▄ ▀▄▄▄▀ █   █ █   █",
 ];
 
@@ -33,9 +34,9 @@ pub(super) fn draw(
 }
 
 fn render_logo(f: &mut Frame, colors: &Theme, area: Rect) {
-    let [row0, row1, row2] = Layout::vertical([Constraint::Length(1); 3]).areas(area);
-    let rows = [row0, row1, row2];
-    for (i, line) in LOGO.iter().enumerate() {
+    // One row per line of the art, so a taller logo cannot index past its own area.
+    let rows = Layout::vertical([Constraint::Length(1); LOGO.len()]).split(area);
+    for (row, line) in rows.iter().zip(LOGO) {
         let span = Span::styled(
             line.to_string(),
             Style::default()
@@ -44,7 +45,7 @@ fn render_logo(f: &mut Frame, colors: &Theme, area: Rect) {
         );
         f.render_widget(
             Paragraph::new(Line::from(span)).alignment(Alignment::Center),
-            rows[i],
+            *row,
         );
     }
 }

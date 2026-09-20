@@ -12,9 +12,11 @@ pub struct SplashLayout {
     pub tag: Rect,
 }
 
-pub fn splash(area: Rect) -> SplashLayout {
+/// `logo_rows` is the height of the ASCII logo: the art is the only place its height is
+/// written down, and the splash must not have a second opinion about it.
+pub fn splash(area: Rect, logo_rows: u16) -> SplashLayout {
     let [logo_area, progress_area, logs_area, tag_area] = Layout::vertical([
-        Constraint::Length(3),
+        Constraint::Length(logo_rows),
         Constraint::Length(2),
         Constraint::Length(5),
         Constraint::Length(1),

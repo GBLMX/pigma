@@ -156,7 +156,7 @@ pub(crate) fn draw_splash(f: &mut Frame, app: &mut App, area: Rect) {
         &app.state.border,
         app.state.tick,
     );
-    let lay = layout::splash(area);
+    let lay = layout::splash(area, splash::LOGO.len() as u16);
     splash::draw(f, &app.state.splash, &bs, &lay);
 }
 
