@@ -207,6 +207,7 @@ fn completion(line: &str, themes: &[&str]) -> Option<String> {
 pub(super) fn open(app: &mut App) {
     app.state.prompt.active = true;
     app.state.prompt.input = TextInput::new();
+    app.state.prompt.history_index = None;
 }
 
 /// Handle a key while the prompt is open; returns whether the key was consumed.
@@ -219,11 +220,14 @@ pub(super) fn handle_ex_key(app: &mut App, key_event: KeyEvent) -> bool {
         KeyCode::Esc => close(app),
         KeyCode::Enter => {
             let line = app.state.prompt.input.value.trim().to_string();
+            app.state.prompt.remember(&line);
             close(app);
             if !line.is_empty() {
                 run(app, &line);
             }
         }
+        KeyCode::Up => app.state.prompt.recall_previous(),
+        KeyCode::Down => app.state.prompt.recall_next(),
         KeyCode::Backspace => app.state.prompt.input.delete_char(),
         KeyCode::Left => app.state.prompt.input.move_left(),
         KeyCode::Right => app.state.prompt.input.move_right(),
@@ -250,7 +254,10 @@ pub(super) fn handle_ex_key(app: &mut App, key_event: KeyEvent) -> bool {
                 }
             }
         }
-        KeyCode::Char(ch) => app.state.prompt.input.enter_char(ch),
+        KeyCode::Char(ch) => {
+            app.state.prompt.leave_history();
+            app.state.prompt.input.enter_char(ch);
+        }
         _ => {}
     }
 

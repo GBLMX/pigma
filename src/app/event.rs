@@ -17,15 +17,34 @@ use crate::{
 /// this point, so there is no reason to sit through the whole track.
 const LISTEN_THRESHOLD: Duration = Duration::from_secs(30);
 
-/// Whether a position means the song has now been listened to and still needs reporting.
-fn listen_due(position: Duration, song_id: u64, reported: Option<u64>) -> bool {
-    position >= LISTEN_THRESHOLD && reported != Some(song_id)
+/// A tick that advances more than this did not play — the position was seeked.
+const SEEK_JUMP: Duration = Duration::from_secs(1);
+
+/// What one progress tick adds to the played total. Progress reports the player position,
+/// so a jump means the bar was dragged: seeking past the threshold is not listening to it.
+fn played_advance(previous: Duration, position: Duration) -> Duration {
+    let advanced = position.saturating_sub(previous);
+    if advanced <= SEEK_JUMP {
+        advanced
+    } else {
+        Duration::ZERO
+    }
+}
+
+/// Whether the played total means the cloud should be told, once per play.
+fn listen_due(played: Duration, song_id: u64, reported: Option<u64>) -> bool {
+    played >= LISTEN_THRESHOLD && reported != Some(song_id)
 }
 
 impl App {
     /// Report the listen the cloud counts, the way the official client does: about thirty
     /// seconds in rather than at the end, and once per play.
     fn report_listen(&mut self, position: Duration) {
+        // Progress ticks the player position, so accumulate what actually played: seeking
+        // only moves the position and must not count towards the threshold.
+        self.played_in_track += played_advance(self.last_position, position);
+        self.last_position = position;
+
         let Some(song_id) = self
             .playback
             .state
@@ -35,13 +54,13 @@ impl App {
         else {
             return;
         };
-        if !listen_due(position, song_id, self.reported_listen) {
+        if !listen_due(self.played_in_track, song_id, self.reported_listen) {
             return;
         }
         self.reported_listen = Some(song_id);
 
         let service = self.service.clone();
-        let played_ms = position.as_millis() as u64;
+        let played_ms = self.played_in_track.as_millis() as u64;
         tokio::spawn(async move {
             if let Err(error) = service.report_play(song_id, played_ms).await {
                 log::debug!("report_play({song_id}): {error}");
@@ -113,6 +132,8 @@ impl App {
             PlaybackEvent::SongPlay(id) => self.handle_song_play(id),
             PlaybackEvent::Started => {
                 self.reported_listen = None;
+                self.played_in_track = Duration::ZERO;
+                self.last_position = Duration::ZERO;
                 self.handle_playback_started();
             }
             PlaybackEvent::Progress { position, total } => {
@@ -375,11 +396,6 @@ mod tests {
         let below = LISTEN_THRESHOLD - Duration::from_secs(1);
         assert!(!listen_due(below, 42, None), "not a listen yet");
         assert!(listen_due(LISTEN_THRESHOLD, 42, None), "at the threshold");
-        assert!(listen_due(
-            LISTEN_THRESHOLD + Duration::from_secs(5),
-            42,
-            None
-        ));
         assert!(
             !listen_due(LISTEN_THRESHOLD, 42, Some(42)),
             "the same play is only reported once"
@@ -388,5 +404,39 @@ mod tests {
             listen_due(LISTEN_THRESHOLD, 7, Some(42)),
             "the next song counts again"
         );
+    }
+
+    /// Listening is measured in playback, not in position: dragging the bar past the
+    /// threshold must not fake a listen, which is what reporting the raw position did.
+    #[test]
+    fn seeking_past_the_threshold_is_not_a_listen() {
+        let tick = Duration::from_millis(80);
+
+        assert_eq!(
+            played_advance(Duration::from_secs(5), Duration::from_secs(5) + tick),
+            tick,
+            "a normal tick counts"
+        );
+        assert_eq!(
+            played_advance(Duration::from_secs(5), Duration::from_secs(90)),
+            Duration::ZERO,
+            "a forward jump is a seek"
+        );
+        assert_eq!(
+            played_advance(Duration::from_secs(90), Duration::from_secs(5)),
+            Duration::ZERO,
+            "seeking back plays nothing"
+        );
+
+        // 375 ticks of 80ms is exactly the threshold.
+        let mut total = Duration::ZERO;
+        let mut previous = Duration::ZERO;
+        for _ in 0..375 {
+            let position = previous + tick;
+            total += played_advance(previous, position);
+            previous = position;
+        }
+        assert_eq!(total, LISTEN_THRESHOLD);
+        assert!(listen_due(total, 42, None));
     }
 }

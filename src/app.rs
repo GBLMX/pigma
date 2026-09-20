@@ -67,6 +67,10 @@ pub struct App {
     /// Song whose listen has already been reported to the cloud, so one play reports once.
     /// Cleared when a track starts, which is what lets a repeat of the same song count.
     pub(super) reported_listen: Option<u64>,
+    /// Last position seen, to tell playback apart from a seek.
+    pub(super) last_position: Duration,
+    /// Playback actually accumulated for the current song; the threshold is measured on it.
+    pub(super) played_in_track: Duration,
     /// Playlists whose full tracks have already been merged into the playback queue for lazy pagination, avoiding repeated Enter presses refetching/truncating the queue.
     queued_playlists: HashSet<u64>,
     /// Live playback snapshot served to `pigma status` over the IPC socket.
@@ -251,6 +255,8 @@ impl App {
             searcher,
             liked_ids,
             reported_listen: None,
+            last_position: Duration::ZERO,
+            played_in_track: Duration::ZERO,
             queued_playlists: HashSet::new(),
             status: Arc::new(Mutex::new(StatusSnapshot::default())),
             queue: Arc::new(Mutex::new(QueueSnapshot::default())),
