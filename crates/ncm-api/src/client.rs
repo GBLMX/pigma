@@ -347,6 +347,11 @@ impl NcmClient {
             "send_eapi path={path} status={status} body(len={}): {preview:?}",
             text.len(),
         );
+        // `send_request` (weapi) warns on non-2xx; eapi must not silently treat an HTTP
+        // failure as a valid payload, since callers parse the body unconditionally.
+        if !status.is_success() {
+            log::warn!("send_eapi non-2xx: path={path} status={status}, body={preview:?}");
+        }
         Ok(text)
     }
 
