@@ -11,7 +11,7 @@
 
 pigma 的核心目标是把网易云音乐和本地音频播放的体验带进命令行环境：终端里的流式播放、歌词、歌单与队列管理，全部围绕键盘操作组织，基于 [Ratatui](https://ratatui.rs) 实现。
 
-本仓库是 [akirco/pigma](https://github.com/akirco/pigma) 的 fork，**持续维护中**：上游的进展在这里跟进，本仓库自己也带了一批改动 —— 鼠标交互（点击 seek／切区／播放控制／模式／喜欢／静音）、频谱与音高读数、`:` 命令行与补全（含邮箱/短信登录）、听歌打卡、按终端能力自动适配配色与字形。二进制与 AUR 包都从**本仓库**发布（[releases](https://github.com/GBLMX/pigma/releases)、`pigma-gblmx-bin`）。
+本仓库是 [akirco/pigma](https://github.com/akirco/pigma) 的 fork，**持续维护中**：上游的进展在这里跟进，本仓库自己也带了一批改动 —— 鼠标交互（点击 seek／切区／播放控制／模式／喜欢／静音）、频谱与音高读数、`:` 命令行与补全（含邮箱/短信登录）、听歌打卡、自定义主题（`[themes.<名>]` 继承内置主题，只写要改的颜色）、按终端能力自动适配配色与字形。二进制与 AUR 包都从**本仓库**发布（[releases](https://github.com/GBLMX/pigma/releases)、`pigma-gblmx-bin`）。
 
 <details>
 <summary><b>📖 点击展开/折叠目录 (Table of Contents)</b></summary>

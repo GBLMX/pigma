@@ -131,18 +131,23 @@ lyrics = "♪ LYRICS"
 log_level = "debug"
 
 # =============================================================================
-# 新增自定义主题
+# 自定义主题
 # =============================================================================
-# 颜色格式: hex (#rrggbb), named (red, blue, ...), 或 indexed (0-255)
-[[themes]]
-name = "my_theme"
-bg = "#0a0b10"
-surface = "#1a1a2e"
-text = "#ff0066"
-accent = "#ffcc00"
-muted = "#00f0ff"
-border = "0"
-error = "#b000ff"
+# 颜色格式: hex (#rrggbb)、名字 (red, blue, ...)、或索引 (0-255, 也可直接写整数)
+# base 是起点: 内置主题名, 或另一个自定义主题; 不写则用 default
+# 只需写想改的颜色, 其余沿用 base
+#
+# [themes.my_theme]
+# base = "tokyo-night"
+# bg = "#0a0b10"
+# surface = "#1a1a2e"
+# text = "#ff0066"
+# accent = "#ffcc00"
+# muted = "#00f0ff"
+# border = 3
+# error = "#b000ff"
+#
+# 然后 default_theme = "my_theme", 或在应用里 `:theme my_theme` (Tab 可补全)
 
 # =============================================================================
 # 自定义列定义

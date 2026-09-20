@@ -381,22 +381,118 @@ fn builtin_themes() -> &'static HashMap<String, Theme> {
     &THEMES
 }
 
+/// A colour as the config writes it: `"#rrggbb"`, a name like `"red"`, an index like
+/// `"3"`, or just the integer `3`. That is the format `config.example.toml` documents, and
+/// the one the built-in themes are written in.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ColorSpec {
+    Index(u8),
+    Text(String),
+}
+
+impl ColorSpec {
+    fn resolve(&self) -> Result<Color, String> {
+        match self {
+            ColorSpec::Index(index) => Ok(Color::Indexed(*index)),
+            ColorSpec::Text(text) => {
+                let text = text.trim();
+                if let Ok(index) = text.parse::<u8>() {
+                    return Ok(Color::Indexed(index));
+                }
+                Color::from_str(text).map_err(|error| error.to_string())
+            }
+        }
+    }
+}
+
+/// A theme as the config writes it: `[themes.<name>]` starts from `base` — a built-in, or
+/// another user theme, `default` when unset — and overrides whichever colours it lists.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "snake_case")]
+pub struct UserTheme {
+    pub base: Option<String>,
+    pub bg: Option<ColorSpec>,
+    pub surface: Option<ColorSpec>,
+    pub text: Option<ColorSpec>,
+    pub accent: Option<ColorSpec>,
+    pub muted: Option<ColorSpec>,
+    pub border: Option<ColorSpec>,
+    pub error: Option<ColorSpec>,
+}
+
+impl UserTheme {
+    /// The concrete theme: the base with whatever this theme parses. A colour that cannot
+    /// be parsed costs that one colour rather than the whole config.
+    fn resolve(&self, name: &str, base: &Theme) -> Theme {
+        let mut theme = base.clone();
+        theme.name = name.to_string();
+        set(&mut theme.bg, self.bg.as_ref(), name, "bg");
+        set(&mut theme.surface, self.surface.as_ref(), name, "surface");
+        set(&mut theme.text, self.text.as_ref(), name, "text");
+        set(&mut theme.accent, self.accent.as_ref(), name, "accent");
+        set(&mut theme.muted, self.muted.as_ref(), name, "muted");
+        set(&mut theme.border, self.border.as_ref(), name, "border");
+        set(&mut theme.error, self.error.as_ref(), name, "error");
+        theme
+    }
+}
+
+fn set(target: &mut Color, value: Option<&ColorSpec>, name: &str, field: &str) {
+    let Some(value) = value else {
+        return;
+    };
+    match value.resolve() {
+        Ok(color) => *target = color,
+        Err(error) => {
+            log::warn!("自定义主题 `{name}` 的 {field} 无法解析（{error}），沿用 base 的颜色")
+        }
+    }
+}
+
 pub struct ThemeRegistry {
     extras: HashMap<String, Theme>,
 }
 
+/// The built-in a user theme starts from when it names no base.
+const DEFAULT_BASE: &str = "default";
+
 impl ThemeRegistry {
-    pub fn new(extras: Vec<Theme>) -> Self {
+    /// Built-ins plus the user's themes, which may build on a built-in or on another user
+    /// theme and override individual colours.
+    pub fn new(user: HashMap<String, UserTheme>) -> Self {
         let mode = *COLOR_MODE;
-        Self {
-            extras: extras
-                .into_iter()
-                .map(|t| {
-                    let t = t.downsampled(mode);
-                    (t.name.clone(), t)
-                })
-                .collect(),
+        let builtins = builtin_themes();
+        let mut extras: HashMap<String, Theme> = HashMap::new();
+        let mut pending: Vec<(String, UserTheme)> = user.into_iter().collect();
+
+        // Resolve in passes so a theme may start from one that was resolved before it; a
+        // base that never appears is a typo or a cycle, and is reported rather than looping.
+        while !pending.is_empty() {
+            let mut resolved: Vec<(String, Theme)> = Vec::new();
+            for (name, spec) in &pending {
+                let base = match spec.base.as_deref() {
+                    None => builtins.get(DEFAULT_BASE),
+                    Some(base) => extras.get(base).or_else(|| builtins.get(base)),
+                };
+                if let Some(base) = base {
+                    resolved.push((name.clone(), spec.resolve(name, base).downsampled(mode)));
+                }
+            }
+            if resolved.is_empty() {
+                for (name, spec) in &pending {
+                    log::warn!(
+                        "自定义主题 `{name}` 的 base `{}` 不存在或成环，已忽略",
+                        spec.base.as_deref().unwrap_or(DEFAULT_BASE)
+                    );
+                }
+                break;
+            }
+            pending.retain(|(name, _)| !resolved.iter().any(|(done, _)| done == name));
+            extras.extend(resolved);
         }
+
+        Self { extras }
     }
 
     pub fn get(&self, name: &str) -> Option<&Theme> {
@@ -419,4 +515,101 @@ impl ThemeRegistry {
 pub fn theme_fallback() -> &'static Theme {
     static FALLBACK: LazyLock<Theme> = LazyLock::new(|| Theme::default().downsampled(*COLOR_MODE));
     &FALLBACK
+}
+
+#[cfg(test)]
+mod user_theme_tests {
+    use super::*;
+
+    /// Go through the real loader: a config file carrying a `[themes.<name>]` table has to
+    /// load at all, which is what used to fail for the documented hex colours.
+    fn user(label: &str, source: &str) -> HashMap<String, UserTheme> {
+        let dir =
+            std::env::temp_dir().join(format!("pigma-theme-test-{}-{label}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create scratch dir");
+        let path = dir.join("config.toml");
+        std::fs::write(&path, source).expect("write config");
+
+        let themes = crate::config::Config::load_from(&path).themes;
+        let _ = std::fs::remove_dir_all(&dir);
+        themes
+    }
+
+    fn expected(color: &str) -> Color {
+        downsample_color(cstr(color), *COLOR_MODE)
+    }
+
+    fn builtin(name: &str) -> &'static Theme {
+        builtin_themes().get(name).expect("built in")
+    }
+
+    /// The formats `config.example.toml` documents — hex, a name, an index — are the ones
+    /// users write, and none of them used to survive deserialization.
+    #[test]
+    fn user_themes_start_from_a_base_and_override_what_they_list() {
+        let registry = ThemeRegistry::new(user(
+            "base",
+            r##"
+[themes.mine]
+base = "dracula"
+bg = "#0a0b10"
+accent = "red"
+border = 3
+"##,
+        ));
+
+        let theme = registry.get("mine").expect("registered");
+        assert_eq!(theme.name, "mine");
+        assert_eq!(theme.bg, expected("#0a0b10"));
+        assert_eq!(theme.accent, expected("red"));
+        assert_eq!(theme.border, Color::Indexed(3));
+        assert_eq!(
+            theme.text,
+            builtin("dracula").text,
+            "unlisted colours come from the base"
+        );
+        assert!(
+            registry.all_names().contains(&"mine"),
+            "and it can be selected"
+        );
+    }
+
+    /// No base means `default`, so a one-line theme is enough.
+    #[test]
+    fn a_user_theme_without_a_base_starts_from_default() {
+        let registry = ThemeRegistry::new(user("tiny", "[themes.tiny]\naccent = \"#ff0000\"\n"));
+        let theme = registry.get("tiny").expect("registered");
+        assert_eq!(theme.accent, expected("#ff0000"));
+        assert_eq!(theme.text, builtin("default").text);
+    }
+
+    /// One bad colour must not cost the rest of the theme, and a bad base must not be
+    /// registered at all — neither may take the config down with them.
+    #[test]
+    fn bad_values_are_contained() {
+        let registry = ThemeRegistry::new(user(
+            "bad",
+            r##"
+[themes.typo]
+base = "default"
+bg = "#nothex"
+
+[themes.orphan]
+base = "nope"
+accent = "#ffffff"
+"##,
+        ));
+
+        let typo = registry.get("typo").expect("registered");
+        assert_eq!(
+            typo.bg,
+            builtin("default").bg,
+            "the base value survives the typo"
+        );
+        assert!(
+            registry.get("orphan").is_none(),
+            "an unknown base is ignored"
+        );
+    }
 }

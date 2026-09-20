@@ -10,7 +10,7 @@ mod symbols;
 pub mod theme;
 mod titles;
 
-use std::{fs, path::Path};
+use std::{collections::HashMap, fs, path::Path};
 
 pub use border::*;
 pub use cache::*;
@@ -19,7 +19,7 @@ pub use navigation::*;
 pub use playerbar::*;
 use serde::{Deserialize, Serialize};
 pub use symbols::*;
-pub use theme::{Theme, ThemeRegistry, theme_fallback};
+pub use theme::{ColorSpec, Theme, ThemeRegistry, UserTheme, theme_fallback};
 pub use titles::*;
 
 use crate::{
@@ -59,8 +59,9 @@ pub struct Config {
     pub symbols: SymbolsConfig,
     pub border: BorderConfig,
     pub seek_interval_secs: u32,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub themes: Vec<Theme>,
+    /// User themes, `[themes.<name>]` in the config: a base plus the colours to override.
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    pub themes: HashMap<String, UserTheme>,
     pub logger: Logger,
     pub navigation: NavConfig,
     #[serde(default)]
@@ -219,7 +220,7 @@ impl Default for Config {
             playerbar: PlayerbarConfig::default(),
             titles: TitlesConfig::default(),
             source_fallback: SonarConfig::default(),
-            themes: Vec::new(),
+            themes: HashMap::new(),
             navigation: NavConfig::default(),
             columns: ColumnsConfig::default(),
             cli_status_template: default_cli_status_template(),
