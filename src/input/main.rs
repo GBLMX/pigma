@@ -11,6 +11,7 @@ use super::{
 };
 use crate::{
     app::App,
+    config::symbols,
     event::{AppEvent, CommandEvent, NavigationEvent, PlaybackEvent},
     playback::mode_icon,
     state::{ContentState, Page, TableMode},
@@ -258,12 +259,12 @@ pub(super) fn handle_main_mouse(app: &mut App, kind: MouseEventKind, col: u16, r
             MouseEventKind::ScrollUp => {
                 let new = (vol + 0.05).clamp(0.0, 1.0);
                 app.playback.set_volume(new);
-                app.toast(format!("   {:.0}%", new * 100.0));
+                app.toast(format!(" {}  {:.0}%", symbols().volume_high, new * 100.0));
             }
             MouseEventKind::ScrollDown => {
                 let new = (vol - 0.05).clamp(0.0, 1.0);
                 app.playback.set_volume(new);
-                app.toast(format!("   {:.0}%", new * 100.0));
+                app.toast(format!(" {}  {:.0}%", symbols().volume_high, new * 100.0));
             }
             _ => {}
         }

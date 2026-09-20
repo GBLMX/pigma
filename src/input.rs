@@ -15,6 +15,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEventKind};
 
 use crate::{
     app::App,
+    config::symbols,
     event::{AppEvent, CommandEvent, CommandPanelAction, NavigationEvent},
     state::Page,
 };
@@ -79,7 +80,7 @@ pub fn handle_key_events(app: &mut App, key_event: KeyEvent) -> color_eyre::Resu
         && key_event.modifiers == KeyModifiers::NONE
     {
         app.playback.clear_queue();
-        app.toast("   已清空播放队列".into());
+        app.toast(format!(" {}  已清空播放队列", symbols().queue_clear));
         if app.state.navigation.page == Page::Playlist {
             if let Some(key) = app.playback.switch_queue(false) {
                 app.state.navigation.playlist_selected =

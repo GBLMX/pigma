@@ -8,7 +8,7 @@ use ratatui::{
 use ratatui_image::{Resize, StatefulImage};
 
 use crate::{
-    config::{PlayerbarConfig, Theme},
+    config::{PlayerbarConfig, Theme, symbols},
     playback::{PlaybackState, mode_icon},
     ui::{gradient_line_gauge::GradientLineGauge, spinner::Spinner},
     utils::{format_duration_into, time::format_duration},
@@ -240,13 +240,7 @@ pub(super) fn draw_song_detail(f: &mut Frame, player: &PlaybackState, colors: &T
     }
 }
 pub(super) fn draw_volume(f: &mut Frame, player: &PlaybackState, colors: &Theme, area: Rect) {
-    let icon = if player.volume <= 0.30 {
-        ""
-    } else if player.volume <= 0.60 {
-        ""
-    } else {
-        ""
-    };
+    let icon = symbols().volume_icon(player.volume);
 
     f.render_widget(
         Paragraph::new(Line::from(Span::styled(

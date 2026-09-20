@@ -9,6 +9,7 @@ use unicode_width::UnicodeWidthStr;
 
 use super::BlockStyle;
 use crate::{
+    config::symbols,
     state::NavState,
     ui::{block::CornerBlock, styled_text},
 };
@@ -64,13 +65,19 @@ pub(super) fn draw(
                     .sum();
                 let padding_len = (inner.width as usize).saturating_sub(3 + name_width);
                 let mut line = Line::default();
-                line.push_span(Span::styled("\u{E0B2}", Style::default().fg(colors.accent)));
+                line.push_span(Span::styled(
+                    symbols().nav_capsule_left.as_str(),
+                    Style::default().fg(colors.accent),
+                ));
                 line.push_span(Span::styled(" ", capsule));
                 for s in name_spans {
                     line.push_span(Span::styled(s.content, capsule));
                 }
                 line.push_span(Span::styled(" ".repeat(padding_len), capsule));
-                line.push_span(Span::styled("\u{E0B0}", Style::default().fg(colors.accent)));
+                line.push_span(Span::styled(
+                    symbols().nav_capsule_right.as_str(),
+                    Style::default().fg(colors.accent),
+                ));
                 line
             } else {
                 let mut line = Line::default();
@@ -134,7 +141,10 @@ pub(super) fn draw_top(f: &mut Frame, nav: &mut NavState, bs: &BlockStyle<'_>, a
                     .add_modifier(Modifier::BOLD);
                 selected_start = Some(total);
                 selected_width = width + 4;
-                line.push_span(Span::styled("\u{E0B2}", Style::default().fg(colors.accent)));
+                line.push_span(Span::styled(
+                    symbols().nav_capsule_left.as_str(),
+                    Style::default().fg(colors.accent),
+                ));
                 line.push_span(Span::styled(" ", capsule));
             }
 
@@ -155,7 +165,10 @@ pub(super) fn draw_top(f: &mut Frame, nav: &mut NavState, bs: &BlockStyle<'_>, a
                     .fg(colors.surface)
                     .add_modifier(Modifier::BOLD);
                 line.push_span(Span::styled(" ", capsule));
-                line.push_span(Span::styled("\u{E0B0}", Style::default().fg(colors.accent)));
+                line.push_span(Span::styled(
+                    symbols().nav_capsule_right.as_str(),
+                    Style::default().fg(colors.accent),
+                ));
             }
             total += width + if is_selected { 4 } else { 0 };
         }

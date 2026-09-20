@@ -16,7 +16,7 @@ pub use search_core::{SearchEngine, SearchResults};
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
-    sync::{Arc, Mutex},
+    sync::{Arc, LazyLock, Mutex},
     time::{Duration, Instant},
 };
 
@@ -29,7 +29,7 @@ use splash::send_event;
 
 use crate::{
     cache::CacheManager,
-    config::{Config, ThemeRegistry},
+    config::{Config, ThemeRegistry, init_symbols, symbols},
     event::{AuthEvent, EventHandler},
     ipc::{IpcEvent, QueueSnapshot, StatusSnapshot},
     playback::{NCM_SEARCH_QUEUE_KEY, PlaybackEngine, THIRD_PARTY_QUEUE_KEY},
@@ -39,7 +39,7 @@ use crate::{
         SearchState, SplashState, State, TableMode,
     },
     ui,
-    utils::{path::expand_tilde, pigma_cache_dir, pigma_config_dir},
+    utils::{path::expand_tilde, pigma_cache_dir, pigma_config_dir, terminal::BACKGROUND},
 };
 
 /// Main application state and entry point for the pigma TUI.
@@ -90,6 +90,14 @@ impl App {
     /// pass `false` for headless daemon mode.
     pub fn new(config: Config, with_terminal: bool) -> color_eyre::Result<Self> {
         let border = config.border.clone();
+
+        // Resolve the appearance once, up front: the glyph set comes from the config, and
+        // the background probe asks the terminal directly, which has to happen before the
+        // event loop starts consuming input.
+        init_symbols(&config.symbols);
+        if with_terminal {
+            LazyLock::force(&BACKGROUND);
+        }
 
         let events = EventHandler::new(with_terminal);
         let tx = events.sender();
@@ -258,7 +266,7 @@ impl App {
     pub fn adjust_volume(&mut self, delta: f64) {
         let new = (self.playback.state.volume + delta).clamp(0.0, 1.0);
         self.playback.set_volume(new);
-        self.toast(format!("   {:.0}%", new * 100.0));
+        self.toast(format!(" {}  {:.0}%", symbols().volume_high, new * 100.0));
     }
 
     /// Refresh the IPC status snapshot from the live playback state. The status
@@ -355,7 +363,11 @@ impl App {
                 } else if let Some(volume) = absolute {
                     let volume = volume.clamp(0.0, 1.0);
                     self.playback.set_volume(volume);
-                    self.toast(format!("   {:.0}%", volume * 100.0));
+                    self.toast(format!(
+                        " {}  {:.0}%",
+                        symbols().volume_high,
+                        volume * 100.0
+                    ));
                 }
             }
             IpcEvent::Mode => {

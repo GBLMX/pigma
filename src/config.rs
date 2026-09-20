@@ -6,6 +6,7 @@ mod cache;
 mod column;
 mod navigation;
 mod playerbar;
+mod symbols;
 pub mod theme;
 mod titles;
 
@@ -17,10 +18,14 @@ pub use column::*;
 pub use navigation::*;
 pub use playerbar::*;
 use serde::{Deserialize, Serialize};
+pub use symbols::*;
 pub use theme::{Theme, ThemeRegistry, theme_fallback};
 pub use titles::*;
 
-use crate::{logger::Logger, utils, utils::GradientPreset};
+use crate::{
+    logger::Logger,
+    utils::{self, GradientPreset, terminal::BackgroundMode},
+};
 
 /// Schema version of `config.toml` written by this build.
 ///
@@ -42,6 +47,16 @@ pub struct Config {
     #[serde(default = "unversioned_config_version")]
     pub config_version: u32,
     pub default_theme: String,
+    /// Theme used when the terminal background is light; `default_theme` is the dark slot.
+    #[serde(default)]
+    pub light_theme: Option<String>,
+    /// Which background the theme slots are chosen for: `auto` (follow the terminal),
+    /// `dark`, or `light`.
+    #[serde(default)]
+    pub background: BackgroundMode,
+    /// Glyph preset and per-key overrides for terminals without a Nerd Font.
+    #[serde(default)]
+    pub symbols: SymbolsConfig,
     pub border: BorderConfig,
     pub seek_interval_secs: u32,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -188,6 +203,9 @@ impl Default for Config {
         Self {
             config_version: CONFIG_VERSION,
             default_theme: Theme::default().name,
+            light_theme: None,
+            background: BackgroundMode::default(),
+            symbols: SymbolsConfig::default(),
             border: BorderConfig::default(),
             seek_interval_secs: 15,
             lyric_gradient: GradientPreset::default(),

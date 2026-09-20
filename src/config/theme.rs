@@ -1,7 +1,9 @@
-use std::{collections::HashMap, str::FromStr, sync::OnceLock};
+use std::{collections::HashMap, str::FromStr, sync::LazyLock};
 
 use ratatui::style::Color;
 use serde::{Deserialize, Serialize};
+
+use crate::utils::terminal::{COLOR_MODE, ColorMode, rgb_to_16, rgb_to_256};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -21,6 +23,22 @@ fn cstr(s: &str) -> Color {
         log::warn!("Invalid color '{}' in theme, using fallback: {}", s, e);
         Color::Reset
     })
+}
+
+/// Map a true-color value onto what the terminal can display.
+///
+/// Named colors and palette indices are already terminal-relative and pass through;
+/// only `Rgb` needs mapping, so a 256-color terminal stops receiving true-color escapes
+/// it cannot render.
+fn downsample_color(color: Color, mode: ColorMode) -> Color {
+    let Color::Rgb(r, g, b) = color else {
+        return color;
+    };
+    match mode {
+        ColorMode::TrueColor => color,
+        ColorMode::Ansi256 => Color::Indexed(rgb_to_256(r, g, b)),
+        ColorMode::Basic => Color::Indexed(rgb_to_16(r, g, b)),
+    }
 }
 
 impl Default for Theme {
@@ -287,6 +305,26 @@ impl Theme {
         }
     }
 
+    /// Convert every true-color token to the terminal's palette.
+    ///
+    /// Applied once when a theme is loaded, so the render path keeps working with plain
+    /// ratatui colors and nothing has to know about the terminal's capabilities.
+    pub fn downsampled(self, mode: ColorMode) -> Self {
+        if mode == ColorMode::TrueColor {
+            return self;
+        }
+        Self {
+            name: self.name,
+            bg: downsample_color(self.bg, mode),
+            surface: downsample_color(self.surface, mode),
+            text: downsample_color(self.text, mode),
+            accent: downsample_color(self.accent, mode),
+            muted: downsample_color(self.muted, mode),
+            border: downsample_color(self.border, mode),
+            error: downsample_color(self.error, mode),
+        }
+    }
+
     /// Look up a theme color field by name (e.g. "accent", "muted", "error", "border").
     pub fn field_color(&self, name: &str) -> Color {
         match name {
@@ -305,9 +343,10 @@ impl Theme {
     }
 }
 
+/// Built-in themes, resolved once and down-sampled to the terminal's palette.
 fn builtin_themes() -> &'static HashMap<String, Theme> {
-    static THEMES: OnceLock<HashMap<String, Theme>> = OnceLock::new();
-    THEMES.get_or_init(|| {
+    static THEMES: LazyLock<HashMap<String, Theme>> = LazyLock::new(|| {
+        let mode = *COLOR_MODE;
         let themes: Vec<Theme> = vec![
             Theme::default(),
             Theme::terminal(),
@@ -333,11 +372,13 @@ fn builtin_themes() -> &'static HashMap<String, Theme> {
         themes
             .into_iter()
             .map(|t| {
+                let t = t.downsampled(mode);
                 let n = t.name.clone();
                 (n, t)
             })
             .collect()
-    })
+    });
+    &THEMES
 }
 
 pub struct ThemeRegistry {
@@ -346,8 +387,15 @@ pub struct ThemeRegistry {
 
 impl ThemeRegistry {
     pub fn new(extras: Vec<Theme>) -> Self {
+        let mode = *COLOR_MODE;
         Self {
-            extras: extras.into_iter().map(|t| (t.name.clone(), t)).collect(),
+            extras: extras
+                .into_iter()
+                .map(|t| {
+                    let t = t.downsampled(mode);
+                    (t.name.clone(), t)
+                })
+                .collect(),
         }
     }
 
@@ -369,6 +417,6 @@ impl ThemeRegistry {
 /// Last-resort hardcoded theme used when neither the configured theme nor the
 /// built-in `default` theme is available.
 pub fn theme_fallback() -> &'static Theme {
-    static FALLBACK: OnceLock<Theme> = OnceLock::new();
-    FALLBACK.get_or_init(Theme::default)
+    static FALLBACK: LazyLock<Theme> = LazyLock::new(|| Theme::default().downsampled(*COLOR_MODE));
+    &FALLBACK
 }

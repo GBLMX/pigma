@@ -1,17 +1,6 @@
 use ratatui::{buffer::Buffer, layout::Rect, style::Style, widgets::Widget};
 
-const BLOCKS_FRAMES: &[&str] = &[
-    "▰▱▱▱▱▱▱",
-    "▰▰▱▱▱▱▱",
-    "▰▰▰▱▱▱▱",
-    "▰▰▰▰▱▱▱",
-    "▰▰▰▰▰▱▱",
-    "▰▰▰▰▰▰▱",
-    "▰▰▰▰▰▰▰",
-    "▰▱▱▱▱▱▱",
-];
-
-const SPEED: u64 = 3;
+use crate::config::symbols;
 
 pub struct Spinner {
     tick: u64,
@@ -41,15 +30,18 @@ impl Spinner {
 
 impl Widget for Spinner {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let frame_idx = (self.tick / SPEED) as usize % BLOCKS_FRAMES.len();
-        let frame = BLOCKS_FRAMES[frame_idx];
+        // Frames and their speed come from the configured symbol preset; a cell is drawn
+        // as filled when it matches the frame's first character, which holds for the
+        // block bar and the ascii bar alike.
+        let frame = symbols().activity_frame(self.tick);
+        let filled = frame.chars().next();
 
         for (i, ch) in frame.chars().enumerate() {
             let x = area.x + i as u16;
             if x >= area.right() {
                 break;
             }
-            let style = if ch == '▰' {
+            let style = if Some(ch) == filled {
                 self.filled_color
             } else {
                 self.empty_color
