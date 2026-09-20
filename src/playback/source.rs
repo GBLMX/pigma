@@ -35,6 +35,16 @@ const PREBUFFER_BYTES: u64 = 512 * 1024;
 /// wait forever — start playback anyway once the timeout is reached.
 const PREBUFFER_TIMEOUT: Duration = Duration::from_secs(8);
 
+/// Decide whether the stream progress callback should record the download-cache entry.
+///
+/// The entry may only be written once the file is complete — an entry written mid-download
+/// lists a truncated file as playable and lets eviction delete a file that is still being
+/// written — and only once per stream. NCM songs carry no sonar metadata (`msong = None`),
+/// which is not a reason to skip the entry altogether.
+fn should_record_cache(mark_cache: bool, complete: bool, sent: &AtomicBool) -> bool {
+    mark_cache && complete && !sent.swap(true, Ordering::SeqCst)
+}
+
 /// Buffer state shared with the stream download progress callback, used to judge whether
 /// enough has been buffered before starting playback.
 #[derive(Clone)]
@@ -126,14 +136,16 @@ impl AudioSource {
         let completed = progress.completed.clone();
         let settings = Settings::default().on_progress(move |_, state, _| {
             buffered.store(state.current_position, Ordering::SeqCst);
-            if state.phase == StreamPhase::Complete {
+            let complete = state.phase == StreamPhase::Complete;
+            if complete {
                 completed.store(true, Ordering::SeqCst);
             }
-            if mark_cache
-                && !sent.swap(true, Ordering::SeqCst)
-                && let Some(m) = msong.take()
-            {
-                cache.mark_cached(&song, ext, Some(m));
+            // Record the cache entry only once the download has finished: an entry written
+            // mid-download would list a truncated file as playable and would let eviction
+            // delete a file that is still being written. NCM songs pass `msong = None`, so
+            // their entry is written without sonar metadata instead of being skipped.
+            if should_record_cache(mark_cache, complete, &sent) {
+                cache.mark_cached(&song, ext, msong.take());
                 let _ = event_tx.send(PlaybackEvent::Cached(song.id).into());
             }
         });
@@ -432,5 +444,35 @@ impl AudioSource {
         } else {
             Err("NCM网络错误，2次重试失败".into())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A download-cache entry is recorded on completion only, and only once per stream:
+    /// recording mid-download would list a truncated file as playable, and skipping the
+    /// entry for NCM songs (which have no sonar metadata) leaves them unmanaged on disk.
+    #[test]
+    fn cache_entry_is_recorded_only_after_completion() {
+        let sent = AtomicBool::new(false);
+
+        assert!(
+            !should_record_cache(true, false, &sent),
+            "mid-download must not write an index entry"
+        );
+        assert!(
+            !should_record_cache(false, true, &sent),
+            "save_on_play = false must not write an index entry"
+        );
+        assert!(
+            should_record_cache(true, true, &sent),
+            "a completed download must be recorded"
+        );
+        assert!(
+            !should_record_cache(true, true, &sent),
+            "a repeated completion callback must not record twice"
+        );
     }
 }
