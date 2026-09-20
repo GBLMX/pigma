@@ -32,6 +32,14 @@ cli_status_format = "plain"
 # 歌词渐变效果: "rainbow", "fire", "ocean", "forest", "sunset", "neon", "pastel", "monochrome"
 lyric_gradient = "rainbow"
 
+# 歌词显示样式:
+#   "window"   —— 滚动窗口(默认):当前行上下若干行 + 卡拉OK填充
+#   "one_line" —— 一次一行:只显示当前行、居中(也接受 "single")
+#   "flow"     —— 颜色流动:渐变沿文字流动并随帧推进,上下行用同色系渐隐
+#   "plain"    —— 纯滚动列表,无高亮
+# 也可在应用里 `:lyrics <样式>` 切换(输入时 Tab 可补全)
+lyric_style = "window"
+
 # 代理地址, 支持 http:// https:// socks5://
 proxy = "http://127.0.0.1:7890"
 

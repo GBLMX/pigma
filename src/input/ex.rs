@@ -10,6 +10,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use crate::{
     app::App,
     cli::parse_volume,
+    config::LyricStyle,
     event::{AppEvent, AuthEvent, NavigationEvent},
     ipc::MsgAction,
     state::Page,
@@ -17,9 +18,10 @@ use crate::{
 };
 
 /// Command names the prompt knows, used for `Tab` completion and suggestions.
-const COMMANDS: [&str; 16] = [
+const COMMANDS: [&str; 17] = [
     "help",
     "layout",
+    "lyrics",
     "login",
     "logout",
     "pitch",
@@ -44,6 +46,7 @@ pub(super) enum ExCommand {
     Login,
     Save,
     Theme(String),
+    LyricStyle(String),
     Volume(String),
     Seek(String),
     Visualizer(bool),
@@ -133,6 +136,7 @@ impl ExCommand {
                 Ok(Self::SmsLogin { phone, code })
             }
             "theme" => Ok(Self::Theme(required("主题名")?)),
+            "lyrics" => Ok(Self::LyricStyle(required("歌词样式")?)),
             "volume" => Ok(Self::Volume(required("音量")?)),
             "seek" => Ok(Self::Seek(required("跳转位置")?)),
             "visualizer" => Ok(Self::Visualizer(parse_on_off(args.first().copied())?)),
@@ -172,6 +176,7 @@ fn candidate_names(head: &str, typed: &str, themes: &[&str]) -> Vec<String> {
             "theme" => themes.to_vec(),
             "visualizer" | "pitch" => vec!["off", "on"],
             "layout" => vec!["default", "minimal", "modern"],
+            "lyrics" => LyricStyle::ALL.iter().map(|s| s.name()).collect(),
             _ => Vec::new(),
         }
     };
@@ -299,6 +304,18 @@ fn execute(app: &mut App, command: ExCommand) -> Result<(), String> {
             app.config.default_theme = name.clone();
             app.config.save();
             app.toast(format!("主题: {name}"));
+        }
+        ExCommand::LyricStyle(name) => {
+            let Some(style) = LyricStyle::parse(&name) else {
+                let known: Vec<&str> = LyricStyle::ALL.iter().map(|s| s.name()).collect();
+                return Err(format!(
+                    "未知歌词样式: {name}（可用: {}）",
+                    known.join(" / ")
+                ));
+            };
+            app.config.lyric_style = style;
+            app.config.save();
+            app.toast(format!("歌词样式: {} — {}", style.name(), style.describe()));
         }
         ExCommand::Volume(value) => match parse_volume(&value) {
             Err(error) => return Err(error.to_string()),

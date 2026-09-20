@@ -203,6 +203,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
                         &app.playback.state,
                         &bs,
                         app.config.lyric_gradient,
+                        app.config.lyric_style,
                         &app.config.titles.lyrics,
                         lay.content,
                     );

@@ -4,6 +4,7 @@
 mod border;
 mod cache;
 mod column;
+mod lyrics;
 mod navigation;
 mod playerbar;
 mod symbols;
@@ -15,6 +16,7 @@ use std::{collections::HashMap, fs, path::Path};
 pub use border::*;
 pub use cache::*;
 pub use column::*;
+pub use lyrics::*;
 pub use navigation::*;
 pub use playerbar::*;
 use serde::{Deserialize, Serialize};
@@ -75,6 +77,9 @@ pub struct Config {
     /// Lyrics highlight gradient style: warm / cubehelix / rainbow / spectral / viridis / turbo.
     #[serde(default)]
     pub lyric_gradient: GradientPreset,
+    /// How the lyrics page draws: `window`, `one_line`, `flow` or `plain`.
+    #[serde(default)]
+    pub lyric_style: LyricStyle,
     /// Proxy address (leave empty to disable the proxy).
     #[serde(default = "default_proxy")]
     pub proxy: String,
@@ -210,6 +215,7 @@ impl Default for Config {
             border: BorderConfig::default(),
             seek_interval_secs: 15,
             lyric_gradient: GradientPreset::default(),
+            lyric_style: LyricStyle::default(),
             proxy: default_proxy(),
             proxy_target: default_proxy_target(),
             search_limit: default_search_limit(),
