@@ -158,12 +158,17 @@ fn render_search(f: &mut Frame, search: &SearchState, colors: &Theme, area: Rect
         " 搜索歌曲..."
     };
 
+    // Same as the command line: the field is `accent` too, so a text input never looks
+    // like it belongs to the terminal rather than to the theme.
     let display = if value.is_empty() {
-        Line::from(Span::styled(placeholder, Style::default().fg(colors.muted)))
+        Line::from(Span::styled(
+            placeholder,
+            Style::default().fg(colors.accent),
+        ))
     } else {
         Line::from(Span::styled(
             value.as_str(),
-            Style::default().fg(colors.text),
+            Style::default().fg(colors.accent),
         ))
     };
 
@@ -188,46 +193,98 @@ fn render_search(f: &mut Frame, search: &SearchState, colors: &Theme, area: Rect
 }
 
 #[cfg(test)]
-mod prompt_colour {
+mod input_colour {
     use ratatui::{Terminal, backend::TestBackend};
 
     use super::*;
 
-    /// Everything the command line shows is the same blue as the `:` in front of it. The
+    /// Every built-in theme, so "the input uses the theme's own accent" is checked against
+    /// all of them rather than against whichever one happened to be open.
+    fn themes() -> Vec<(String, Theme)> {
+        let registry = crate::config::ThemeRegistry::new(Default::default());
+        registry
+            .all_names()
+            .iter()
+            .map(|name| {
+                (
+                    (*name).to_string(),
+                    registry.get(name).cloned().unwrap_or_default(),
+                )
+            })
+            .collect()
+    }
+
+    /// Everything the command line shows is the same colour as the `:` in front of it: the
     /// typed text used to be a dark grey and the hint `muted`, which read as two unrelated
-    /// greys right next to the coloured prompt.
+    /// greys next to the coloured prompt.
     #[test]
-    fn the_text_after_the_colon_is_accent_coloured() {
-        let colors = Theme::default();
-        for typed in ["", "theme github-light"] {
-            let mut prompt = PromptState::default();
-            prompt.input.value = typed.to_string();
+    fn the_command_line_uses_the_themes_accent() {
+        for (name, colors) in themes() {
+            for typed in ["", "theme github-light"] {
+                let mut prompt = PromptState::default();
+                prompt.input.value = typed.to_string();
 
-            let mut terminal = Terminal::new(TestBackend::new(40, 1)).expect("backend");
-            terminal
-                .draw(|f| render_prompt(f, &prompt, &colors, f.area()))
-                .expect("draw");
-            let buffer = terminal.backend().buffer().clone();
+                let mut terminal = Terminal::new(TestBackend::new(40, 1)).expect("backend");
+                terminal
+                    .draw(|f| render_prompt(f, &prompt, &colors, f.area()))
+                    .expect("draw");
+                let buffer = terminal.backend().buffer().clone();
 
-            assert_eq!(buffer[(0, 0)].fg, colors.accent, "the colon itself");
-            let mut cells = 0;
-            // x = 0 is the colon; everything after it belongs to the command line.
-            for x in 1..buffer.area.width {
-                let cell = &buffer[(x, 0)];
-                if cell.symbol().trim().is_empty() {
-                    continue;
+                assert_eq!(buffer[(0, 0)].fg, colors.accent, "{name}: the colon itself");
+                let mut cells = 0;
+                // x = 0 is the colon; everything after it belongs to the command line.
+                for x in 1..buffer.area.width {
+                    let cell = &buffer[(x, 0)];
+                    if cell.symbol().trim().is_empty() {
+                        continue;
+                    }
+                    assert_eq!(
+                        cell.fg, colors.accent,
+                        "{name}, {typed:?}: ({x},0) draws {:?}, not the prompt colour",
+                        cell.fg
+                    );
+                    cells += 1;
                 }
-                assert_eq!(
-                    cell.fg, colors.accent,
-                    "typed {typed:?}: ({x},0) draws {:?}, not the prompt colour",
-                    cell.fg
-                );
-                cells += 1;
+                assert!(cells > 0, "{name}, {typed:?}: nothing after the colon");
             }
-            assert!(
-                cells > 0,
-                "typed {typed:?}: nothing rendered after the colon"
-            );
+        }
+    }
+
+    /// The search box gets the same treatment, so no text field falls back to the terminal's
+    /// own foreground.
+    #[test]
+    fn the_search_box_uses_the_themes_accent() {
+        for (name, colors) in themes() {
+            for typed in ["", "taylor swift"] {
+                let mut search = SearchState {
+                    active: true,
+                    ..SearchState::default()
+                };
+                search.input.value = typed.to_string();
+
+                let mut terminal = Terminal::new(TestBackend::new(60, 1)).expect("backend");
+                terminal
+                    .draw(|f| render_search(f, &search, &colors, f.area()))
+                    .expect("draw");
+                let buffer = terminal.backend().buffer().clone();
+
+                let mut cells = 0;
+                // 0 is the magnifier and the right end holds the provider name, which has
+                // its own colour.
+                for x in 2..56 {
+                    let cell = &buffer[(x, 0)];
+                    if cell.symbol().trim().is_empty() {
+                        continue;
+                    }
+                    assert_eq!(
+                        cell.fg, colors.accent,
+                        "{name}, {typed:?}: ({x},0) draws {:?}",
+                        cell.fg
+                    );
+                    cells += 1;
+                }
+                assert!(cells > 0, "{name}, {typed:?}: the field rendered nothing");
+            }
         }
     }
 }
