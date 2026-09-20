@@ -8,9 +8,9 @@ use ncm_api::SongInfo;
 
 use super::{App, send_event};
 use crate::{
-    event::{NavigationEvent, PlaybackEvent},
+    event::{AppEvent, NavigationEvent, PlaybackEvent},
     playback::{CoverState, NCM_SEARCH_QUEUE_KEY, THIRD_PARTY_QUEUE_KEY, parse_lyric_lines},
-    state::{ContentState, PaginationInfo},
+    state::{ContentState, PaginationInfo, mv},
 };
 
 impl App {
@@ -332,6 +332,29 @@ impl App {
             // Clear the cover so a new song never shows the previous one's
             // cover while its own cover is loading (or missing).
             self.playback.state.cover.clear();
+
+            // The MV poster travels with the song the way the lyrics and the cover do: it is
+            // fetched when the track starts, and every failure — no MV on the song, a detail
+            // request that errors, a poster that cannot be downloaded — is silent, because the
+            // panel is decoration and the page says what it has either way. `clear` bumps the
+            // generation first, so a poster still on its way when the song changes lands in the
+            // empty slot instead of beside the new song's lyrics.
+            mv::clear();
+            if song.mv != 0 {
+                let client = self.service.client().clone();
+                let http = self.cover_http.clone();
+                let picker = self.picker.clone();
+                let sender = self.state.events.sender();
+                let generation = mv::generation();
+                let mv_id = song.mv;
+                tokio::spawn(async move {
+                    if mv::fetch_and_install(&client, &http, mv_id, &picker, generation).await {
+                        // The frame on screen was drawn without a poster; only a wake-up gets it
+                        // drawn again.
+                        send_event(&sender, AppEvent::Repaint.into());
+                    }
+                });
+            }
 
             // Load cover image
             let song_id = song.id;
@@ -712,5 +735,90 @@ mod local_lyrics_tests {
         assert!(load_local_lyrics(&audio).is_none());
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+}
+
+#[cfg(test)]
+mod mv_panel_hook {
+    use std::time::Duration;
+
+    use super::*;
+    use crate::{
+        config::{Config, ProxyTarget},
+        state::mv,
+    };
+
+    /// A song the hook can be started on: only its id and whether it has an MV matter here.
+    fn song(id: u64, mv: u64) -> Arc<SongInfo> {
+        Arc::new(SongInfo {
+            id,
+            name: "test".into(),
+            singer: String::new(),
+            artist_id: 0,
+            album: String::new(),
+            album_id: 0,
+            pic_url: String::new(),
+            duration: 60_000,
+            mv,
+            copyright: ncm_api::SongCopyright::Free,
+            local_path: None,
+        })
+    }
+
+    /// The hook that starts a track owns the panel: it drops the poster the previous song left
+    /// and, when the new song has an MV, asks for its own — and a request that cannot be
+    /// answered leaves the slot as empty as it was. Every request here goes to the discard port,
+    /// which is what a machine with no network looks like to the app.
+    #[tokio::test]
+    async fn a_track_change_clears_and_reloads_the_panel() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let _turn = mv::fixtures::turn().await;
+
+        let config = Config {
+            proxy: "http://127.0.0.1:9".into(),
+            proxy_target: ProxyTarget::Both,
+            ..Config::default()
+        };
+        let mut app = App::new(config, false).expect("app");
+
+        // A song with an MV, and the poster the song before it left behind.
+        mv::clear();
+        app.playback.state.current_song = Some(song(7, 7));
+        assert!(mv::install(
+            mv::generation(),
+            mv::fixtures::panel(&app.picker)
+        ));
+        let before = mv::generation();
+
+        app.handle_playback_started();
+
+        assert!(mv::panel().is_none(), "the old poster must be dropped");
+        let after = mv::generation();
+        assert!(after > before, "and the load must belong to the new song");
+
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert!(
+            mv::panel().is_none(),
+            "a detail request that is never answered installs nothing"
+        );
+        assert_eq!(
+            mv::generation(),
+            after,
+            "and a failed load is not a track change"
+        );
+
+        // A song with no MV starts no load, and still leaves no poster behind.
+        app.playback.state.current_song = Some(song(8, 0));
+        assert!(mv::install(
+            mv::generation(),
+            mv::fixtures::panel(&app.picker)
+        ));
+        app.handle_playback_started();
+        assert!(
+            mv::panel().is_none(),
+            "a song with no MV must clear the slot"
+        );
+
+        mv::clear();
     }
 }

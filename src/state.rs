@@ -6,6 +6,7 @@ pub mod command;
 pub mod content;
 pub mod help;
 pub mod login;
+pub mod mv;
 pub mod navigation;
 pub mod page;
 pub mod prompt;
