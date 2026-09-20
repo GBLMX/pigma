@@ -17,6 +17,7 @@ pigma 的核心目标是把网易云音乐和本地音频播放的体验带进�
 <summary><b>📖 点击展开/折叠目录 (Table of Contents)</b></summary>
 
 - [pigma](#pigma)
+  - [本仓库与原作者](#本仓库与原作者)
   - [Features](#features)
   - [Preview](#preview)
   - [Install](#install)
@@ -48,6 +49,24 @@ pigma 的核心目标是把网易云音乐和本地音频播放的体验带进�
 
 </details>
 
+
+### 本仓库与原作者
+
+| | |
+| --- | --- |
+| **上游** | [akirco/pigma](https://github.com/akirco/pigma) —— 作者 akirco，Apache-2.0。原始版权与许可声明见 [LICENSE](./LICENSE)，**未作改动** |
+| **本仓库** | GBLMX 的 fork，由 GBLMX 维护。这里的提交、[releases](https://github.com/GBLMX/pigma/releases) 与 AUR 包 `pigma-gblmx-bin` 都由本仓库负责，与原作者无关；上游是否采纳这些改动、上游自身的维护计划，本仓库不代表也不承诺 |
+| **向上游贡献** | 上游的 [CONTRIBUTING](./CONTRIBUTING.md) 仍然适用。本仓库的 `main` 已与上游分叉，向上游提 PR 请从独立分支（如 `feat/...`）出发，不要从 `main` |
+
+相对上游 `21c380d`（v0.2.14），本仓库自带的改动：
+
+- **构建**：两个 crate 收进一个 Cargo workspace —— 依赖版本统一（rustls 三份规格合一）、`cargo test/clippy --workspace` 覆盖全部成员，CI 增加 ubuntu 与成员检查
+- **修复**：下载缓存条目只在流完成后记录 · 默认日志级别改为 INFO · 清空的 `sections`/`columns` 序列化不再 panic · eapi 非 2xx 只告警 · IPC socket 权限收窄到属主 · `.gitignore` 忽略调试残留
+- **配置**：`config_version` 版本号，旧文件加载时自动升级并把原文件备份为 `config.toml.bak-v0`
+- **播放**：解析失败按类型分类（网络失败重试一次、无版权/无地址直接走兜底源），不再靠错误字符串前缀判断
+- **外观**：符号预设（`nerd`／`unicode`／`ascii`，不装 Nerd Font 也能用）· 按终端能力降级真彩色 · 依据终端背景自动选明/暗主题
+- **新增**：频谱可视化 · 音高读数（自实现 YIN，无新增依赖）· 鼠标交互（点击 seek／切区／起播／静音）· vim 风格 `:` 命令行与 Tab 补全
+- **打包**：AUR `pigma-gblmx-bin`（独立包名，发布时带真实校验和）
 
 **注意：**
 

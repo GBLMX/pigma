@@ -5,7 +5,7 @@ edition = "2024"
 description = "A netease cloud music client (GBLMX fork)"
 repository = "https://github.com/GBLMX/pigma"
 license = "Apache-2.0"
-# authors = ["akirco <earlfx@163.com>"]
+authors = ["akirco <earlfx@163.com>", "GBLMX <GBLMX@users.noreply.github.com>"]
 
 [workspace]
 # First-party crates live in one workspace so a single lockfile resolves them and
