@@ -1,7 +1,7 @@
 # Maintainer: GB LMX <GBLMX@users.noreply.github.com>
 pkgname=pigma-gblmx-bin
 _pkgname=pigma
-pkgver=0.2.14.gblmx.9
+pkgver=0.2.14.gblmx.10
 pkgrel=1
 pkgdesc="A netease cloud music client (GBLMX fork build)"
 arch=('x86_64')
@@ -14,7 +14,7 @@ conflicts=("${_pkgname}")
 source=("${_pkgname}-${pkgver}.tar.gz::${url}/releases/download/v${pkgver}/${_pkgname}-x86_64-unknown-linux-gnu.tar.gz")
 # Checksum of the release asset referenced above; the release workflow recomputes it from
 # the published asset on every tag, so it cannot go stale in the AUR package.
-sha256sums=('d14c2a58a36d6efcf7b697a1d20e13f025c8f7139a5fc2673171028fee9159aa')
+sha256sums=('a724ed0e03b7ef37616491360c003538197417ca543a69c799ffcafd2c6800e5')
 
 package() {
     install -Dm755 "${srcdir}/${_pkgname}" "${pkgdir}/usr/bin/${_pkgname}"
