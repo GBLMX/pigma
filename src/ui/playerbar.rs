@@ -141,8 +141,10 @@ mod tests {
             tick: 0,
         };
 
-        let mut player = PlaybackState::default();
-        player.visualizer = vec![1.0; BANDS];
+        let player = PlaybackState {
+            visualizer: vec![1.0; BANDS],
+            ..PlaybackState::default()
+        };
 
         let mut config = PlayerbarConfig::default();
         config.visible.visualizer = true;
