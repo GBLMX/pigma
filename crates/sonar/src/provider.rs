@@ -1,17 +1,17 @@
 use std::sync::Arc;
 
-use crate::error::Result;
-use crate::model::{
-    PlayUrlResult, ProxyKind, Quality, SearchQuery, SearchResult, SonarSource, Song,
+use crate::{
+    error::Result,
+    model::{PlayUrlResult, ProxyKind, Quality, SearchQuery, SearchResult, SonarSource, Song},
+    search::SearchConfig,
 };
-use crate::search::SearchConfig;
 use async_trait::async_trait;
 use reqwest::Client;
 
-use self::bilivideo::BiliVideoProvider;
-use self::kugou::KugouProvider;
-use self::kuwo::KuwoProvider;
-use self::youtube::YoutubeProvider;
+use self::{
+    bilivideo::BiliVideoProvider, kugou::KugouProvider, kuwo::KuwoProvider,
+    youtube::YoutubeProvider,
+};
 
 // Priorities are declared per source in `SonarSource::default_priority` and applied
 // through `SonarProvider::priority`'s default implementation.

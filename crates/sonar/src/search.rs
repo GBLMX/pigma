@@ -1,6 +1,8 @@
-use crate::error::Result;
-use crate::model::{ProxyKind, SearchQuery, SearchResult, SonarSource, Song};
-use crate::provider::{SonarProvider, build_providers};
+use crate::{
+    error::Result,
+    model::{ProxyKind, SearchQuery, SearchResult, SonarSource, Song},
+    provider::{SonarProvider, build_providers},
+};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 

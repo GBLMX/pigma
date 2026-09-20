@@ -14,10 +14,10 @@ use super::{
     scrollbar::{calc_scroll_offset, render_scrollbar},
     title::render_title,
 };
-use crate::state::QueueHits;
 use crate::{
     config::Theme,
     playback::PlaybackEngine,
+    state::QueueHits,
     utils::{format::clip_long_text, format_duration_into},
 };
 

@@ -1,6 +1,8 @@
-use std::env;
-use std::io::{BufRead, BufReader, Write};
-use std::sync::LazyLock;
+use std::{
+    env,
+    io::{BufRead, BufReader, Write},
+    sync::LazyLock,
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -404,8 +406,7 @@ fn detect_background() -> Background {
 /// give up after a frame instead of blocking startup.
 #[cfg(all(unix, target_os = "linux"))]
 fn probe_tty_background() -> Option<f64> {
-    use std::fs::OpenOptions;
-    use std::os::fd::AsRawFd;
+    use std::{fs::OpenOptions, os::fd::AsRawFd};
 
     const REPLY_TIMEOUT_MS: libc::c_int = 120;
 
