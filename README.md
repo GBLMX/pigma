@@ -25,6 +25,7 @@ pigma 的核心目标是把网易云音乐和本地音频播放的体验带进�
     - [From source (cargo)](#from-source-cargo)
     - [Build from source](#build-from-source)
   - [Usage](#usage)
+    - [命令模式（vim 风格）](#命令模式vim-风格)
     - [CLI 控制（status / msg）](#cli-控制status--msg)
       - [直接走 Unix socket（socat / 脚本）](#直接走-unix-socketsocat--脚本)
       - [Windows：命名管道控制（PowerShell）](#windows命名管道控制powershell)
@@ -204,6 +205,27 @@ cargo build --release
 | m             | 切换播放模式（适用于我的歌单或我喜欢的音乐） |
 | u             |  上传`本地音乐`或`下载管理`的音频到音乐云盘  |
 | g/G           |                列表顶部/底部                 |
+| v             |        频谱显示开关（同 `:visualizer on`）     |
+| V             |          音高读数开关（同 `:pitch on`）        |
+| :             |      命令模式（vim 风格，Tab 补全，见下节）     |
+
+### 命令模式（vim 风格）
+
+按 `:` 打开命令行：`Enter` 执行、`Esc` 取消、`Tab` 补全（命令名、`:theme` 的主题名、`on`/`off`）。
+结果与错误都以 toast 回报，跟 vim 一样（例如 `E: 未知命令: foo`）。
+
+| 命令 | 说明 |
+|---|---|
+| `:q` / `:quit` | 退出 |
+| `:help` / `:login` | 快捷键面板 / 登录页 |
+| `:save` | 立即写回 `config.toml` |
+| `:theme <名字>` | 切换主题（`Tab` 会列出全部主题名） |
+| `:volume 75` / `:volume +5` / `:volume -10` | 音量（与 `pigma msg volume` 同一套语法） |
+| `:seek 90` / `:seek +15` / `:seek -30` / `:seek 50%` | 跳到某秒 / 相对跳转 / 百分比 |
+| `:visualizer on\|off` | 频谱显示开关（同 `v` 键） |
+| `:pitch on\|off` | 音高读数开关（同 `V` 键） |
+
+终端背景为浅色时，`:theme` 配合配置里的 `background = "auto"` 与 `light_theme` 会自动选浅色主题。
 
 ### CLI 控制（status / msg）
 

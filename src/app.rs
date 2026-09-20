@@ -279,6 +279,20 @@ impl App {
         self.toast(format!(" {}  {:.0}%", symbols().volume_high, new * 100.0));
     }
 
+    /// Show or hide the spectrum bars (`v`, `:visualizer on|off`).
+    pub fn set_visualizer(&mut self, on: bool) {
+        self.config.playerbar.visible.visualizer = on;
+        self.config.save();
+        self.toast(format!("频谱: {}", if on { "开" } else { "关" }));
+    }
+
+    /// Show or hide the pitch readout (`V`, `:pitch on|off`).
+    pub fn set_pitch(&mut self, on: bool) {
+        self.config.playerbar.visible.pitch = on;
+        self.config.save();
+        self.toast(format!("音高: {}", if on { "开" } else { "关" }));
+    }
+
     /// Refresh the IPC status snapshot from the live playback state. The status
     /// (current song + progress) is cheap and rebuilt each loop; the full queue
     /// listing is only rebuilt when the queue actually changed.

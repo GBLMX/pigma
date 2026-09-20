@@ -239,16 +239,8 @@ fn execute(app: &mut App, command: ExCommand) -> Result<(), String> {
             Ok(_) => return Err("音量参数无效".to_string()),
         },
         ExCommand::Seek(value) => seek(app, &value)?,
-        ExCommand::Visualizer(on) => {
-            app.config.playerbar.visible.visualizer = on;
-            app.config.save();
-            app.toast(format!("频谱: {}", if on { "开" } else { "关" }));
-        }
-        ExCommand::Pitch(on) => {
-            app.config.playerbar.visible.pitch = on;
-            app.config.save();
-            app.toast(format!("音高: {}", if on { "开" } else { "关" }));
-        }
+        ExCommand::Visualizer(on) => app.set_visualizer(on),
+        ExCommand::Pitch(on) => app.set_pitch(on),
     }
     Ok(())
 }

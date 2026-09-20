@@ -248,6 +248,15 @@ pub(super) fn handle_main_key(app: &mut App, key_event: KeyEvent) -> color_eyre:
         KeyCode::Char('z' | 'Z') => {
             app.cycle_nav_position();
         }
+        // `v`/`V` toggle the two audio readouts, exactly like `:visualizer` / `:pitch`.
+        KeyCode::Char('v') => {
+            let on = !app.config.playerbar.visible.visualizer;
+            app.set_visualizer(on);
+        }
+        KeyCode::Char('V') => {
+            let on = !app.config.playerbar.visible.pitch;
+            app.set_pitch(on);
+        }
         _ => {}
     }
     Ok(())
