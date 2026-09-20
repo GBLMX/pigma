@@ -153,7 +153,7 @@ jobs:
     needs: release
     # Fork-only: this pushes GBLMX's own package, so it must not run in a repo that is
     # not ours (upstream publishes `boxpigma-bin` from the same job name in its own repo).
-    if: startsWith(github.ref, 'refs/tags/') && github.repository == 'GBLMX/boxpigma' # 只有在推送 tag 发布时才触发 AUR 更新
+    if: startsWith(github.ref, 'refs/tags/') && github.repository == 'GBLMX/pigma' # 只有在推送 tag 发布时才触发 AUR 更新
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -197,7 +197,7 @@ jobs:
     needs: release
     # Upstream-only: the tap lives in akirco/homebrew-pigma and the job needs a token we
     # do not have, so it is skipped when this workflow runs in a fork.
-    if: startsWith(github.ref, 'refs/tags/') && github.repository == 'akirco/boxpigma' # 只有在推送 tag 发布时才更新 tap
+    if: startsWith(github.ref, 'refs/tags/') && github.repository == 'akirco/pigma' # 只有在推送 tag 发布时才更新 tap
     runs-on: ubuntu-latest
     steps:
       - name: Checkout tap repository

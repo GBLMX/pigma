@@ -4,7 +4,7 @@
 [![Release](https://github.com/GBLMX/pigma/actions/workflows/release.yml/badge.svg)](https://github.com/GBLMX/pigma/actions/workflows/release.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![AUR Version](https://img.shields.io/aur/version/boxpigma-gblmx-bin)](https://aur.archlinux.org/packages/boxpigma-gblmx-bin)
-![GitHub repo size](https://img.shields.io/github/repo-size/GBLMX/boxpigma)
+![GitHub repo size](https://img.shields.io/github/repo-size/GBLMX/pigma)
 
 
 <img width="100" src="./imgs/logo.png" alt="boxpigma" />
