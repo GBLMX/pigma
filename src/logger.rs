@@ -27,8 +27,11 @@ fn log_file() -> PathBuf {
 
 impl Default for Logger {
     fn default() -> Self {
+        // `Info` by default: at `Debug` the HTTP layer logs response-body previews, which
+        // include account-related payloads, into the log file. Users who need the verbose
+        // trace set `[logger] log_level = "DEBUG"` explicitly.
         Logger {
-            log_level: Level::Debug,
+            log_level: Level::Info,
         }
     }
 }
