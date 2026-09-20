@@ -151,7 +151,9 @@ jobs:
   aur-release:
     name: Publish to AUR
     needs: release
-    if: startsWith(github.ref, 'refs/tags/') # 只有在推送 tag 发布时才触发 AUR 更新
+    # Fork-only: this pushes GBLMX's own package, so it must not run in a repo that is
+    # not ours (upstream publishes `pigma-bin` from the same job name in its own repo).
+    if: startsWith(github.ref, 'refs/tags/') && github.repository == 'GBLMX/pigma' # 只有在推送 tag 发布时才触发 AUR 更新
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -173,7 +175,7 @@ jobs:
       - name: Publish AUR package
         uses: KSXGitHub/github-actions-deploy-aur@v3
         with:
-          pkgname: 'pigma-bin'
+          pkgname: 'pigma-gblmx-bin'
           pkgbuild: './PKGBUILD'
           commit_username: 'GitHub Actions'
           commit_email: 'actions@github.com'
@@ -182,7 +184,9 @@ jobs:
   homebrew-tap:
     name: Update Homebrew tap
     needs: release
-    if: startsWith(github.ref, 'refs/tags/') # 只有在推送 tag 发布时才更新 tap
+    # Upstream-only: the tap lives in akirco/homebrew-pigma and the job needs a token we
+    # do not have, so it is skipped when this workflow runs in a fork.
+    if: startsWith(github.ref, 'refs/tags/') && github.repository == 'akirco/pigma' # 只有在推送 tag 发布时才更新 tap
     runs-on: ubuntu-latest
     steps:
       - name: Checkout tap repository
