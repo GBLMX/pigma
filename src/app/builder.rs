@@ -7,7 +7,7 @@ use sonar::SonarFinder;
 use super::App;
 use crate::{
     config::{Config, ProxyTarget, ThemeRegistry},
-    state::{CommandAction, CommandItem, CommandPanel},
+    state::{COMMANDS, CommandItem, CommandPanel},
     utils::terminal::{ImageProtocol, choose_image_protocol},
 };
 
@@ -40,36 +40,41 @@ impl App {
         if active { proxy } else { "" }
     }
 
-    /// Build the command panel (theme-switching submenu + border/save-on-play toggles).
+    /// Build the command palette from the one command table.
+    ///
+    /// Every entry comes from [`COMMANDS`], so the palette cannot drift from the `:` command
+    /// line again: the same text that names a command there is what Enter runs here. Themes are
+    /// the one entry rendered as a submenu, because the list comes from the registry at runtime.
     pub(super) fn build_command_panel(theme_registry: &ThemeRegistry) -> CommandPanel {
         let theme_children: Vec<CommandItem> = theme_registry
             .all_names()
             .into_iter()
-            .map(|name| {
-                let name = name.to_string();
-                let action = CommandAction::SwitchTheme(name.clone());
-                CommandItem::Action { name, action }
+            .map(|name| CommandItem::Action {
+                name: name.to_string(),
+                summary: "",
+                key: None,
+                ex: format!("theme {name}"),
+                needs_argument: false,
             })
             .collect();
 
-        let commands = vec![
-            CommandItem::SubMenu {
-                name: "Switch Theme".into(),
-                children: theme_children,
-            },
-            CommandItem::Action {
-                name: "Toggle Border Mode".into(),
-                action: CommandAction::ToggleBordered,
-            },
-            CommandItem::Action {
-                name: "Toggle Save on Play".into(),
-                action: CommandAction::ToggleSaveOnPlay,
-            },
-            CommandItem::Action {
-                name: "Cycle Nav Position".into(),
-                action: CommandAction::CycleNavPosition,
-            },
-        ];
+        let mut commands: Vec<CommandItem> = vec![CommandItem::SubMenu {
+            name: "切换主题".to_string(),
+            children: theme_children,
+        }];
+
+        commands.extend(
+            COMMANDS
+                .iter()
+                .filter(|command| command.name != "theme" && command.in_palette)
+                .map(|command| CommandItem::Action {
+                    name: command.name.to_string(),
+                    summary: command.summary,
+                    key: command.key,
+                    ex: command.ex.to_string(),
+                    needs_argument: command.needs_argument,
+                }),
+        );
 
         let mut command_panel = CommandPanel::new();
         command_panel.levels = vec![commands];
@@ -159,5 +164,66 @@ impl App {
             builder = builder.proxy(reqwest::Proxy::all(proxy).map_err(color_eyre::Report::msg)?);
         }
         builder.build().map_err(color_eyre::Report::msg)
+    }
+}
+
+#[cfg(test)]
+mod command_panel_tests {
+    use super::*;
+    use crate::state::COMMANDS;
+
+    /// The palette is built from the table, so it cannot fall behind it: every command the `:`
+    /// line knows has an entry (themes are the submenu above them).
+    #[test]
+    fn the_palette_lists_every_command() {
+        let registry = ThemeRegistry::new(Default::default());
+        let panel = App::build_command_panel(&registry);
+        let items = panel.current_items().expect("built with one level");
+
+        let listed: Vec<&str> = items
+            .iter()
+            .filter_map(|item| match item {
+                CommandItem::Action { name, .. } => Some(name.as_str()),
+                CommandItem::SubMenu { .. } => None,
+            })
+            .collect();
+
+        let expected: Vec<&str> = COMMANDS
+            .iter()
+            .filter(|c| c.in_palette && c.name != "theme")
+            .map(|c| c.name)
+            .collect();
+        for command in expected
+            .iter()
+            .map(|name| COMMANDS.iter().find(|c| c.name == *name).unwrap())
+        {
+            assert!(
+                listed.contains(&command.name),
+                "{} is missing from the palette: {listed:?}",
+                command.name
+            );
+        }
+        assert_eq!(
+            listed.len(),
+            expected.len(),
+            "the palette and the table disagree: {listed:?}"
+        );
+    }
+
+    /// Themes come from the registry at runtime, and picking one has to run `theme <name>`.
+    #[test]
+    fn the_theme_submenu_runs_the_theme_command() {
+        let registry = ThemeRegistry::new(Default::default());
+        let panel = App::build_command_panel(&registry);
+        let Some(CommandItem::SubMenu { children, .. }) = panel.current_items().unwrap().first()
+        else {
+            panic!("the first entry is the theme submenu");
+        };
+        let first = children.first().expect("at least one theme");
+        let CommandItem::Action { ex, .. } = first else {
+            panic!("theme entries are actions");
+        };
+        assert!(ex.starts_with("theme "), "{ex}");
+        crate::input::ex::ExCommand::parse(ex).expect("the submenu entry parses");
     }
 }

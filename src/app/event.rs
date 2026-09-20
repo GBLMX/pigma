@@ -10,7 +10,7 @@ use crate::{
         PlaybackEvent, SplashEvent,
     },
     input,
-    state::{CommandAction, ContentState},
+    state::{ContentState, PanelAction},
 };
 
 /// How much of a song the cloud counts as a listen; the official client reports around
@@ -350,12 +350,30 @@ impl App {
                 }
             }
             CommandPanelAction::Select => {
-                let action = panel.enter();
-                if action.is_some() {
+                let command = panel.enter();
+                if command.is_some() {
                     panel.open = false;
                 }
-                if let Some(action) = action {
-                    self.execute_command(action);
+                match command {
+                    // The palette runs exactly what `:` would: one vocabulary, one executor, so
+                    // the two cannot drift apart again.
+                    Some(PanelAction::Run(line)) => {
+                        match crate::input::ex::ExCommand::parse(&line) {
+                            Ok(command) => {
+                                if let Err(error) = crate::input::ex::execute(self, command) {
+                                    self.toast(format!("E: {error}"));
+                                }
+                            }
+                            Err(error) => self.toast(format!("E: {error}")),
+                        }
+                    }
+                    // One that needs an argument opens the command line ready for it, rather than
+                    // running and reporting a missing value.
+                    Some(PanelAction::Prefill(text)) => {
+                        crate::input::ex::open(self);
+                        crate::input::handle_paste(self, &text);
+                    }
+                    None => {}
                 }
             }
         }
@@ -375,36 +393,6 @@ impl App {
             &mut std::io::stdout(),
             &format!("{} — {}", song.name, song.singer),
         );
-    }
-
-    fn execute_command(&mut self, action: CommandAction) {
-        match action {
-            CommandAction::ToggleBordered => {
-                self.state.border.enabled = !self.state.border.enabled;
-                self.toast(format!(
-                    "BORDER MODE: {}",
-                    if self.state.border.enabled {
-                        "ON"
-                    } else {
-                        "OFF"
-                    }
-                ));
-            }
-            CommandAction::ToggleSaveOnPlay => {
-                let enabled = !self.config.cache.save_on_play;
-                self.config.cache.save_on_play = enabled;
-                self.playback.set_save_on_play(enabled);
-                self.config.save();
-                self.toast(format!("边听边存: {}", if enabled { "ON" } else { "OFF" }));
-            }
-            CommandAction::CycleNavPosition => self.cycle_nav_position(),
-            CommandAction::SwitchTheme(name) => {
-                let msg = format!("THEME: {name}");
-                self.config.default_theme = name;
-                self.config.save();
-                self.toast(msg);
-            }
-        }
     }
 }
 

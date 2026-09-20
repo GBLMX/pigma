@@ -3,7 +3,7 @@
 
 mod command;
 mod content;
-mod ex;
+pub(crate) mod ex;
 mod help;
 mod hit;
 mod login;

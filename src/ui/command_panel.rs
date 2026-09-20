@@ -9,10 +9,7 @@ use ratatui::{
 };
 
 use super::{BlockStyle, block::CornerBlock};
-use crate::{
-    app::App,
-    state::{CommandAction, CommandItem},
-};
+use crate::{app::App, state::CommandItem};
 
 pub(super) fn draw(f: &mut Frame, app: &App, area: Rect) {
     let panel = &app.state.command_panel;
@@ -23,7 +20,7 @@ pub(super) fn draw(f: &mut Frame, app: &App, area: Rect) {
 
     let title = panel.current_title();
     let inner_height = items.len() as u16 + 2;
-    let inner_width = 32u16;
+    let inner_width = 56u16;
 
     let popup_area = area.centered(
         Constraint::Length(inner_width),
@@ -51,27 +48,18 @@ pub(super) fn draw(f: &mut Frame, app: &App, area: Rect) {
             ..inner
         };
 
+        // The name is what `:` would take, the key is what does the same thing without it —
+        // the palette is a third door onto one command table, not a list of its own.
         let display: Cow<'_, str> = match item {
             CommandItem::Action {
-                name,
-                action: CommandAction::SwitchTheme(n),
-                ..
-            } if n == &app.config.default_theme => Cow::Owned(format!("{} *", name)),
-            CommandItem::Action {
-                name,
-                action: CommandAction::ToggleSaveOnPlay,
-                ..
+                name, summary, key, ..
             } => {
-                let state = if app.config.cache.save_on_play {
-                    "ON"
-                } else {
-                    "OFF"
-                };
-                Cow::Owned(format!("{name}: {state}"))
+                let key = key
+                    .map(|k| format!("{k:<3}"))
+                    .unwrap_or_else(|| "   ".into());
+                Cow::Owned(format!("{name:<14}{key}{summary}"))
             }
-            CommandItem::Action { name, .. } | CommandItem::SubMenu { name, .. } => {
-                Cow::Borrowed(name)
-            }
+            CommandItem::SubMenu { name, .. } => Cow::Owned(format!("{name:<14}   ▸")),
         };
 
         let prefix = if i == panel.selected { "▶ " } else { "  " };

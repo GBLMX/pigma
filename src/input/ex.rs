@@ -17,41 +17,31 @@ use crate::{
     text_input::TextInput,
 };
 
-/// Command names the prompt knows, used for `Tab` completion and suggestions.
-const COMMANDS: [&str; 17] = [
-    "help",
-    "layout",
-    "lyrics",
-    "login",
-    "logout",
-    "pitch",
-    "q",
-    "quit",
-    "save",
-    "seek",
-    "sign",
-    "signin",
-    "sms",
-    "smslogin",
-    "theme",
-    "visualizer",
-    "volume",
-];
-
 /// What a command line asks for.
 #[derive(Debug, Clone, PartialEq)]
-pub(super) enum ExCommand {
+pub(crate) enum ExCommand {
     Quit,
     Help,
     Login,
     Save,
-    Theme(String),
-    LyricStyle(String),
+    /// `None` cycles to the next theme.
+    Theme(Option<String>),
+    /// `None` cycles to the next style, like every other value-taking command.
+    LyricStyle(Option<String>),
     Volume(String),
     Seek(String),
-    Visualizer(bool),
-    Pitch(bool),
-    Layout(String),
+    /// `None` toggles, like the `v` key.
+    Visualizer(Option<bool>),
+    /// Toggle the border mode (the `b` key).
+    Border,
+    /// Cycle the navigation bar's position (the `z` key).
+    NavPos,
+    /// Toggle "save while playing" — palette-only until now.
+    SaveOnPlay,
+    /// `None` toggles, like the `V` key.
+    Pitch(Option<bool>),
+    /// `None` cycles.
+    Layout(Option<String>),
     /// Email (or phone number) plus password.
     Signin {
         account: String,
@@ -71,7 +61,7 @@ pub(super) enum ExCommand {
 
 impl ExCommand {
     /// Parse one command line, without the leading `:`.
-    fn parse(line: &str) -> Result<Self, String> {
+    pub(crate) fn parse(line: &str) -> Result<Self, String> {
         let mut parts = line.split_whitespace();
         let Some(name) = parts.next() else {
             return Err("缺少命令".to_string());
@@ -135,15 +125,38 @@ impl ExCommand {
                 let (phone, code) = required_pair("手机号", "验证码")?;
                 Ok(Self::SmsLogin { phone, code })
             }
-            "theme" => Ok(Self::Theme(required("主题名")?)),
-            "lyrics" => Ok(Self::LyricStyle(required("歌词样式")?)),
+            "theme" => Ok(Self::Theme(optional_argument(&args)?)),
+            "lyrics" => Ok(Self::LyricStyle(optional_argument(&args)?)),
             "volume" => Ok(Self::Volume(required("音量")?)),
             "seek" => Ok(Self::Seek(required("跳转位置")?)),
-            "visualizer" => Ok(Self::Visualizer(parse_on_off(args.first().copied())?)),
-            "pitch" => Ok(Self::Pitch(parse_on_off(args.first().copied())?)),
-            "layout" => Ok(Self::Layout(required("布局名")?)),
+            "visualizer" => Ok(Self::Visualizer(optional_on_off(args.first().copied())?)),
+            "border" => Ok(Self::Border),
+            "navpos" => Ok(Self::NavPos),
+            "saveonplay" => Ok(Self::SaveOnPlay),
+            "pitch" => Ok(Self::Pitch(optional_on_off(args.first().copied())?)),
+            "layout" => Ok(Self::Layout(optional_argument(&args)?)),
             other => Err(format!("未知命令: {other}")),
         }
+    }
+}
+
+/// The single optional argument of a value-taking command.
+///
+/// No argument means the bare form, which cycles to the next value; more than one is an error
+/// rather than a silently ignored tail.
+fn optional_argument(args: &[&str]) -> Result<Option<String>, String> {
+    match args {
+        [] => Ok(None),
+        [one] => Ok(Some((*one).to_string())),
+        _ => Err("只接受一个参数".to_string()),
+    }
+}
+
+/// Like [`parse_on_off`], but no argument means "toggle" rather than an error.
+fn optional_on_off(argument: Option<&str>) -> Result<Option<bool>, String> {
+    match argument {
+        Some(_) => parse_on_off(argument).map(Some),
+        None => Ok(None),
     }
 }
 
@@ -170,7 +183,7 @@ fn split_head(line: &str) -> (String, &str) {
 fn candidate_names(head: &str, typed: &str, themes: &[&str]) -> Vec<String> {
     let name = head.trim();
     let pool: Vec<&str> = if name.is_empty() {
-        COMMANDS.to_vec()
+        crate::state::command_names()
     } else {
         match name {
             "theme" => themes.to_vec(),
@@ -209,7 +222,7 @@ fn completion(line: &str, themes: &[&str]) -> Option<String> {
 }
 
 /// Open the prompt on an empty line.
-pub(super) fn open(app: &mut App) {
+pub(crate) fn open(app: &mut App) {
     app.state.prompt.active = true;
     app.state.prompt.input = TextInput::new();
     app.state.prompt.history_index = None;
@@ -286,7 +299,7 @@ fn run(app: &mut App, line: &str) {
     }
 }
 
-fn execute(app: &mut App, command: ExCommand) -> Result<(), String> {
+pub(crate) fn execute(app: &mut App, command: ExCommand) -> Result<(), String> {
     match command {
         ExCommand::Quit => {
             app.state.events.send(AppEvent::Quit);
@@ -300,12 +313,54 @@ fn execute(app: &mut App, command: ExCommand) -> Result<(), String> {
             app.config.save();
             app.toast("已保存配置".to_string());
         }
-        ExCommand::Theme(name) => {
+        ExCommand::Border => {
+            app.state.border.enabled = !app.state.border.enabled;
+            app.toast(format!(
+                "边框模式: {}",
+                if app.state.border.enabled {
+                    "ON"
+                } else {
+                    "OFF"
+                }
+            ));
+        }
+        ExCommand::NavPos => app.cycle_nav_position(),
+        ExCommand::SaveOnPlay => {
+            let enabled = !app.config.cache.save_on_play;
+            app.config.cache.save_on_play = enabled;
+            app.config.save();
+            app.toast(format!("边听边存: {}", if enabled { "ON" } else { "OFF" }));
+        }
+        ExCommand::Theme(None) => {
+            let names = app.theme_registry.all_names();
+            let current = names
+                .iter()
+                .position(|name| *name == app.config.default_theme)
+                .unwrap_or(0);
+            let next = names[(current + 1) % names.len().max(1)].to_string();
+            app.config.default_theme = next.clone();
+            app.config.save();
+            app.toast(format!("主题: {next}"));
+        }
+        ExCommand::Theme(Some(name)) => {
             app.config.default_theme = name.clone();
             app.config.save();
             app.toast(format!("主题: {name}"));
         }
-        ExCommand::LyricStyle(name) => {
+        ExCommand::LyricStyle(None) => {
+            // Bare, it cycles — the same shape as `:visualizer`, `:pitch` and the keys that do
+            // the same thing.
+            let next = match app.config.lyric_style {
+                LyricStyle::Window => LyricStyle::OneLine,
+                LyricStyle::OneLine => LyricStyle::Flow,
+                LyricStyle::Flow => LyricStyle::Plain,
+                LyricStyle::Plain => LyricStyle::Window,
+            };
+            app.config.lyric_style = next;
+            app.config.save();
+            app.toast(format!("歌词样式: {} — {}", next.name(), next.describe()));
+        }
+        ExCommand::LyricStyle(Some(name)) => {
             let Some(style) = LyricStyle::parse(&name) else {
                 let known: Vec<&str> = LyricStyle::ALL.iter().map(|s| s.name()).collect();
                 return Err(format!(
@@ -330,9 +385,23 @@ fn execute(app: &mut App, command: ExCommand) -> Result<(), String> {
             Ok(_) => return Err("音量参数无效".to_string()),
         },
         ExCommand::Seek(value) => seek(app, &value)?,
-        ExCommand::Visualizer(on) => app.set_visualizer(on),
-        ExCommand::Pitch(on) => app.set_pitch(on),
-        ExCommand::Layout(name) => app.set_playerbar_layout(&name)?,
+        ExCommand::Visualizer(on) => {
+            let on = on.unwrap_or(!app.config.playerbar.visible.visualizer);
+            app.set_visualizer(on);
+        }
+        ExCommand::Pitch(on) => {
+            let on = on.unwrap_or(!app.config.playerbar.visible.pitch);
+            app.set_pitch(on);
+        }
+        ExCommand::Layout(None) => {
+            let next = match app.config.playerbar.layout {
+                crate::config::LayoutType::Default => "modern",
+                crate::config::LayoutType::Modern => "minimal",
+                crate::config::LayoutType::Minimal => "default",
+            };
+            app.set_playerbar_layout(next)?;
+        }
+        ExCommand::Layout(Some(name)) => app.set_playerbar_layout(&name)?,
         ExCommand::Logout => {
             let service = app.service.clone();
             let sender = app.state.events.sender();
@@ -439,7 +508,7 @@ mod tests {
         assert_eq!(ExCommand::parse("save"), Ok(ExCommand::Save));
         assert_eq!(
             ExCommand::parse("theme dracula"),
-            Ok(ExCommand::Theme("dracula".to_string()))
+            Ok(ExCommand::Theme(Some("dracula".to_string())))
         );
         assert_eq!(
             ExCommand::parse("volume +5"),
@@ -451,12 +520,21 @@ mod tests {
         );
         assert_eq!(
             ExCommand::parse("visualizer on"),
-            Ok(ExCommand::Visualizer(true))
+            Ok(ExCommand::Visualizer(Some(true)))
         );
-        assert_eq!(ExCommand::parse("pitch 0"), Ok(ExCommand::Pitch(false)));
+        assert_eq!(
+            ExCommand::parse("pitch 0"),
+            Ok(ExCommand::Pitch(Some(false)))
+        );
+        // Bare, it toggles — the same thing the `v` and `V` keys do.
+        assert_eq!(
+            ExCommand::parse("visualizer"),
+            Ok(ExCommand::Visualizer(None))
+        );
+        assert_eq!(ExCommand::parse("pitch"), Ok(ExCommand::Pitch(None)));
         assert_eq!(
             ExCommand::parse("layout default"),
-            Ok(ExCommand::Layout("default".to_string()))
+            Ok(ExCommand::Layout(Some("default".to_string())))
         );
         assert_eq!(
             ExCommand::parse("signin someone@example.com hunter2"),
@@ -490,8 +568,11 @@ mod tests {
         let unknown = ExCommand::parse("frobnicate").unwrap_err();
         assert!(unknown.contains("frobnicate"), "got {unknown}");
 
-        let missing = ExCommand::parse("theme").unwrap_err();
-        assert!(missing.contains("主题名"), "got {missing}");
+        assert_eq!(
+            ExCommand::parse("theme"),
+            Ok(ExCommand::Theme(None)),
+            "bare, it cycles to the next theme"
+        );
 
         let extra = ExCommand::parse("theme a b").unwrap_err();
         assert!(extra.contains("只接受一个参数"), "got {extra}");
@@ -499,8 +580,9 @@ mod tests {
         let bad_flag = ExCommand::parse("pitch maybe").unwrap_err();
         assert!(bad_flag.contains("on/off"), "got {bad_flag}");
 
-        let bad_layout = ExCommand::parse("layout").unwrap_err();
-        assert!(bad_layout.contains("布局名"), "got {bad_layout}");
+        // Bare `:layout` cycles now; too many arguments is the error left to catch.
+        let bad_layout = ExCommand::parse("layout a b").unwrap_err();
+        assert!(bad_layout.contains("只接受一个参数"), "got {bad_layout}");
 
         for (line, missing) in [
             ("signin someone@example.com", "密码"),
@@ -538,10 +620,21 @@ mod tests {
         assert_eq!(completion("s", &THEMES), None);
         assert_eq!(
             candidate_names("", "s", &THEMES),
-            vec!["save", "seek", "sign", "signin", "sms", "smslogin"]
+            vec![
+                "sign",
+                "saveonplay",
+                "save",
+                "seek",
+                "signin",
+                "sms",
+                "smslogin"
+            ]
         );
         // an empty line offers every command
-        assert_eq!(candidate_names("", "", &THEMES).len(), COMMANDS.len());
+        assert_eq!(
+            candidate_names("", "", &THEMES).len(),
+            crate::state::command_names().len()
+        );
         assert_eq!(completion("", &THEMES), None);
     }
 

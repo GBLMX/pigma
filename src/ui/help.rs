@@ -11,6 +11,7 @@ use crate::app::App;
 
 const HELP_ITEMS: &[(&str, &str)] = &[
     ("Ctrl+C/q", "退出程序"),
+    (":", "命令模式（Tab 补全）"),
     ("Ctrl+P", "命令面板"),
     ("L", "登录网易云"),
     ("w", "清空播放队列"),
@@ -38,6 +39,8 @@ const HELP_ITEMS: &[(&str, &str)] = &[
     ("b", "切换边框模式"),
     ("u", "上传缓存歌曲"),
     ("r", "手动刷新列表内容"),
+    ("v", "频谱开关"),
+    ("V", "音高读数开关"),
 ];
 
 const POPUP_WIDTH: u16 = 64;
@@ -69,7 +72,7 @@ pub(super) fn draw(f: &mut Frame, app: &App, area: Rect) -> usize {
 
     let footer = format!(
         "{:>width$}",
-        "↑/↓ 或 j/k 滚动  Esc 关闭",
+        "Esc 关闭 · : 命令行 · Ctrl+P 面板",
         width = (POPUP_WIDTH - 4) as usize
     );
     let footer_area = Rect {
