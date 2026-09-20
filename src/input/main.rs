@@ -1,4 +1,5 @@
 use crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEventKind};
+use ratatui::layout::Rect;
 
 use super::{
     content::{
@@ -300,6 +301,39 @@ pub(super) fn handle_main_mouse(app: &mut App, kind: MouseEventKind, col: u16, r
     }
 }
 
+/// A player bar button the mouse can land on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PlayerbarTarget {
+    Transport(playerbar::ControlButton),
+    Mode,
+    Like,
+}
+
+/// Which button a click lands on, if any: the transport buttons, the mode icon and the
+/// like hearts are hit-tested against the rects the last frame published, so they follow
+/// whatever the active layout drew.
+fn playerbar_target(
+    transport: &[(playerbar::ControlButton, Rect); 3],
+    mode: Rect,
+    likes: &[Rect; 2],
+    col: u16,
+    row: u16,
+) -> Option<PlayerbarTarget> {
+    if let Some((button, _)) = transport
+        .iter()
+        .find(|(_, rect)| hit::contains(*rect, col, row))
+    {
+        return Some(PlayerbarTarget::Transport(*button));
+    }
+    if hit::contains(mode, col, row) {
+        return Some(PlayerbarTarget::Mode);
+    }
+    if likes.iter().any(|rect| hit::contains(*rect, col, row)) {
+        return Some(PlayerbarTarget::Like);
+    }
+    None
+}
+
 /// Start or pause playback, the way `Space` and the play button both mean it.
 fn toggle_play_pause(app: &mut App) {
     let was_paused = app.playback.state.paused;
@@ -400,32 +434,23 @@ fn click_playerbar(app: &mut App, col: u16, row: u16) -> bool {
         }
     }
 
-    if let Some((button, _)) = app
-        .state
-        .transport
-        .into_iter()
-        .find(|(_, rect)| hit::contains(*rect, col, row))
-    {
-        match button {
-            playerbar::ControlButton::Prev => app.playback.prev(),
-            playerbar::ControlButton::PlayPause => toggle_play_pause(app),
-            playerbar::ControlButton::Next => app.playback.next(),
+    let buttons = playerbar_target(
+        &app.state.transport,
+        app.state.mode_area,
+        &app.state.like_areas,
+        col,
+        row,
+    );
+    if let Some(target) = buttons {
+        match target {
+            PlayerbarTarget::Transport(playerbar::ControlButton::Prev) => app.playback.prev(),
+            PlayerbarTarget::Transport(playerbar::ControlButton::PlayPause) => {
+                toggle_play_pause(app);
+            }
+            PlayerbarTarget::Transport(playerbar::ControlButton::Next) => app.playback.next(),
+            PlayerbarTarget::Mode => cycle_play_mode(app),
+            PlayerbarTarget::Like => toggle_like(app),
         }
-        return true;
-    }
-
-    if hit::contains(app.state.mode_area, col, row) {
-        cycle_play_mode(app);
-        return true;
-    }
-
-    if app
-        .state
-        .like_areas
-        .iter()
-        .any(|rect| hit::contains(*rect, col, row))
-    {
-        toggle_like(app);
         return true;
     }
 
@@ -524,4 +549,70 @@ fn is_download_view(app: &App) -> bool {
 
 fn is_local_music_view(app: &App) -> bool {
     current_api(app) == Some("local_music")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A click has to map to the button that is drawn under it, for both controls row
+    /// alignments, for the mode cell and for the hearts — the mapping is what the mouse
+    /// handlers act on, so it is worth pinning down without a terminal.
+    #[test]
+    fn clicks_map_to_the_button_under_the_cursor() {
+        let area = Rect::new(0, 4, 60, 1);
+        let mode = Rect::new(58, 4, 1, 1);
+        let likes = [Rect::new(2, 6, 1, 1), Rect::new(2, 7, 1, 1)];
+
+        for centered in [true, false] {
+            let transport = playerbar::control_rects(area, centered);
+            let target = |rect: Rect| playerbar_target(&transport, mode, &likes, rect.x, rect.y);
+
+            assert_eq!(
+                target(transport[0].1),
+                Some(PlayerbarTarget::Transport(playerbar::ControlButton::Prev)),
+                "centered={centered}"
+            );
+            assert_eq!(
+                target(transport[1].1),
+                Some(PlayerbarTarget::Transport(
+                    playerbar::ControlButton::PlayPause
+                )),
+                "centered={centered}"
+            );
+            assert_eq!(
+                target(transport[2].1),
+                Some(PlayerbarTarget::Transport(playerbar::ControlButton::Next)),
+                "centered={centered}"
+            );
+
+            // The cell just past the last icon, and the gap between two of them, are dead.
+            let last = transport[2].1;
+            assert_eq!(target(Rect::new(last.right(), last.y, 1, 1)), None);
+            let first = transport[0].1;
+            assert_eq!(
+                target(Rect::new(first.right(), first.y, 1, 1)),
+                None,
+                "the gap"
+            );
+        }
+
+        // No transport buttons on screen, but the mode cell and both hearts still are.
+        let none = [(playerbar::ControlButton::Prev, Rect::default()); 3];
+        assert_eq!(
+            playerbar_target(&none, mode, &likes, 58, 4),
+            Some(PlayerbarTarget::Mode)
+        );
+        for heart in likes {
+            assert_eq!(
+                playerbar_target(&none, Rect::default(), &likes, heart.x, heart.y),
+                Some(PlayerbarTarget::Like)
+            );
+        }
+        assert_eq!(
+            playerbar_target(&none, Rect::default(), &[Rect::default(); 2], 30, 20),
+            None,
+            "empty space is not a button"
+        );
+    }
 }
