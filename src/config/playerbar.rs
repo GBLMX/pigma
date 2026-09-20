@@ -18,6 +18,10 @@ pub struct PlayerbarVisible {
     pub volume: bool,
     pub mode_icon: bool,
     pub spinner: bool,
+    /// Frequency bars of what is playing, drawn on the layout's spare row.
+    pub visualizer: bool,
+    /// Dominant-pitch readout (note + frequency), sharing that row with the bars.
+    pub pitch: bool,
 }
 
 impl Default for PlayerbarVisible {
@@ -27,6 +31,8 @@ impl Default for PlayerbarVisible {
             volume: true,
             mode_icon: true,
             spinner: true,
+            visualizer: false,
+            pitch: false,
         }
     }
 }

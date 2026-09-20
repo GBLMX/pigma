@@ -38,6 +38,8 @@ pub struct SymbolsConfig {
     pub volume_high: Option<String>,
     /// Shown when the playback queue is emptied.
     pub queue_clear: Option<String>,
+    /// Spectrum bar characters, lowest first (at least two).
+    pub visualizer_bars: Option<String>,
     /// Spinner frames, one per animation step; an empty list is ignored.
     pub spinner_activity: Option<Vec<String>>,
     /// Main-loop ticks per spinner frame (the UI has always advanced every 3 ticks).
@@ -53,6 +55,8 @@ pub struct Symbols {
     pub volume_mid: String,
     pub volume_high: String,
     pub queue_clear: String,
+    /// Spectrum bar characters from shortest to tallest.
+    pub visualizer_bars: String,
     pub spinner_activity: Vec<String>,
     pub spinner_ticks_per_frame: u64,
 }
@@ -100,6 +104,8 @@ impl SymbolPreset {
             (SymbolPreset::Ascii, "volume_mid") => "=",
             (SymbolPreset::Ascii, "volume_high") => "#",
             (SymbolPreset::Ascii, "queue_clear") => "x",
+            (SymbolPreset::Nerd | SymbolPreset::Unicode, "visualizer_bars") => "▁▂▃▄▅▆▇█",
+            (SymbolPreset::Ascii, "visualizer_bars") => " .:-=+*#",
             _ => "?",
         }
     }
@@ -150,6 +156,17 @@ impl Symbols {
             volume_mid: pick(&config.volume_mid, "volume_mid"),
             volume_high: pick(&config.volume_high, "volume_high"),
             queue_clear: pick(&config.queue_clear, "queue_clear"),
+            visualizer_bars: {
+                let bars = pick(&config.visualizer_bars, "visualizer_bars");
+                if bars.chars().count() < 2 {
+                    log::warn!(
+                        "symbols.visualizer_bars needs at least two characters, using the preset"
+                    );
+                    preset.glyph("visualizer_bars").to_string()
+                } else {
+                    bars
+                }
+            },
             spinner_activity: frames,
             spinner_ticks_per_frame: ticks,
         }
@@ -310,6 +327,27 @@ mod tests {
         }
         assert_eq!(symbols.activity_frame(0), symbols.activity_frame(24));
         assert_ne!(symbols.activity_frame(0), symbols.activity_frame(3));
+    }
+
+    #[test]
+    fn visualizer_bars_keep_at_least_two_levels() {
+        let ascii = Symbols::resolve(&SymbolsConfig {
+            preset: SymbolPreset::Ascii,
+            ..SymbolsConfig::default()
+        });
+        assert!(
+            ascii.visualizer_bars.is_ascii(),
+            "ascii preset must draw ascii bars"
+        );
+
+        let single = Symbols::resolve(&SymbolsConfig {
+            visualizer_bars: Some("x".to_string()),
+            ..SymbolsConfig::default()
+        });
+        assert_ne!(
+            single.visualizer_bars, "x",
+            "a one-character bar set cannot express a level and must fall back"
+        );
     }
 
     #[test]

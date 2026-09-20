@@ -76,6 +76,8 @@ impl Playerbar for ModernLayout {
             controls: bottom_cols[1],
             volume: vol_mode_cols[0],
             mode_icon: vol_mode_cols[1],
+            // This layout fills every row with the cover block, so `visualizer` keeps its
+            // zero rect and the spectrum is not drawn on it.
             ..Default::default()
         }
     }

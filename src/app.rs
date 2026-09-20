@@ -278,6 +278,7 @@ impl App {
     /// throttled to once per second so the daemon does not spam subscribers at
     /// the event-loop rate.
     fn update_status_snapshot(&mut self) {
+        self.playback.update_analysis();
         let snapshot = StatusSnapshot::from_playback(&self.playback.state);
         let mut changed = false;
         if let Ok(mut stored) = self.status.lock() {

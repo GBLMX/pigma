@@ -36,6 +36,9 @@ impl Playerbar for MinimalLayout {
             gauge: cols[3],
             progress_time_right: cols[4],
             mode_icon: cols[5],
+            // This layout keeps the upper part of the bar empty, which is where the
+            // spectrum goes.
+            visualizer: rows[0],
             ..Default::default()
         }
     }
@@ -57,6 +60,16 @@ impl Playerbar for MinimalLayout {
 
         if config.visible.mode_icon {
             widgets::draw_mode_icon(f, player, colors, layout.mode_icon);
+        }
+
+        if config.visible.visualizer || config.visible.pitch {
+            let (bars, pitch) = super::spectrum_row(layout.visualizer, &config.visible);
+            if config.visible.visualizer {
+                widgets::draw_visualizer(f, player, colors, bars);
+            }
+            if config.visible.pitch {
+                widgets::draw_pitch(f, player, colors, pitch);
+            }
         }
     }
 }

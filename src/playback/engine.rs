@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use ncm_api::{SongInfo, SongQuality};
@@ -11,8 +11,10 @@ use super::{
     controller::PlaybackHandle,
     lyrics::LyricLine,
     mode::{self, PlayMode, Strategy},
+    pitch::PitchTracker,
     queue::PlaylistQueue,
     source::AudioSource,
+    spectrum::{self, Spectrum},
     state::PlaybackState,
     storage::PlaylistStorage,
 };
@@ -90,6 +92,14 @@ pub struct PlaybackEngine {
     /// switches songs so a stale resolve neither consumes bandwidth nor sends a
     /// `Play` command for a song that is no longer current.
     current_resolve: Option<tokio::task::JoinHandle<()>>,
+    /// Frequency analyser fed by the sample tap on the audio thread.
+    spectrum: Spectrum,
+    /// Dominant-pitch detector sharing the same tap.
+    pitch: PitchTracker,
+    /// Reused mono window handed to the analyser, so a frame allocates nothing.
+    spectrum_mono: Vec<f32>,
+    /// Throttles the analysis to the display rate instead of the event-loop rate.
+    last_spectrum: Instant,
 }
 
 impl PlaybackEngine {
@@ -136,6 +146,10 @@ impl PlaybackEngine {
             consecutive_errors: 0,
             liked_ids,
             current_resolve: None,
+            spectrum: Spectrum::default(),
+            pitch: PitchTracker::new(),
+            spectrum_mono: Vec::with_capacity(spectrum::WINDOW),
+            last_spectrum: Instant::now(),
         };
         this.restore_session();
         this
@@ -159,6 +173,43 @@ impl PlaybackEngine {
                     .unwrap_or(false)
             })
             .unwrap_or(false);
+    }
+
+    /// Refresh the spectrum bars and the pitch readout from the tapped audio.
+    ///
+    /// Runs at the display rate (~30 fps) rather than once per loop iteration, and only
+    /// while something is playing: a paused or stopped player decays the bars instead of
+    /// leaving a stale window frozen on screen.
+    pub fn update_analysis(&mut self) {
+        const FRAME: Duration = Duration::from_millis(33);
+
+        if self.last_spectrum.elapsed() < FRAME {
+            return;
+        }
+        self.last_spectrum = Instant::now();
+
+        let buffer = spectrum::buffer();
+        self.spectrum_mono.clear();
+        if self.state.playing && !self.state.paused {
+            buffer.snapshot(&mut self.spectrum_mono);
+            self.spectrum
+                .analyze(&self.spectrum_mono, buffer.sample_rate());
+        } else {
+            // Nothing playing: let the bars fall instead of freezing a stale window.
+            self.spectrum.decay();
+        }
+
+        self.state.pitch = if self.state.playing && !self.state.paused {
+            self.pitch
+                .analyze(&self.spectrum_mono, buffer.sample_rate())
+        } else {
+            None
+        };
+
+        self.state.visualizer.clear();
+        self.state
+            .visualizer
+            .extend_from_slice(self.spectrum.bars());
     }
 
     pub fn is_currently_playing(&self, song_id: u64) -> bool {

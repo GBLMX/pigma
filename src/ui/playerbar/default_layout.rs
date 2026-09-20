@@ -40,6 +40,8 @@ impl Playerbar for DefaultLayout {
             song_info: cols[0],
             controls: mid[0],
             gauge: mid[2],
+            // The row between the controls and the gauge is the layout's spare line.
+            visualizer: mid[1],
             spinner: cols[2],
             mode_icon: right[0],
             volume: right[2],
@@ -66,6 +68,16 @@ impl Playerbar for DefaultLayout {
 
         if config.visible.volume && layout.volume.width > 0 {
             widgets::draw_volume(f, player, colors, layout.volume);
+        }
+
+        if config.visible.visualizer || config.visible.pitch {
+            let (bars, pitch) = super::spectrum_row(layout.visualizer, &config.visible);
+            if config.visible.visualizer {
+                widgets::draw_visualizer(f, player, colors, bars);
+            }
+            if config.visible.pitch {
+                widgets::draw_pitch(f, player, colors, pitch);
+            }
         }
 
         if player.seeking && config.visible.spinner {

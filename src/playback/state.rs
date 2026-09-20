@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use ncm_api::SongInfo;
 
-use super::{cover::CoverState, lyrics::LyricLine, mode::PlayMode};
+use super::{cover::CoverState, lyrics::LyricLine, mode::PlayMode, pitch::Note};
 
 #[derive(Debug, Clone)]
 pub struct PlaybackState {
@@ -19,6 +19,10 @@ pub struct PlaybackState {
     pub cached: bool,
     pub liked: bool,
     pub cover: CoverState,
+    /// Bar levels of the playing audio's frequency spectrum, refreshed by the engine.
+    pub visualizer: Vec<f32>,
+    /// Dominant pitch of the playing audio, if one could be detected.
+    pub pitch: Option<Note>,
 }
 
 impl Default for PlaybackState {
@@ -37,6 +41,8 @@ impl Default for PlaybackState {
             cached: false,
             liked: false,
             cover: CoverState::default(),
+            visualizer: Vec::new(),
+            pitch: None,
         }
     }
 }

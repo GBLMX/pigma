@@ -15,6 +15,7 @@ use tokio::sync::mpsc;
 
 #[cfg(all(target_os = "linux", target_env = "gnu"))]
 use super::engine::mem_rss_kb;
+use super::spectrum::{self, SpectrumTap};
 use crate::event::{Event, PlaybackEvent};
 
 /// Progress ticks (~200ms each) the position may stay frozen while playing
@@ -162,7 +163,7 @@ pub(super) fn run(
                             &sink.as_ref().expect("sink ensured").mixer().clone(),
                         );
                         p.set_volume(volume);
-                        p.append(source);
+                        p.append(SpectrumTap::new(source, spectrum::buffer()));
                         last_pos = Duration::default();
                         stall_ticks = 0;
                         Some(p)

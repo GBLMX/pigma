@@ -5,14 +5,14 @@ mod widgets;
 
 use ratatui::{
     Frame,
-    layout::Rect,
+    layout::{Constraint, Layout, Rect},
     style::Style,
     widgets::{Padding, Paragraph},
 };
 
 use super::{BlockStyle, block::CornerBlock};
 use crate::{
-    config::{LayoutType, PlayerbarConfig, Theme},
+    config::{LayoutType, PlayerbarConfig, PlayerbarVisible, Theme},
     playback::PlaybackState,
 };
 
@@ -29,6 +29,23 @@ pub(super) struct LayoutArea {
     pub spinner: Rect,
     pub mode_icon: Rect,
     pub volume: Rect,
+    /// Spectrum row; a zero rect when the active layout has no spare row for it.
+    pub visualizer: Rect,
+}
+
+/// Split the layouts' spare row between the spectrum and the pitch readout, so enabling
+/// both does not draw them over each other. Either half is the whole row when only one
+/// of the two is visible.
+pub(super) fn spectrum_row(area: Rect, visible: &PlayerbarVisible) -> (Rect, Rect) {
+    const PITCH_WIDTH: u16 = 14;
+
+    if visible.visualizer && visible.pitch && area.width > PITCH_WIDTH {
+        let cols =
+            Layout::horizontal([Constraint::Min(0), Constraint::Length(PITCH_WIDTH)]).split(area);
+        (cols[0], cols[1])
+    } else {
+        (area, area)
+    }
 }
 
 pub(super) trait Playerbar {

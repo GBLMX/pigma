@@ -239,9 +239,54 @@ pub(super) fn draw_song_detail(f: &mut Frame, player: &PlaybackState, colors: &T
         f.render_widget(Paragraph::new(detail), area);
     }
 }
+/// Frequency bars of what is playing, one cell per column.
+pub(super) fn draw_visualizer(f: &mut Frame, player: &PlaybackState, colors: &Theme, area: Rect) {
+    let bars: Vec<char> = symbols().visualizer_bars.chars().collect();
+    let levels = &player.visualizer;
+    let columns = area.width as usize;
+    if columns == 0 || area.height == 0 || bars.len() < 2 {
+        return;
+    }
+
+    let mut spans = Vec::with_capacity(columns);
+    for column in 0..columns {
+        let level = if levels.is_empty() {
+            0.0
+        } else {
+            // Spread the bands over the available width, one band per column.
+            let band = (column * levels.len() / columns).min(levels.len() - 1);
+            levels[band].clamp(0.0, 1.0)
+        };
+        let glyph = bars[(level * (bars.len() - 1) as f32).round() as usize];
+        let style = if level > 0.0 {
+            Style::default().fg(colors.accent)
+        } else {
+            Style::default().fg(colors.muted)
+        };
+        spans.push(Span::styled(glyph.to_string(), style));
+    }
+
+    f.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
+/// Dominant-pitch readout: note name with octave plus the detected frequency.
+pub(super) fn draw_pitch(f: &mut Frame, player: &PlaybackState, colors: &Theme, area: Rect) {
+    let Some(note) = &player.pitch else {
+        return;
+    };
+
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            format!("{} {:>4.0}Hz", note.label(), note.frequency),
+            Style::default().fg(colors.accent),
+        )))
+        .alignment(Alignment::Right),
+        area,
+    );
+}
+
 pub(super) fn draw_volume(f: &mut Frame, player: &PlaybackState, colors: &Theme, area: Rect) {
     let icon = symbols().volume_icon(player.volume);
-
     f.render_widget(
         Paragraph::new(Line::from(Span::styled(
             icon,
