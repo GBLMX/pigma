@@ -66,7 +66,7 @@ impl NcmClient {
             .request_weapi("/weapi/point/dailyTask", &params)
             .await?;
         let value: Value = serde_json::from_str(&result)?;
-        parse_msg(&value).map_err(|e| NcmError::parse(e, &value))
+        parse_daily_task(&value)
     }
 
     /// Listening check-in — report a song play record
