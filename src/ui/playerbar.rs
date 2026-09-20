@@ -31,6 +31,9 @@ pub(super) struct LayoutArea {
     pub volume: Rect,
     /// Spectrum row; a zero rect when the active layout has no spare row for it.
     pub visualizer: Rect,
+    /// Pitch readout cell, for layouts that can give it one of its own instead of sharing
+    /// the spectrum row.
+    pub pitch: Rect,
 }
 
 /// Split the layouts' spare row between the spectrum and the pitch readout, so enabling

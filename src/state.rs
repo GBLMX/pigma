@@ -108,6 +108,8 @@ pub struct State {
     pub volume_area: Rect,
     pub cover_area: Rect,
     pub spectrum_row_area: Rect,
+    /// Pitch readout cell, when the layout gave it one of its own.
+    pub pitch_area: Rect,
     /// Volume to restore when the volume icon is clicked again.
     pub volume_before_mute: Option<f64>,
 }

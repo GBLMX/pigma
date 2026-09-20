@@ -6,6 +6,7 @@ use ratatui::{
     widgets::{LineGauge, Paragraph},
 };
 use ratatui_image::{Resize, StatefulImage};
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::{
     config::{PlayerbarConfig, Theme, symbols},
@@ -270,19 +271,83 @@ pub(super) fn draw_visualizer(f: &mut Frame, player: &PlaybackState, colors: &Th
 }
 
 /// Dominant-pitch readout: note name with octave plus the detected frequency.
-pub(super) fn draw_pitch(f: &mut Frame, player: &PlaybackState, colors: &Theme, area: Rect) {
+///
+/// A narrow area cannot hold the whole label, and truncating it would hide the octave or
+/// the frequency, so the text scrolls through the area and wraps around instead.
+pub(super) fn draw_pitch(
+    f: &mut Frame,
+    player: &PlaybackState,
+    colors: &Theme,
+    tick: u64,
+    area: Rect,
+) {
     let Some(note) = &player.pitch else {
         return;
     };
 
+    let label = format!("{} {:>4.0}Hz", note.label(), note.frequency);
+    let width = UnicodeWidthStr::width(label.as_str());
+    let style = Style::default().fg(colors.accent);
+
+    if width <= area.width as usize {
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(label, style))).alignment(Alignment::Right),
+            area,
+        );
+        return;
+    }
+
+    // One cell per two ticks (~160ms at the loop's rate): fast enough to read, slow
+    // enough not to blur into noise.
+    let offset = (tick / PITCH_SCROLL_TICKS) as usize;
+    let scrolled = scroll_text(
+        &format!("{label}{PITCH_SCROLL_GAP}"),
+        offset,
+        area.width as usize,
+    );
     f.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            format!("{} {:>4.0}Hz", note.label(), note.frequency),
-            Style::default().fg(colors.accent),
-        )))
-        .alignment(Alignment::Right),
+        Paragraph::new(Line::from(Span::styled(scrolled, style))).alignment(Alignment::Left),
         area,
     );
+}
+
+/// Ticks per scrolled cell of the pitch readout.
+const PITCH_SCROLL_TICKS: u64 = 2;
+/// Cells of blank between two passes of a scrolling readout.
+const PITCH_SCROLL_GAP: &str = "   ";
+
+/// A window of `width` cells into `text`, starting `offset` cells in and wrapping around.
+///
+/// Widths are measured per character, so a wide glyph occupies the two cells it draws and
+/// the window never ends mid-glyph.
+pub(super) fn scroll_text(text: &str, offset: usize, width: usize) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let total: usize = chars
+        .iter()
+        .map(|c| UnicodeWidthChar::width(*c).unwrap_or(0))
+        .sum();
+    if total == 0 || width == 0 {
+        return String::new();
+    }
+
+    let start = offset % total;
+    let mut out = String::new();
+    let mut used = 0usize;
+    let mut index = 0usize;
+    // Walk far enough to fill `width` cells, with a hard bound so a text made only of
+    // zero-width characters cannot spin here.
+    let max_steps = chars.len() * 2 + width;
+    while used < width && index < max_steps {
+        let ch = chars[(start + index) % chars.len()];
+        let ch_width = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if used + ch_width > width {
+            break;
+        }
+        out.push(ch);
+        used += ch_width;
+        index += 1;
+    }
+    out
 }
 
 pub(super) fn draw_volume(f: &mut Frame, player: &PlaybackState, colors: &Theme, area: Rect) {
@@ -325,5 +390,39 @@ pub(super) fn draw_cover(f: &mut Frame, player: &PlaybackState, colors: &Theme, 
             cell.set_char(icon.chars().next().unwrap_or('♪'));
             cell.set_style(Style::default().fg(colors.accent));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::scroll_text;
+
+    /// The marquee window slides by whole cells, wraps around, and fills the width it was
+    /// given — the pitch readout relies on all three to stay readable in a narrow cell.
+    #[test]
+    fn scroll_text_wraps_and_clips_by_cells() {
+        assert_eq!(scroll_text("A4  440Hz", 0, 4), "A4  ");
+        assert_eq!(scroll_text("A4  440Hz", 2, 4), "  44");
+        assert_eq!(scroll_text("A4  440Hz", 9, 4), "A4  ", "wraps to the start");
+        assert_eq!(scroll_text("abc", 2, 6), "cabcab");
+        assert_eq!(
+            scroll_text("ab", 0, 5),
+            "ababa",
+            "repeats to fill the width"
+        );
+    }
+
+    /// A wide glyph takes the two cells it draws and is never cut in half.
+    #[test]
+    fn scroll_text_never_splits_a_wide_glyph() {
+        assert_eq!(scroll_text("中ab", 0, 2), "中");
+        assert_eq!(scroll_text("中ab", 1, 2), "ab");
+        assert_eq!(scroll_text("中ab", 1, 1), "a");
+    }
+
+    #[test]
+    fn scroll_text_handles_degenerate_input() {
+        assert_eq!(scroll_text("", 0, 4), "");
+        assert_eq!(scroll_text("abc", 0, 0), "");
     }
 }

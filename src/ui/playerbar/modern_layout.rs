@@ -94,8 +94,9 @@ impl Playerbar for ModernLayout {
             volume: vol_mode_cols[0],
             mode_icon: vol_mode_cols[1],
             visualizer: spectrum_row,
-            // No room for the pitch readout: the row it could use is only as wide as the
-            // cover column.
+            // The cell beside the song info is idle except while seeking, so the readout
+            // lives there and scrolls through it.
+            pitch: middle_cols[1],
             ..Default::default()
         }
     }
@@ -120,6 +121,8 @@ impl Playerbar for ModernLayout {
         widgets::draw_song_info(f, player, colors, layout.song_info);
         if player.seeking && config.visible.spinner && layout.spinner.width > 0 {
             widgets::draw_spinner(f, tick, colors, layout.spinner);
+        } else if config.visible.pitch && layout.pitch.width > 0 {
+            widgets::draw_pitch(f, player, colors, tick, layout.pitch);
         }
 
         widgets::draw_song_detail(f, player, colors, layout.song_detail);
@@ -156,5 +159,11 @@ mod tests {
         assert_eq!(layout.visualizer.y, layout.cover.y + layout.cover.height);
         assert_eq!(layout.visualizer.width, layout.cover.width);
         assert_eq!(layout.visualizer.x, layout.cover.x);
+        // The readout has a cell of its own here, so it never has to share that row.
+        assert_eq!(layout.pitch.height, 1);
+        assert!(
+            layout.pitch.width > 0,
+            "the pitch cell is the idle one beside the song info"
+        );
     }
 }

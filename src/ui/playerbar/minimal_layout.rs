@@ -48,7 +48,7 @@ impl Playerbar for MinimalLayout {
         f: &mut Frame,
         player: &PlaybackState,
         colors: &Theme,
-        _tick: u64,
+        tick: u64,
         config: &PlayerbarConfig,
         layout: &LayoutArea,
     ) {
@@ -68,7 +68,7 @@ impl Playerbar for MinimalLayout {
                 widgets::draw_visualizer(f, player, colors, bars);
             }
             if config.visible.pitch {
-                widgets::draw_pitch(f, player, colors, pitch);
+                widgets::draw_pitch(f, player, colors, tick, pitch);
             }
         }
     }

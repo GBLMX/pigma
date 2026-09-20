@@ -344,16 +344,24 @@ fn handle_click(app: &mut App, col: u16, row: u16) {
 /// The player bar's own click targets: the spectrum row, the volume icon and the cover.
 /// Returns whether the click was one of them.
 fn click_playerbar(app: &mut App, col: u16, row: u16) -> bool {
-    if app.state.spectrum_row_area.width > 0 && app.config.playerbar.visible.visualizer {
-        // Clicking a readout hides it; `:visualizer on` / `:pitch on` bring it back.
-        let (bars, pitch) =
+    if app.state.spectrum_row_area.width > 0 || app.state.pitch_area.width > 0 {
+        // Clicking a readout hides it; `:visualizer on` / `:pitch on` bring it back. The
+        // pitch cell is its own in layouts that have one, and part of the spectrum row
+        // otherwise.
+        let (bars, shared) =
             playerbar::spectrum_row(app.state.spectrum_row_area, &app.config.playerbar.visible);
+        let pitch = if app.state.pitch_area.width > 0 {
+            app.state.pitch_area
+        } else {
+            shared
+        };
+
         if app.config.playerbar.visible.pitch && hit::contains(pitch, col, row) {
             app.config.playerbar.visible.pitch = false;
             app.toast("音高已隐藏（:pitch on 恢复）".to_string());
             return true;
         }
-        if hit::contains(bars, col, row) {
+        if app.config.playerbar.visible.visualizer && hit::contains(bars, col, row) {
             app.config.playerbar.visible.visualizer = false;
             app.toast("频谱已隐藏（:visualizer on 恢复）".to_string());
             return true;

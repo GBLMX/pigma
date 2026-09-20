@@ -205,6 +205,7 @@ impl App {
             volume_area: Rect::default(),
             cover_area: Rect::default(),
             spectrum_row_area: Rect::default(),
+            pitch_area: Rect::default(),
             volume_before_mute: None,
         };
         state.navigation.search.providers = search_providers;

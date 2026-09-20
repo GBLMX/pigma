@@ -94,6 +94,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             app.state.volume_area = playerbar_areas.volume;
             app.state.cover_area = playerbar_areas.cover;
             app.state.spectrum_row_area = playerbar_areas.visualizer;
+            app.state.pitch_area = playerbar_areas.pitch;
 
             match page {
                 Page::Main => {
