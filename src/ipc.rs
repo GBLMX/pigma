@@ -342,6 +342,20 @@ enum IpcListener {
     Pipe { name: String },
 }
 
+/// Restrict the IPC socket to its owner. The endpoint is user-scoped (see the module docs),
+/// so no other account needs access; the process umask would otherwise leave it reachable
+/// by group/other.
+#[cfg(unix)]
+fn restrict_socket(path: &std::path::Path) {
+    use std::os::unix::fs::PermissionsExt;
+    if let Err(e) = fs::set_permissions(path, fs::Permissions::from_mode(0o600)) {
+        log::warn!(
+            "ipc: failed to restrict permissions of {}: {e}",
+            path.display()
+        );
+    }
+}
+
 /// Bind the listener, clearing any stale file left by a previous run on Unix.
 /// Returns `None` when another pigma instance already holds the endpoint.
 impl IpcListener {
@@ -353,7 +367,10 @@ impl IpcListener {
                 let _ = fs::create_dir_all(dir);
             }
             match tokio::net::UnixListener::bind(&path) {
-                Ok(listener) => Some(Self::Unix(listener)),
+                Ok(listener) => {
+                    restrict_socket(&path);
+                    Some(Self::Unix(listener))
+                }
                 Err(_) => {
                     // Either a live instance owns the socket or it is stale.
                     // A non-blocking connect probe tells us which: if we can
@@ -367,7 +384,11 @@ impl IpcListener {
                         return None;
                     }
                     let _ = fs::remove_file(&path);
-                    tokio::net::UnixListener::bind(&path).ok().map(Self::Unix)
+                    let listener = tokio::net::UnixListener::bind(&path).ok();
+                    if listener.is_some() {
+                        restrict_socket(&path);
+                    }
+                    listener.map(Self::Unix)
                 }
             }
         }
