@@ -13,9 +13,11 @@ use super::{
     content::{ContentState, TableMode},
     search::SearchState,
 };
-use crate::config::NavConfig;
-use crate::event::{AppEvent, Event};
 pub use crate::config::{NavItemConfig, NavSectionConfig as NavSection};
+use crate::{
+    config::NavConfig,
+    event::{AppEvent, Event},
+};
 
 pub struct NavState {
     pub sections: Vec<NavSection>,

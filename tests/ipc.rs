@@ -53,7 +53,10 @@ fn tmp_socket(tag: &str) -> std::path::PathBuf {
     {
         // Named pipes live in a global namespace, so make the name unique per
         // test (parallel-safe) and per process.
-        std::path::PathBuf::from(format!(r"\\.\pipe\boxpigma-test-{}-{tag}", std::process::id()))
+        std::path::PathBuf::from(format!(
+            r"\\.\pipe\boxpigma-test-{}-{tag}",
+            std::process::id()
+        ))
     }
 }
 

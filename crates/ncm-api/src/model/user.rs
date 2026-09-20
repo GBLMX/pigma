@@ -66,7 +66,8 @@ mod daily_task_tests {
 
     #[test]
     fn already_signed_in_is_a_normal_result() {
-        let msg = parse_daily_task(&json!({ "code": -2, "msg": "今天已签到" })).expect("-2 不是错误");
+        let msg =
+            parse_daily_task(&json!({ "code": -2, "msg": "今天已签到" })).expect("-2 不是错误");
         assert_eq!(msg.code, -2);
         assert_eq!(msg.msg, "今天已签到");
         let bare = parse_daily_task(&json!({ "code": -2 })).expect("-2 不是错误");
@@ -75,10 +76,14 @@ mod daily_task_tests {
 
     #[test]
     fn a_business_failure_is_an_error_that_names_the_cause() {
-        let err = parse_daily_task(&json!({ "code": 301, "msg": "需要登录" })).expect_err("301 应当报错");
+        let err =
+            parse_daily_task(&json!({ "code": 301, "msg": "需要登录" })).expect_err("301 应当报错");
         let text = err.to_string();
         assert!(text.contains("301"), "错误里应带服务端 code，实得 {text:?}");
-        assert!(text.contains("需要登录"), "错误里应带服务端 msg，实得 {text:?}");
+        assert!(
+            text.contains("需要登录"),
+            "错误里应带服务端 msg，实得 {text:?}"
+        );
     }
 }
 
@@ -300,16 +305,27 @@ mod login_error_tests {
     #[test]
     fn risk_control_tells_the_user_the_way_out() {
         // Verified against the live API: -460 carried only `message`, and used to lose it entirely.
-        let text = error_text(json!({ "code": -460, "message": "检测到您的网络环境存在风险，请稍后再试" }));
-        assert!(text.contains("二维码"), "风控错误必须给出可行的出路，实得 {text:?}");
+        let text = error_text(
+            json!({ "code": -460, "message": "检测到您的网络环境存在风险，请稍后再试" }),
+        );
+        assert!(
+            text.contains("二维码"),
+            "风控错误必须给出可行的出路，实得 {text:?}"
+        );
         let text = error_text(json!({ "code": -462 }));
-        assert!(text.contains("二维码"), "滑块验证在终端里做不了，必须指向二维码，实得 {text:?}");
+        assert!(
+            text.contains("二维码"),
+            "滑块验证在终端里做不了，必须指向二维码，实得 {text:?}"
+        );
     }
 
     #[test]
     fn the_server_message_is_used_when_it_has_one() {
         let text = error_text(json!({ "code": 999, "message": "服务端原话" }));
-        assert!(text.contains("服务端原话"), "服务端的 message 字段不能被丢弃，实得 {text:?}");
+        assert!(
+            text.contains("服务端原话"),
+            "服务端的 message 字段不能被丢弃，实得 {text:?}"
+        );
     }
 
     #[test]

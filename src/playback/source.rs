@@ -683,8 +683,16 @@ impl AudioSource {
 
         // 4. NCM streaming, then the third-party sources, then the user's own cloud disk: the song
         //    is only declared unplayable when all three failed.
-        let sonar = self.sonar_enabled.then_some(|| self.resolve_providers(song));
-        resolve_streaming(song, || self.resolve_ncm(song), sonar, || self.resolve_cloud(song)).await
+        let sonar = self
+            .sonar_enabled
+            .then_some(|| self.resolve_providers(song));
+        resolve_streaming(
+            song,
+            || self.resolve_ncm(song),
+            sonar,
+            || self.resolve_cloud(song),
+        )
+        .await
     }
 }
 
@@ -938,10 +946,7 @@ mod tests {
         .await
         .expect_err("the transport failure is reported");
         assert_eq!(attempts.load(Ordering::SeqCst), 2, "网络错误只重试一次");
-        assert!(
-            cloud_asked.load(Ordering::SeqCst),
-            "重试耗尽后仍要尝试云盘"
-        );
+        assert!(cloud_asked.load(Ordering::SeqCst), "重试耗尽后仍要尝试云盘");
         assert!(
             matches!(&error, SourceError::Network(message) if message == "boom"),
             "重试耗尽且云盘未命中时返回网络错误, got {error:?}"

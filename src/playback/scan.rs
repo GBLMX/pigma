@@ -38,9 +38,11 @@ fn read_tags(path: &Path) -> LocalTags {
         tag::ItemKey,
     };
 
-    let Ok(tagged) = Probe::open(path)
-        .and_then(|probe| probe.options(ParseOptions::new().read_cover_art(false)).read())
-    else {
+    let Ok(tagged) = Probe::open(path).and_then(|probe| {
+        probe
+            .options(ParseOptions::new().read_cover_art(false))
+            .read()
+    }) else {
         return LocalTags::default();
     };
     // Primary tag first (ID3v2 for mp3, Vorbis comments for flac, ...), then
@@ -151,10 +153,8 @@ mod tests {
 
     /// A scratch directory this test owns; `label` keeps parallel tests apart.
     fn temp_dir(label: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "boxpigma-scan-test-{}-{label}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("boxpigma-scan-test-{}-{label}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("create scratch dir");
         dir

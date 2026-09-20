@@ -20,11 +20,7 @@ use ratatui_image::{Resize, StatefulImage};
 use time::{OffsetDateTime, UtcOffset, format_description::FormatItem, macros::format_description};
 
 use super::{
-    BlockStyle,
-    block::CornerBlock,
-    scrollbar::calc_scroll_offset,
-    skeleton::Skeleton,
-    table,
+    BlockStyle, block::CornerBlock, scrollbar::calc_scroll_offset, skeleton::Skeleton, table,
     title::render_title,
 };
 use crate::{
@@ -521,7 +517,10 @@ mod tests {
         );
         assert!(all.contains("布拉格广场"), "a hot song is missing:\n{all}");
         assert!(all.contains("04:54"), "a song length is missing:\n{all}");
-        assert!(all.contains("专辑 (2/44)"), "the album pane is missing:\n{all}");
+        assert!(
+            all.contains("专辑 (2/44)"),
+            "the album pane is missing:\n{all}"
+        );
         assert!(
             all.contains("最伟大的作品"),
             "an album name is missing:\n{all}"

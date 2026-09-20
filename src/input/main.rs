@@ -106,10 +106,7 @@ pub(super) fn handle_main_key(app: &mut App, key_event: KeyEvent) -> color_eyre:
         }
         KeyCode::Left => {
             if app.state.navigation.table_mode == TableMode::Cell
-                && matches!(
-                    app.state.navigation.page,
-                    Page::Main | Page::Lyrics
-                )
+                && matches!(app.state.navigation.page, Page::Main | Page::Lyrics)
             {
                 cell_select_prev_column(app);
             } else if app.playback.current_song().is_some() {
@@ -119,10 +116,7 @@ pub(super) fn handle_main_key(app: &mut App, key_event: KeyEvent) -> color_eyre:
         }
         KeyCode::Right => {
             if app.state.navigation.table_mode == TableMode::Cell
-                && matches!(
-                    app.state.navigation.page,
-                    Page::Main | Page::Lyrics
-                )
+                && matches!(app.state.navigation.page, Page::Main | Page::Lyrics)
             {
                 cell_select_next_column(app);
             } else if app.playback.current_song().is_some() {
@@ -591,7 +585,9 @@ fn open_artist_from_table(app: &mut App) -> bool {
     };
     let io = artist_io(app);
     app.state.navigation.artist.open(id, name, pic_url, io);
-    app.state.events.send(NavigationEvent::Navigate(Page::Artist));
+    app.state
+        .events
+        .send(NavigationEvent::Navigate(Page::Artist));
     true
 }
 
