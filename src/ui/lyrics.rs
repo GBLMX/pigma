@@ -318,10 +318,13 @@ fn flow_line<'a>(view: &View<'a>, text: &'a str, keep: f32) -> Line<'a> {
     line.alignment(Alignment::Center)
 }
 
-/// How far the gradient has travelled, from the frame counter. Slow enough to read: one full
-/// pass takes roughly eight seconds.
+/// How far the gradient has travelled, from the frame counter.
+///
+/// `tick` advances once per 80ms of wall time (`ui::draw`), not once per frame, so this is a
+/// speed rather than a per-frame step and the flow looks the same on a busy and an idle page:
+/// 12.5 ticks a second at 0.01 leaves one pass through the palette taking eight seconds.
 fn flow_phase(tick: u64) -> f32 {
-    const PER_TICK: f32 = 0.004;
+    const PER_TICK: f32 = 0.01;
     (tick as f32 * PER_TICK).rem_euclid(1.0)
 }
 
@@ -503,6 +506,23 @@ mod tests {
         assert!(
             rows.iter().any(|r| r.contains("line3")) && rows.iter().any(|r| r.contains("line5")),
             "the flow keeps the window: {rows:?}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod flow_speed {
+    use super::*;
+
+    /// One pass should take about eight seconds, and `tick` counts 80ms steps, so a second is
+    /// 12.5 ticks: assert the pace instead of trusting the constant's comment.
+    #[test]
+    fn one_pass_takes_about_eight_seconds() {
+        let ticks_per_second = 1000.0 / 80.0;
+        let seconds_per_pass = 1.0 / (flow_phase(1) as f64 * ticks_per_second);
+        assert!(
+            (7.0..9.0).contains(&seconds_per_pass),
+            "one pass takes {seconds_per_pass:.1}s, which is not the pace this is meant to have"
         );
     }
 }
