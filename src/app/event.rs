@@ -13,7 +13,42 @@ use crate::{
     state::{CommandAction, ContentState},
 };
 
+/// How much of a song the cloud counts as a listen; the official client reports around
+/// this point, so there is no reason to sit through the whole track.
+const LISTEN_THRESHOLD: Duration = Duration::from_secs(30);
+
+/// Whether a position means the song has now been listened to and still needs reporting.
+fn listen_due(position: Duration, song_id: u64, reported: Option<u64>) -> bool {
+    position >= LISTEN_THRESHOLD && reported != Some(song_id)
+}
+
 impl App {
+    /// Report the listen the cloud counts, the way the official client does: about thirty
+    /// seconds in rather than at the end, and once per play.
+    fn report_listen(&mut self, position: Duration) {
+        let Some(song_id) = self
+            .playback
+            .state
+            .current_song
+            .as_ref()
+            .map(|song| song.id)
+        else {
+            return;
+        };
+        if !listen_due(position, song_id, self.reported_listen) {
+            return;
+        }
+        self.reported_listen = Some(song_id);
+
+        let service = self.service.clone();
+        let played_ms = position.as_millis() as u64;
+        tokio::spawn(async move {
+            if let Err(error) = service.report_play(song_id, played_ms).await {
+                log::debug!("report_play({song_id}): {error}");
+            }
+        });
+    }
+
     pub(super) async fn handle_events(&mut self) -> color_eyre::Result<()> {
         if self.playback.state.seeking {
             tokio::select! {
@@ -76,17 +111,23 @@ impl App {
     fn handle_playback_event(&mut self, event: PlaybackEvent) {
         match event {
             PlaybackEvent::SongPlay(id) => self.handle_song_play(id),
-            PlaybackEvent::Started => self.handle_playback_started(),
+            PlaybackEvent::Started => {
+                self.reported_listen = None;
+                self.handle_playback_started();
+            }
             PlaybackEvent::Progress { position, total } => {
                 self.playback.on_playback_progress(position, total);
+                self.report_listen(position);
             }
             PlaybackEvent::Finished => {
-                // NetEase only counts a listen when the client reports it, and that record
-                // is what feeds 最近播放 and the recommendations. Only songs that ran to the
-                // end count — a skip is not a listen.
+                // The cloud only counts a listen when the client reports it, and that record
+                // is what feeds 最近播放 and the recommendations. Long songs were already
+                // reported thirty seconds in; this catches the ones too short to reach it,
+                // where a completed play is the whole song.
                 let finished = self.playback.finish_and_snapshot();
                 if let Some((song_id, duration_ms, progress)) = finished
                     && progress >= 0.9
+                    && Duration::from_millis(duration_ms) < LISTEN_THRESHOLD
                 {
                     let service = self.service.clone();
                     tokio::spawn(async move {
@@ -320,5 +361,32 @@ impl App {
                 self.toast(msg);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The listen rule the cloud cares about: a listen is counted about thirty seconds in,
+    /// once per play, and a different song is a different listen.
+    #[test]
+    fn a_listen_is_reported_once_past_the_threshold() {
+        let below = LISTEN_THRESHOLD - Duration::from_secs(1);
+        assert!(!listen_due(below, 42, None), "not a listen yet");
+        assert!(listen_due(LISTEN_THRESHOLD, 42, None), "at the threshold");
+        assert!(listen_due(
+            LISTEN_THRESHOLD + Duration::from_secs(5),
+            42,
+            None
+        ));
+        assert!(
+            !listen_due(LISTEN_THRESHOLD, 42, Some(42)),
+            "the same play is only reported once"
+        );
+        assert!(
+            listen_due(LISTEN_THRESHOLD, 7, Some(42)),
+            "the next song counts again"
+        );
     }
 }

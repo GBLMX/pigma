@@ -64,6 +64,9 @@ pub struct App {
     pub searcher: Arc<SearchEngine>,
     /// Song ID set of the user's "我喜欢的音乐" playlist, sharing the same `Arc` as `PlaybackEngine`.
     pub liked_ids: Arc<Mutex<HashSet<u64>>>,
+    /// Song whose listen has already been reported to the cloud, so one play reports once.
+    /// Cleared when a track starts, which is what lets a repeat of the same song count.
+    pub(super) reported_listen: Option<u64>,
     /// Playlists whose full tracks have already been merged into the playback queue for lazy pagination, avoiding repeated Enter presses refetching/truncating the queue.
     queued_playlists: HashSet<u64>,
     /// Live playback snapshot served to `pigma status` over the IPC socket.
@@ -247,6 +250,7 @@ impl App {
             search_results,
             searcher,
             liked_ids,
+            reported_listen: None,
             queued_playlists: HashSet::new(),
             status: Arc::new(Mutex::new(StatusSnapshot::default())),
             queue: Arc::new(Mutex::new(QueueSnapshot::default())),
