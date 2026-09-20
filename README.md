@@ -3,7 +3,7 @@
 [![CI](https://github.com/akirco/pigma/actions/workflows/ci.yml/badge.svg)](https://github.com/akirco/pigma/actions/workflows/ci.yml)
 [![Release](https://github.com/akirco/pigma/actions/workflows/release.yml/badge.svg)](https://github.com/akirco/pigma/actions/workflows/release.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![AUR Version](https://img.shields.io/aur/version/pigma-bin)](https://aur.archlinux.org/packages/pigma-bin)
+[![AUR Version](https://img.shields.io/aur/version/pigma-gblmx-bin)](https://aur.archlinux.org/packages/pigma-gblmx-bin)
 ![GitHub repo size](https://img.shields.io/github/repo-size/akirco/pigma)
 
 
@@ -133,11 +133,11 @@ scoop install aki/pigma
 
 `linux(aur)`
 ```sh
-yay -S pigma
+yay -S pigma-gblmx-bin
 
 #or
 
-paru -S pigma
+paru -S pigma-gblmx-bin
 ```
 
 `macOS`
