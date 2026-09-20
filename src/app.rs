@@ -286,6 +286,26 @@ impl App {
         self.toast(format!("频谱: {}", if on { "开" } else { "关" }));
     }
 
+    /// Switch the player bar layout (`:layout default|modern|minimal`).
+    ///
+    /// Worth knowing before switching: the modern layout fills every row with something, so
+    /// the spectrum has to share the cover column there and is only eight cells wide; the
+    /// other two layouts give it a full-width row.
+    pub fn set_playerbar_layout(&mut self, name: &str) -> Result<(), String> {
+        let layout = match name.to_ascii_lowercase().as_str() {
+            "default" => crate::config::LayoutType::Default,
+            "modern" => crate::config::LayoutType::Modern,
+            "minimal" => crate::config::LayoutType::Minimal,
+            other => {
+                return Err(format!("未知布局: {other}（default / modern / minimal）"));
+            }
+        };
+        self.config.playerbar.layout = layout;
+        self.config.save();
+        self.toast(format!("播放条布局: {}", name.to_ascii_lowercase()));
+        Ok(())
+    }
+
     /// Show or hide the pitch readout (`V`, `:pitch on|off`).
     pub fn set_pitch(&mut self, on: bool) {
         self.config.playerbar.visible.pitch = on;

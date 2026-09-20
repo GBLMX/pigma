@@ -17,8 +17,9 @@ use crate::{
 };
 
 /// Command names the prompt knows, used for `Tab` completion and suggestions.
-const COMMANDS: [&str; 10] = [
+const COMMANDS: [&str; 11] = [
     "help",
+    "layout",
     "login",
     "pitch",
     "q",
@@ -42,6 +43,7 @@ pub(super) enum ExCommand {
     Seek(String),
     Visualizer(bool),
     Pitch(bool),
+    Layout(String),
 }
 
 impl ExCommand {
@@ -72,6 +74,7 @@ impl ExCommand {
             "seek" => Ok(Self::Seek(required("跳转位置")?)),
             "visualizer" => Ok(Self::Visualizer(parse_on_off(argument)?)),
             "pitch" => Ok(Self::Pitch(parse_on_off(argument)?)),
+            "layout" => Ok(Self::Layout(required("布局名")?)),
             other => Err(format!("未知命令: {other}")),
         }
     }
@@ -105,6 +108,7 @@ fn candidate_names(head: &str, typed: &str, themes: &[&str]) -> Vec<String> {
         match name {
             "theme" => themes.to_vec(),
             "visualizer" | "pitch" => vec!["off", "on"],
+            "layout" => vec!["default", "minimal", "modern"],
             _ => Vec::new(),
         }
     };
@@ -241,6 +245,7 @@ fn execute(app: &mut App, command: ExCommand) -> Result<(), String> {
         ExCommand::Seek(value) => seek(app, &value)?,
         ExCommand::Visualizer(on) => app.set_visualizer(on),
         ExCommand::Pitch(on) => app.set_pitch(on),
+        ExCommand::Layout(name) => app.set_playerbar_layout(&name)?,
     }
     Ok(())
 }
@@ -302,6 +307,10 @@ mod tests {
             Ok(ExCommand::Visualizer(true))
         );
         assert_eq!(ExCommand::parse("pitch 0"), Ok(ExCommand::Pitch(false)));
+        assert_eq!(
+            ExCommand::parse("layout default"),
+            Ok(ExCommand::Layout("default".to_string()))
+        );
         // surrounding whitespace is the user's business, not an error
         assert_eq!(ExCommand::parse("  q  "), Ok(ExCommand::Quit));
     }
@@ -320,6 +329,9 @@ mod tests {
 
         let bad_flag = ExCommand::parse("pitch maybe").unwrap_err();
         assert!(bad_flag.contains("on/off"), "got {bad_flag}");
+
+        let bad_layout = ExCommand::parse("layout").unwrap_err();
+        assert!(bad_layout.contains("布局名"), "got {bad_layout}");
 
         assert!(ExCommand::parse("   ").is_err());
     }
@@ -386,6 +398,14 @@ mod tests {
         assert_eq!(
             candidate_names("visualizer ", "", &THEMES),
             vec!["off", "on"]
+        );
+        assert_eq!(
+            candidate_names("layout ", "", &THEMES),
+            vec!["default", "minimal", "modern"]
+        );
+        assert_eq!(
+            completion("layout mod", &THEMES),
+            Some("layout modern ".to_string())
         );
 
         // a command without an argument pool has nothing to offer

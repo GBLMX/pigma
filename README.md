@@ -223,6 +223,7 @@ cargo build --release
 | `:volume 75` / `:volume +5` / `:volume -10` | 音量（与 `pigma msg volume` 同一套语法） |
 | `:seek 90` / `:seek +15` / `:seek -30` / `:seek 50%` | 跳到某秒 / 相对跳转 / 百分比 |
 | `:visualizer on\|off` | 频谱显示开关（同 `v` 键） |
+| `:layout default\|modern\|minimal` | 播放条布局（`modern` 下频谱只有封面列的 8 格宽，另两种布局是整行） |
 | `:pitch on\|off` | 音高读数开关（同 `V` 键） |
 
 终端背景为浅色时，`:theme` 配合配置里的 `background = "auto"` 与 `light_theme` 会自动选浅色主题。
