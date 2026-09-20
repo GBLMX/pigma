@@ -1,4 +1,4 @@
-//! IPC between the running TUI and the `pigma status` / `pigma msg` CLI
+//! IPC between the running TUI and the `boxpigma status` / `boxpigma msg` CLI
 //! commands.
 //!
 //! The TUI binds a listener and accepts one-line JSON requests:
@@ -10,7 +10,7 @@
 //!   app's event channel and replies `{"ok":true}`.
 //!
 //! Transport is platform-specific: a Unix domain socket at
-//! `~/.cache/pigma/pigma.sock` on Linux/macOS, and a named pipe `\\.\pipe\pigma`
+//! `~/.cache/boxpigma/boxpigma.sock` on Linux/macOS, and a named pipe `\\.\pipe\boxpigma`
 //! on Windows. The endpoint is user-scoped so no authentication is needed.
 
 #[cfg(unix)]
@@ -29,33 +29,33 @@ use tokio::{
 };
 
 #[cfg(unix)]
-use crate::utils::pigma_cache_dir;
+use crate::utils::boxpigma_cache_dir;
 use crate::{
     event::{AppEvent, Event},
     playback::PlayMode,
 };
 
-/// Socket file name inside `pigma_cache_dir()` (Unix only).
-pub const SOCKET_FILE: &str = "pigma.sock";
+/// Socket file name inside `boxpigma_cache_dir()` (Unix only).
+pub const SOCKET_FILE: &str = "boxpigma.sock";
 
 /// Default named-pipe name on Windows.
 #[cfg(windows)]
-const PIPE_NAME: &str = r"\\.\pipe\pigma";
+const PIPE_NAME: &str = r"\\.\pipe\boxpigma";
 
 /// Request sent from the CLI to the running TUI.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "cmd", rename_all = "snake_case")]
 pub enum IpcRequest {
     Status,
-    /// Return the current playback queue (`pigma status -L`).
+    /// Return the current playback queue (`boxpigma status -L`).
     List,
     /// Keep the connection open and stream each `StatusSnapshot` change as a
     /// JSON line. An initial snapshot is sent immediately on connect.
     Subscribe,
     /// Search songs across NCM and the enabled sonar providers
-    /// (`pigma msg search <keyword>`). The server replies with a JSON array of
+    /// (`boxpigma msg search <keyword>`). The server replies with a JSON array of
     /// [`SearchEntry`]; results are registered in-process so a returned id can
-    /// later be played with `pigma msg play <id>`.
+    /// later be played with `boxpigma msg play <id>`.
     Search {
         keyword: String,
     },
@@ -64,7 +64,7 @@ pub enum IpcRequest {
     },
 }
 
-/// A playback control action for `pigma msg`.
+/// A playback control action for `boxpigma msg`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum MsgAction {
@@ -72,7 +72,7 @@ pub enum MsgAction {
     Next,
     Pause,
     /// Resume when paused, start when stopped. With `song_id` set, jump to that
-    /// song in the active queue and play it (`pigma msg play <id>`).
+    /// song in the active queue and play it (`boxpigma msg play <id>`).
     Play {
         song_id: Option<u64>,
     },
@@ -143,7 +143,7 @@ impl From<MsgAction> for IpcEvent {
     }
 }
 
-/// Live playback state snapshot served to `pigma status`.
+/// Live playback state snapshot served to `boxpigma status`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct StatusSnapshot {
     pub id: u64,
@@ -214,7 +214,7 @@ fn mode_key(mode: &PlayMode) -> &'static str {
     }
 }
 
-/// A single entry in the playback queue, served to `pigma status -L`.
+/// A single entry in the playback queue, served to `boxpigma status -L`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueueEntry {
     pub id: u64,
@@ -236,7 +236,7 @@ impl QueueEntry {
     }
 }
 
-/// Full queue listing served to `pigma status -L`: the current song's queue
+/// Full queue listing served to `boxpigma status -L`: the current song's queue
 /// index (0-based, `None` when nothing is queued) plus the songs.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct QueueSnapshot {
@@ -244,7 +244,7 @@ pub struct QueueSnapshot {
     pub songs: Vec<QueueEntry>,
 }
 
-/// A search hit served to `pigma msg search <keyword>`. `source` tags the
+/// A search hit served to `boxpigma msg search <keyword>`. `source` tags the
 /// provider: `netease` for NetEase Cloud, otherwise the sonar provider name
 /// (`kugou` / `kuwo` / `bilivideo` / `youtube`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -273,7 +273,7 @@ impl SearchEntry {
 fn socket_path() -> PathBuf {
     #[cfg(unix)]
     {
-        pigma_cache_dir().join(SOCKET_FILE)
+        boxpigma_cache_dir().join(SOCKET_FILE)
     }
     #[cfg(windows)]
     {
@@ -306,7 +306,7 @@ pub fn set_socket_path(path: Option<PathBuf>) {
 }
 
 /// Resolve the socket path: a thread-local override if set, otherwise the
-/// process-wide override, otherwise the default location under `pigma_cache_dir()`.
+/// process-wide override, otherwise the default location under `boxpigma_cache_dir()`.
 fn resolve_socket_path() -> PathBuf {
     SOCKET_OVERRIDE
         .with(|c| c.borrow().clone())
@@ -357,7 +357,7 @@ fn restrict_socket(path: &std::path::Path) {
 }
 
 /// Bind the listener, clearing any stale file left by a previous run on Unix.
-/// Returns `None` when another pigma instance already holds the endpoint.
+/// Returns `None` when another boxpigma instance already holds the endpoint.
 impl IpcListener {
     fn bind() -> Option<Self> {
         let path = resolve_socket_path();
@@ -378,7 +378,7 @@ impl IpcListener {
                     // steal the socket.
                     if std::os::unix::net::UnixStream::connect(&path).is_ok() {
                         log::warn!(
-                            "ipc: another pigma instance already owns {}",
+                            "ipc: another boxpigma instance already owns {}",
                             path.display()
                         );
                         return None;
@@ -400,7 +400,7 @@ impl IpcListener {
                 Err(e) => {
                     // Windows releases the pipe name when the owning process
                     // exits, so a failed bind always means a live instance.
-                    log::warn!("ipc: another pigma instance already owns the pipe {name}: {e}");
+                    log::warn!("ipc: another boxpigma instance already owns the pipe {name}: {e}");
                     None
                 }
             }
@@ -616,7 +616,7 @@ async fn connect() -> color_eyre::Result<ClientStream> {
     let path = resolve_socket_path();
     client_connect(&path)
         .await
-        .wrap_err("pigma is not running (start the TUI or `pigma -d`, or check --socket)")
+        .wrap_err("boxpigma is not running (start the TUI or `boxpigma -d`, or check --socket)")
 }
 
 /// Send a `status` request and return the live snapshot.
@@ -667,9 +667,9 @@ pub async fn subscribe_status() -> color_eyre::Result<impl tokio::io::AsyncBufRe
     Ok(BufReader::new(stream))
 }
 
-/// Send a `search` request (`pigma msg search <keyword>`) and return the
+/// Send a `search` request (`boxpigma msg search <keyword>`) and return the
 /// matching songs, tagged by source and registered in the daemon for a later
-/// `pigma msg play <id>`.
+/// `boxpigma msg play <id>`.
 pub async fn search_songs(keyword: &str) -> color_eyre::Result<Vec<SearchEntry>> {
     let mut stream = connect().await?;
     let request = serde_json::to_string(&IpcRequest::Search {

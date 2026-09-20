@@ -3,7 +3,7 @@
 //! The prompt mirrors the search field's editing behaviour (`TextInput`, `Esc`, `Enter`)
 //! but executes ex commands instead of searching. Commands are named after what they do
 //! rather than after a key, so `:volume +5` and the `+` key reach the same code, and the
-//! volume grammar is the one `pigma msg volume` already accepts.
+//! volume grammar is the one `boxpigma msg volume` already accepts.
 
 use crossterm::event::{KeyCode, KeyEvent};
 
@@ -250,10 +250,9 @@ pub(super) fn handle_ex_key(app: &mut App, key_event: KeyEvent) -> bool {
         KeyCode::Left => app.state.prompt.input.move_left(),
         KeyCode::Right => app.state.prompt.input.move_right(),
         KeyCode::Tab => {
-            // Theme names come from the live registry, so `:theme <Tab>` offers exactly
-            // the themes this build can load, custom ones included.
-            let mut themes = app.theme_registry.all_names();
-            themes.sort_unstable();
+            // Theme names come from the live registry, so `:theme <Tab>` offers exactly the
+            // themes this build can load, custom ones included, plus `random`.
+            let themes = app.theme_registry.choosable_names();
 
             match completion(&app.state.prompt.input.value, &themes) {
                 Some(completed) => {
@@ -332,17 +331,21 @@ pub(crate) fn execute(app: &mut App, command: ExCommand) -> Result<(), String> {
             app.toast(format!("边听边存: {}", if enabled { "ON" } else { "OFF" }));
         }
         ExCommand::Theme(None) => {
-            let names = app.theme_registry.all_names();
+            let names = app.theme_registry.choosable_names();
             let current = names
                 .iter()
                 .position(|name| *name == app.config.default_theme)
                 .unwrap_or(0);
-            let next = names[(current + 1) % names.len().max(1)].to_string();
+            let requested = names[(current + 1) % names.len().max(1)];
+            let next = app.theme_registry.concrete_name(requested);
             app.config.default_theme = next.clone();
             app.config.save();
             app.toast(format!("主题: {next}"));
         }
         ExCommand::Theme(Some(name)) => {
+            // `random` is rolled now and the roll is what gets written: a *standing* random
+            // theme is `random` in the config file, and typing it again re-rolls.
+            let name = app.theme_registry.concrete_name(&name);
             app.config.default_theme = name.clone();
             app.config.save();
             app.toast(format!("主题: {name}"));

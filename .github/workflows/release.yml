@@ -96,7 +96,7 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           cd target/${{ matrix.target }}/release
-          tar czvf ../../../pigma-${{ matrix.target }}.tar.gz pigma
+          tar czvf ../../../boxpigma-${{ matrix.target }}.tar.gz boxpigma
           cd -
 
       - name: Package (windows)
@@ -104,16 +104,16 @@ jobs:
         shell: bash
         run: |
           cd target/${{ matrix.target }}/release
-          7z a ../../../pigma-${{ matrix.target }}.zip pigma.exe
+          7z a ../../../boxpigma-${{ matrix.target }}.zip boxpigma.exe
           cd ..
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v7
         with:
-          name: pigma-${{ matrix.target }}
+          name: boxpigma-${{ matrix.target }}
           path: |
-            pigma-${{ matrix.target }}.tar.gz
-            pigma-${{ matrix.target }}.zip
+            boxpigma-${{ matrix.target }}.tar.gz
+            boxpigma-${{ matrix.target }}.zip
 
   release:
     name: publish release
@@ -144,7 +144,7 @@ jobs:
       - name: Upload release
         uses: softprops/action-gh-release@v3
         with:
-          files: artifacts/pigma-*/pigma-*
+          files: artifacts/boxpigma-*/boxpigma-*
           body_path: release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -152,8 +152,8 @@ jobs:
     name: Publish to AUR
     needs: release
     # Fork-only: this pushes GBLMX's own package, so it must not run in a repo that is
-    # not ours (upstream publishes `pigma-bin` from the same job name in its own repo).
-    if: startsWith(github.ref, 'refs/tags/') && github.repository == 'GBLMX/pigma' # 只有在推送 tag 发布时才触发 AUR 更新
+    # not ours (upstream publishes `boxpigma-bin` from the same job name in its own repo).
+    if: startsWith(github.ref, 'refs/tags/') && github.repository == 'GBLMX/boxpigma' # 只有在推送 tag 发布时才触发 AUR 更新
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -178,7 +178,7 @@ jobs:
         # should verify what it downloads rather than ship sha256sums=('SKIP').
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}
-          ASSET="pigma-x86_64-unknown-linux-gnu.tar.gz"
+          ASSET="boxpigma-x86_64-unknown-linux-gnu.tar.gz"
           curl -sSfLO "https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/${ASSET}"
           SUM=$(sha256sum "${ASSET}" | cut -d' ' -f1)
           sed -i "s/^sha256sums=.*/sha256sums=('${SUM}')/" ./PKGBUILD
@@ -186,7 +186,7 @@ jobs:
       - name: Publish AUR package
         uses: KSXGitHub/github-actions-deploy-aur@v3
         with:
-          pkgname: 'pigma-gblmx-bin'
+          pkgname: 'boxpigma-gblmx-bin'
           pkgbuild: './PKGBUILD'
           commit_username: 'GitHub Actions'
           commit_email: 'actions@github.com'
@@ -197,7 +197,7 @@ jobs:
     needs: release
     # Upstream-only: the tap lives in akirco/homebrew-pigma and the job needs a token we
     # do not have, so it is skipped when this workflow runs in a fork.
-    if: startsWith(github.ref, 'refs/tags/') && github.repository == 'akirco/pigma' # 只有在推送 tag 发布时才更新 tap
+    if: startsWith(github.ref, 'refs/tags/') && github.repository == 'akirco/boxpigma' # 只有在推送 tag 发布时才更新 tap
     runs-on: ubuntu-latest
     steps:
       - name: Checkout tap repository
@@ -222,7 +222,7 @@ jobs:
           if git diff --cached --quiet; then
             echo "No formula changes"
           else
-            git commit -m "chore: update pigma to ${GITHUB_REF#refs/tags/}"
+            git commit -m "chore: update boxpigma to ${GITHUB_REF#refs/tags/}"
             git push
           fi
         env:

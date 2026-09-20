@@ -1,3 +1,31 @@
+## [1.0.0] - 2026-09-21
+
+### ⚠️ 破坏性变更
+
+- **改名 `pigma` → `boxpigma`**：包名、二进制名、配置目录（`~/.config/boxpigma`）、缓存目录（`~/.cache/boxpigma`）、IPC socket（`pigma.sock` → `boxpigma.sock`）与 Windows 命名管道（`\\.\pipe\boxpigma`）全部随之改名
+- **升级不会丢数据**：首次运行会把旧的 `pigma` 目录整体搬到新名字下（配置、cookie、队列、封面缓存都在里面），日志里留一行 `adopted … from before the rename`；若搬不动（比如旧实例还在跑、权限不足）则继续使用旧目录，绝不静默从空配置开始
+- 旧二进制与**正在运行的旧守护进程**不会自动升级：请重启守护进程；`~/.local/bin/pigma` 是旧文件，可自行删除
+- AUR 包名一并改为 `boxpigma-gblmx-bin`（发布到 AUR 需要以新包名注册；若希望保留旧包名，改回 `PKGBUILD` 与 release 工作流里的两处即可）
+
+### 🚀 Features
+
+- *(theme)* `default_theme = "random"`（以及 `light_theme`）每次启动随机挑一个主题；`:theme random` 立刻重掷并把抽到的那一个写回配置；补全与命令面板都能选到 `random`（它排在主题列表最前，因此循环切换每圈遇到一次）
+- *(log)* 日志改用 `tracing` + `tracing-appender`：按天轮转、保留最近 7 个，行内带模块路径与本地时间。此前是单个无限增长的文件（实测已 2.8 MB），且写入在调用线程持锁同步进行；**135 个 `log::*!` 调用点一行未改**，由 `tracing-log` 桥接
+- *(notify)* kitty 终端改用其自有的 `OSC 99` 通知：标题与正文分开、Base64 负载（`e=1`）、并用 `f=` 声明应用名，便于用户过滤；其余终端保持 `OSC 9` 不变
+- *(ui)* 键位表里的页面行由页面表生成，页面不可能再从 `?` 里漏掉
+
+### 🐛 Bug Fixes
+
+- *(theme)* `all_names()` 取自 `HashMap`，`:theme` 的循环顺序每次启动都不同 —— 现在排序，顺序稳定
+- *(net)* sonar 搜索、封面下载、音频流三处的 reqwest 客户端此前**没有任何超时**；现在统一 `connect_timeout` 10s + `read_timeout` 30s，封面与搜索另加 30s 总时限。音频流**刻意不加总超时**（会截断正在播放的下载），已用 34 秒持续下载的探针验证不会被切断
+
+### 💼 Other
+
+- *(ui)* 页面分发、页面按键与键位表合并为一张表：新增一个页面从改 **9 个文件降到 2 个**（`ui.rs` 生产代码里的页面匹配臂 5 → 0，`layout.rs` 3 → 0）
+- *(ui)* 铺底色改用 `Fill`，不再用一个无边界的 `Block`
+- *(theme)* WCAG 亮度/对比度改用 `palette`，全仓颜色数学从三处收敛到一处；等价性用全部 2²⁴ 个 8 位 sRGB 颜色与 19 个内置主题逐一核对（`on_accent` 结果全部一致）
+- *(cli)* 版本号升至 `1.0.0`
+
 ## [0.2.14] - 2026-09-12
 
 ### 🚀 Features

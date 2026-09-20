@@ -8,16 +8,16 @@
   "gtk-layer-shell": true,
   "height": 50,
   "modules-left": [
-    "group/pigma"
+    "group/boxpigma"
   ],
-  "group/pigma": {
+  "group/boxpigma": {
     "orientation": "horizontal",
     "modules": [
-      "custom/pigma",
-      "custom/pigma#like",
-      "custom/pigma#prev",
-      "custom/pigma#play",
-      "custom/pigma#next"
+      "custom/boxpigma",
+      "custom/boxpigma#like",
+      "custom/boxpigma#prev",
+      "custom/boxpigma#play",
+      "custom/boxpigma#next"
     ],
     "drawer": {
       "transition-duration": 300,
@@ -25,50 +25,50 @@
       "children-class": "drawer-child"
     }
   },
-  "custom/pigma": {
-    "exec": "~/.config/waybar/scripts/pigma",
+  "custom/boxpigma": {
+    "exec": "~/.config/waybar/scripts/boxpigma",
     "interval": 1,
     "tooltip": true,
     "return-type": "json",
-    "on-click-right": "pigma msg mode",
-    "on-scroll-up": "pigma msg volume +5",
-    "on-scroll-down": "pigma msg volume -5",
+    "on-click-right": "boxpigma msg mode",
+    "on-scroll-up": "boxpigma msg volume +5",
+    "on-scroll-down": "boxpigma msg volume -5",
     "format": "{}"
   },
-  "custom/pigma#like": {
-    "exec": "~/.config/waybar/scripts/pigma --icon like",
+  "custom/boxpigma#like": {
+    "exec": "~/.config/waybar/scripts/boxpigma --icon like",
     "interval": 1,
     "return-type": "json",
-    "on-click": "~/.config/waybar/scripts/pigma --like",
-    "on-scroll-up": "pigma msg volume +5",
-    "on-scroll-down": "pigma msg volume -5",
+    "on-click": "~/.config/waybar/scripts/boxpigma --like",
+    "on-scroll-up": "boxpigma msg volume +5",
+    "on-scroll-down": "boxpigma msg volume -5",
     "format": "{}"
   },
-  "custom/pigma#prev": {
-    "exec": "~/.config/waybar/scripts/pigma --icon prev",
+  "custom/boxpigma#prev": {
+    "exec": "~/.config/waybar/scripts/boxpigma --icon prev",
     "interval": "once",
     "return-type": "json",
-    "on-click": "~/.config/waybar/scripts/pigma --previous",
-    "on-scroll-up": "pigma msg volume +5",
-    "on-scroll-down": "pigma msg volume -5",
+    "on-click": "~/.config/waybar/scripts/boxpigma --previous",
+    "on-scroll-up": "boxpigma msg volume +5",
+    "on-scroll-down": "boxpigma msg volume -5",
     "format": "{}"
   },
-  "custom/pigma#play": {
-    "exec": "~/.config/waybar/scripts/pigma --icon play",
+  "custom/boxpigma#play": {
+    "exec": "~/.config/waybar/scripts/boxpigma --icon play",
     "interval": 1,
     "return-type": "json",
-    "on-click": "~/.config/waybar/scripts/pigma --toggle",
-    "on-scroll-up": "pigma msg volume +5",
-    "on-scroll-down": "pigma msg volume -5",
+    "on-click": "~/.config/waybar/scripts/boxpigma --toggle",
+    "on-scroll-up": "boxpigma msg volume +5",
+    "on-scroll-down": "boxpigma msg volume -5",
     "format": "{}"
   },
-  "custom/pigma#next": {
-    "exec": "~/.config/waybar/scripts/pigma --icon next",
+  "custom/boxpigma#next": {
+    "exec": "~/.config/waybar/scripts/boxpigma --icon next",
     "interval": "once",
     "return-type": "json",
-    "on-click": "~/.config/waybar/scripts/pigma --next",
-    "on-scroll-up": "pigma msg volume +5",
-    "on-scroll-down": "pigma msg volume -5",
+    "on-click": "~/.config/waybar/scripts/boxpigma --next",
+    "on-scroll-up": "boxpigma msg volume +5",
+    "on-scroll-down": "boxpigma msg volume -5",
     "format": "{}"
   }
 }

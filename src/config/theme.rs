@@ -1,5 +1,6 @@
 use std::{collections::HashMap, str::FromStr, sync::LazyLock};
 
+use palette::{LinLuma, Srgb, color_difference::Wcag21RelativeContrast, white_point::D65};
 use ratatui::style::Color;
 use serde::{Deserialize, Serialize};
 
@@ -319,14 +320,16 @@ impl Theme {
         let Some(accent) = relative_luminance(self.accent) else {
             return self.bg;
         };
+        let black = LinLuma::<D65, f64>::new(0.0);
+        let white = LinLuma::<D65, f64>::new(1.0);
         let candidates = [
             relative_luminance(self.bg).map(|l| (contrast_ratio(l, accent), self.bg)),
             relative_luminance(self.text).map(|l| (contrast_ratio(l, accent), self.text)),
             // Palettes where both anchors sit close to the accent (catppuccin-latte and
             // one-light among the built-ins) cannot reach 3:1 with their own colours, and a
             // row nobody can read is worse than a plain black-or-white highlight.
-            Some((contrast_ratio(0.0, accent), Color::Rgb(0, 0, 0))),
-            Some((contrast_ratio(1.0, accent), Color::Rgb(255, 255, 255))),
+            Some((contrast_ratio(black, accent), Color::Rgb(0, 0, 0))),
+            Some((contrast_ratio(white, accent), Color::Rgb(255, 255, 255))),
         ];
 
         candidates
@@ -376,25 +379,19 @@ impl Theme {
 
 /// WCAG relative luminance, for colours that carry their own channels. Palette indices and
 /// named colours depend on the terminal's own palette, which the app cannot read.
-fn relative_luminance(color: Color) -> Option<f64> {
+///
+/// The number itself comes from `palette`: sRGB decoding plus the Y row of the sRGB→XYZ
+/// matrix, which is what WCAG 2.1 defines as relative luminance.
+pub(crate) fn relative_luminance(color: Color) -> Option<LinLuma<D65, f64>> {
     let Color::Rgb(r, g, b) = color else {
         return None;
     };
-    let channel = |c: u8| {
-        let c = f64::from(c) / 255.0;
-        if c <= 0.03928 {
-            c / 12.92
-        } else {
-            ((c + 0.055) / 1.055).powf(2.4)
-        }
-    };
-    Some(0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b))
+    Some(Srgb::new(r, g, b).into_format::<f64>().relative_luminance())
 }
 
 /// WCAG contrast ratio between two relative luminances.
-fn contrast_ratio(a: f64, b: f64) -> f64 {
-    let (hi, lo) = if a > b { (a, b) } else { (b, a) };
-    (hi + 0.05) / (lo + 0.05)
+pub(crate) fn contrast_ratio(a: LinLuma<D65, f64>, b: LinLuma<D65, f64>) -> f64 {
+    a.relative_contrast(b)
 }
 
 /// Built-in themes, resolved once and down-sampled to the terminal's palette.
@@ -508,6 +505,9 @@ pub struct ThemeRegistry {
     extras: HashMap<String, Theme>,
 }
 
+/// The name a user may write where a theme name goes: pick one at random.
+pub const RANDOM_THEME: &str = "random";
+
 /// The built-in a user theme starts from when it names no base.
 const DEFAULT_BASE: &str = "default";
 
@@ -553,6 +553,8 @@ impl ThemeRegistry {
         self.extras.get(name).or_else(|| builtin_themes().get(name))
     }
 
+    /// The themes this registry holds, in a stable order: the map's own order varies per
+    /// process, which would make `:theme` cycle differently on every start.
     pub fn all_names(&self) -> Vec<&str> {
         let mut names: Vec<&str> = self.extras.keys().map(|s| s.as_str()).collect();
         for k in builtin_themes().keys() {
@@ -560,7 +562,42 @@ impl ThemeRegistry {
                 names.push(k);
             }
         }
+        names.sort_unstable();
         names
+    }
+
+    /// What may be written where a theme name goes: [`RANDOM_THEME`], then every theme.
+    ///
+    /// `random` comes first on purpose. Cycling walks this list and then continues from
+    /// whichever theme was picked, so putting it first means it comes up once per lap instead
+    /// of swallowing the step after it.
+    pub fn choosable_names(&self) -> Vec<&str> {
+        let mut names = vec![RANDOM_THEME];
+        names.extend(self.all_names());
+        names
+    }
+
+    /// The theme [`RANDOM_THEME`] stands for, drawn uniformly from [`Self::all_names`].
+    pub fn random_name(&self) -> &str {
+        let names = self.all_names();
+        let count = names.len();
+        if count == 0 {
+            return theme_fallback().name.as_str();
+        }
+        names[rand::random_range(0..count)]
+    }
+
+    /// The theme behind `requested`: [`RANDOM_THEME`] becomes one of the themes, and every
+    /// other name — including a typo — is passed through untouched.
+    ///
+    /// Call this where a theme is *chosen*, never where it is *drawn*: `resolve_theme` runs on
+    /// every frame, and rolling there would repaint the interface in a new theme each frame.
+    pub fn concrete_name(&self, requested: &str) -> String {
+        if requested == RANDOM_THEME {
+            self.random_name().to_string()
+        } else {
+            requested.to_string()
+        }
     }
 }
 
@@ -572,14 +609,79 @@ pub fn theme_fallback() -> &'static Theme {
 }
 
 #[cfg(test)]
+mod random_theme_tests {
+    use super::*;
+
+    fn registry() -> ThemeRegistry {
+        ThemeRegistry::new(HashMap::new())
+    }
+
+    /// Whatever `random` picks has to be a theme that resolves, or `resolve_theme` logs a
+    /// warning and the user sees `default` while their config says `random`.
+    #[test]
+    fn random_always_picks_a_theme_that_exists() {
+        let registry = registry();
+        for _ in 0..64 {
+            let picked = registry.random_name();
+            assert_ne!(picked, RANDOM_THEME, "`random` is a request, not a theme");
+            assert!(
+                registry.get(picked).is_some(),
+                "`{picked}` does not resolve"
+            );
+        }
+    }
+
+    #[test]
+    fn concrete_name_passes_every_other_name_through() {
+        let registry = registry();
+        assert_eq!(registry.concrete_name("dracula"), "dracula");
+        assert_eq!(
+            registry.concrete_name("a-typo-stays-a-typo"),
+            "a-typo-stays-a-typo"
+        );
+
+        let rolled = registry.concrete_name(RANDOM_THEME);
+        assert_ne!(rolled, RANDOM_THEME);
+        assert!(
+            registry.get(&rolled).is_some(),
+            "`{rolled}` does not resolve"
+        );
+    }
+
+    /// `random` heads the list so that cycling meets it once per lap: the theme it picks is
+    /// further down the list, so the next step carries on past the entry instead of landing on
+    /// `random` again.
+    #[test]
+    fn choosable_names_lists_random_then_every_theme() {
+        let registry = registry();
+        let choosable = registry.choosable_names();
+        assert_eq!(choosable.first().copied(), Some(RANDOM_THEME));
+        assert_eq!(choosable.len(), registry.all_names().len() + 1);
+        assert_eq!(&choosable[1..], registry.all_names().as_slice());
+    }
+
+    /// The list is a map's keys, so without sorting the cycle order would differ per run.
+    #[test]
+    fn all_names_is_stable() {
+        let registry = registry();
+        let names = registry.all_names();
+        let mut sorted = names.clone();
+        sorted.sort_unstable();
+        assert_eq!(names, sorted);
+    }
+}
+
+#[cfg(test)]
 mod user_theme_tests {
     use super::*;
 
     /// Go through the real loader: a config file carrying a `[themes.<name>]` table has to
     /// load at all, which is what used to fail for the documented hex colours.
     fn user(label: &str, source: &str) -> HashMap<String, UserTheme> {
-        let dir =
-            std::env::temp_dir().join(format!("pigma-theme-test-{}-{label}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "boxpigma-theme-test-{}-{label}",
+            std::process::id()
+        ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("create scratch dir");
         let path = dir.join("config.toml");

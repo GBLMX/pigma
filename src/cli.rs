@@ -1,4 +1,4 @@
-//! CLI entry: `pigma status` / `pigma msg` subcommands plus the argument
+//! CLI entry: `boxpigma status` / `boxpigma msg` subcommands plus the argument
 //! parser. The TUI itself runs when no subcommand is given.
 
 use std::path::PathBuf;
@@ -25,7 +25,7 @@ const STYLES: Styles = Styles::styled()
 
 #[derive(Debug, Parser)]
 #[command(
-    name = "pigma",
+    name = "boxpigma",
     version,
     disable_version_flag = true,
     about = "A netease cloud music client",
@@ -101,7 +101,7 @@ pub enum Command {
     },
 }
 
-/// `pigma msg` action selector. The `#[value(name)]`/`#[value(alias)]` names are
+/// `boxpigma msg` action selector. The `#[value(name)]`/`#[value(alias)]` names are
 /// what the shell-completion script offers (and what `parse_msg_action` accepts).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum MsgActionArg {
@@ -147,7 +147,7 @@ pub enum MsgActionArg {
 /*                               command actions                              */
 /* -------------------------------------------------------------------------- */
 
-/// `pigma status` handler.
+/// `boxpigma status` handler.
 pub async fn status(template: &str, json: bool, list: bool) -> color_eyre::Result<()> {
     let config = Config::load();
     if list {
@@ -207,9 +207,9 @@ fn print_queue(queue: &ipc::QueueSnapshot) {
     print!("{}", render_queue(queue));
 }
 
-/// `pigma msg` handler. `list` (no value) prints the live playback queue, and
+/// `boxpigma msg` handler. `list` (no value) prints the live playback queue, and
 /// `search` is a request/response command (the daemon returns matching songs and
-/// registers them for a later `pigma msg play <id>`); everything else is a
+/// registers them for a later `boxpigma msg play <id>`); everything else is a
 /// fire-and-forget control action.
 pub async fn msg(
     action: MsgActionArg,
@@ -219,8 +219,8 @@ pub async fn msg(
 ) -> color_eyre::Result<()> {
     match action {
         MsgActionArg::List => {
-            // `pigma msg list <endpoint>` keeps the old switch-list alias;
-            // `pigma msg list` with no value prints the live playback queue.
+            // `boxpigma msg list <endpoint>` keeps the old switch-list alias;
+            // `boxpigma msg list` with no value prints the live playback queue.
             if let Some(endpoint) = value {
                 let action = MsgAction::SwitchList {
                     endpoint: endpoint.to_string(),
@@ -240,7 +240,7 @@ pub async fn msg(
         MsgActionArg::Search => {
             let keyword = value.ok_or_else(|| {
                 color_eyre::eyre::eyre!(
-                    "search requires a keyword (e.g. `pigma msg search 周杰伦`)"
+                    "search requires a keyword (e.g. `boxpigma msg search 周杰伦`)"
                 )
             })?;
             let results = ipc::search_songs(keyword).await?;
@@ -288,7 +288,7 @@ fn parse_msg_action(
         MsgActionArg::SwitchList => {
             let endpoint = value.ok_or_else(|| {
                 color_eyre::eyre::eyre!(
-                    "switch-list requires an endpoint (e.g. `pigma msg switch-list toplist`)"
+                    "switch-list requires an endpoint (e.g. `boxpigma msg switch-list toplist`)"
                 )
             })?;
             Ok(MsgAction::SwitchList {
@@ -365,22 +365,31 @@ fn format_status(template: &str, s: &StatusSnapshot) -> String {
         .replace("{liked}", if s.liked { "true" } else { "false" })
 }
 
-/// `pigma completions <shell>` handler: print a shell completion script for the
-/// `pigma` CLI to stdout.
+/// `boxpigma completions <shell>` handler: print a shell completion script for the
+/// `boxpigma` CLI to stdout.
 fn completions(shell: &str) -> color_eyre::Result<()> {
     let mut cmd = <Cli as clap::CommandFactory>::command();
     let mut out = std::io::stdout();
     match shell {
-        "bash" => clap_complete::generate(clap_complete::shells::Bash, &mut cmd, "pigma", &mut out),
-        "zsh" => clap_complete::generate(clap_complete::shells::Zsh, &mut cmd, "pigma", &mut out),
-        "fish" => clap_complete::generate(clap_complete::shells::Fish, &mut cmd, "pigma", &mut out),
-        "elvish" => {
-            clap_complete::generate(clap_complete::shells::Elvish, &mut cmd, "pigma", &mut out)
+        "bash" => {
+            clap_complete::generate(clap_complete::shells::Bash, &mut cmd, "boxpigma", &mut out)
         }
+        "zsh" => {
+            clap_complete::generate(clap_complete::shells::Zsh, &mut cmd, "boxpigma", &mut out)
+        }
+        "fish" => {
+            clap_complete::generate(clap_complete::shells::Fish, &mut cmd, "boxpigma", &mut out)
+        }
+        "elvish" => clap_complete::generate(
+            clap_complete::shells::Elvish,
+            &mut cmd,
+            "boxpigma",
+            &mut out,
+        ),
         "powershell" => clap_complete::generate(
             clap_complete::shells::PowerShell,
             &mut cmd,
-            "pigma",
+            "boxpigma",
             &mut out,
         ),
         other => {
@@ -629,14 +638,14 @@ mod tests {
     fn completions_prints_script() {
         // Capturing stdout is awkward; instead verify the subcommand parses and
         // that each supported shell name is accepted by the parser.
-        let cmd = Cli::try_parse_from(["pigma", "completions", "bash"]).unwrap();
+        let cmd = Cli::try_parse_from(["boxpigma", "completions", "bash"]).unwrap();
         assert!(matches!(
             cmd.command,
             Some(Command::Completions { shell }) if shell == "bash"
         ));
-        assert!(Cli::try_parse_from(["pigma", "completions", "zsh"]).is_ok());
-        assert!(Cli::try_parse_from(["pigma", "completions", "fish"]).is_ok());
-        assert!(Cli::try_parse_from(["pigma", "completions", "powershell"]).is_ok());
-        assert!(Cli::try_parse_from(["pigma", "completions", "nushell"]).is_err());
+        assert!(Cli::try_parse_from(["boxpigma", "completions", "zsh"]).is_ok());
+        assert!(Cli::try_parse_from(["boxpigma", "completions", "fish"]).is_ok());
+        assert!(Cli::try_parse_from(["boxpigma", "completions", "powershell"]).is_ok());
+        assert!(Cli::try_parse_from(["boxpigma", "completions", "nushell"]).is_err());
     }
 }

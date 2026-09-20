@@ -1,15 +1,15 @@
 ---
-name: pigma
-description: 网易云音乐 TUI 客户端 pigma 的 CLI 控制技能（status / msg 子命令与 IPC 控制）
+name: boxpigma
+description: 网易云音乐 TUI 客户端 boxpigma 的 CLI 控制技能（status / msg 子命令与 IPC 控制）
 ---
 
 
-# Pigma – 网易云音乐客户端（CLI 控制）
+# boxpigma – 网易云音乐客户端（CLI 控制）
 
 ## Overview
-**Pigma** 是一个网易云音乐 TUI 客户端（ratatui）。不带子命令直接运行即进入交互界面；同时提供
-`pigma status` / `pigma msg` 两个子命令，通过 IPC（Linux/macOS 为 Unix socket
-`~/.cache/pigma/pigma.sock`，Windows 为命名管道 `\\.\pipe\pigma`）查询或控制**正在运行**的实例
+**boxpigma** 是一个网易云音乐 TUI 客户端（ratatui）。不带子命令直接运行即进入交互界面；同时提供
+`boxpigma status` / `boxpigma msg` 两个子命令，通过 IPC（Linux/macOS 为 Unix socket
+`~/.cache/boxpigma/boxpigma.sock`，Windows 为命名管道 `\\.\pipe\boxpigma`）查询或控制**正在运行**的实例
 （交互界面或 `-d` 守护进程均可）。适合脚本、状态栏（Waybar）、远程控制。
 
 ---
@@ -18,22 +18,22 @@ description: 网易云音乐 TUI 客户端 pigma 的 CLI 控制技能（status /
 
 ```bash
 cargo build --release
-# 将 target/release/pigma 加入 PATH
+# 将 target/release/boxpigma 加入 PATH
 ```
 
 - **无子命令** → 启动交互式 TUI。
 - **守护进程**（无头后台）：
   ```bash
-  pigma -d                # 等价于 pigma -d liked
-  pigma -d toplist        # 加载指定端点
-  pigma -d toplist:3      # 歌单/榜单端点选第 3 个（1 起始）
+  boxpigma -d                # 等价于 boxpigma -d liked
+  boxpigma -d toplist        # 加载指定端点
+  boxpigma -d toplist:3      # 歌单/榜单端点选第 3 个（1 起始）
   ```
-  守护进程只加载队列，**不自动播放**，需显式 `pigma msg play`。
+  守护进程只加载队列，**不自动播放**，需显式 `boxpigma msg play`。
   `SIGINT`/`SIGTERM` 会保存会话并干净退出。
 
 ---
 
-## 全局选项（`pigma --help`）
+## 全局选项（`boxpigma --help`）
 
 | 选项 | 说明 |
 |---|---|
@@ -47,28 +47,28 @@ cargo build --release
 
 ---
 
-## 命令自动补全（`pigma completions`）
+## 命令自动补全（`boxpigma completions`）
 
 为常见 shell 生成补全脚本（打印到 stdout，请重定向到你的补全目录）：
 
 ```bash
 # bash
-pigma completions bash > /usr/share/bash-completion/completions/pigma
+boxpigma completions bash > /usr/share/bash-completion/completions/boxpigma
 # zsh（按 fpath 或补全目录）
-pigma completions zsh > "${fpath[1]}/_pigma"
+boxpigma completions zsh > "${fpath[1]}/_pigma"
 # fish
-pigma completions fish > ~/.config/fish/completions/pigma.fish
+boxpigma completions fish > ~/.config/fish/completions/boxpigma.fish
 ```
 
 支持 `bash` / `zsh` / `fish` / `elvish` / `powershell`。补全会列出子命令与选项；
-`pigma msg <Tab>` 会补全动作名（`previous`/`next`/`play`/`switch-list`/`list` 等，含别名）。
+`boxpigma msg <Tab>` 会补全动作名（`previous`/`next`/`play`/`switch-list`/`list` 等，含别名）。
 
 ---
 
-## `pigma status` – 查询状态
+## `boxpigma status` – 查询状态
 
 ```bash
-pigma status [OPTIONS]
+boxpigma status [OPTIONS]
 ```
 
 | 选项 | 说明 |
@@ -82,33 +82,33 @@ pigma status [OPTIONS]
 `repeat_all` / `shuffle` / `heartbeat`。
 
 ```bash
-pigma status                                   # plain（默认模板来自配置）
-pigma status --json | jq '.name'
-pigma status -L                                # 队列列表
-pigma status -L --json                         # 队列原始 JSON
-pigma status --template "{artist} – {name} [{status}] vol {volume}%"
+boxpigma status                                   # plain（默认模板来自配置）
+boxpigma status --json | jq '.name'
+boxpigma status -L                                # 队列列表
+boxpigma status -L --json                         # 队列原始 JSON
+boxpigma status --template "{artist} – {name} [{status}] vol {volume}%"
 ```
 
 ---
 
-## `pigma msg list` – 列出播放队列
+## `boxpigma msg list` – 列出播放队列
 
 查询**正在运行**的实例的当前播放队列（复用 TUI 队列表格的显示逻辑），
 `▶` 标记当前曲目：
 
 ```bash
-pigma msg list            # 列出当前播放队列
-pigma msg list --json     # 原始 QueueSnapshot（id/name/singer/album/duration_ms）
+boxpigma msg list            # 列出当前播放队列
+boxpigma msg list --json     # 原始 QueueSnapshot（id/name/singer/album/duration_ms）
 ```
 
 选项：`--json`、`--socket <SOCKET>`。
 
 ---
 
-## `pigma msg <ACTION> [VALUE]` – 控制播放
+## `boxpigma msg <ACTION> [VALUE]` – 控制播放
 
 ```bash
-pigma msg [OPTIONS] <ACTION> [VALUE]
+boxpigma msg [OPTIONS] <ACTION> [VALUE]
 ```
 
 | 动作 | 别名 | 说明 |
@@ -130,17 +130,17 @@ pigma msg [OPTIONS] <ACTION> [VALUE]
 选项：`--playlist <INDEX>`（switch-list 用）、`--json`（list 用）、`--socket <SOCKET>`。
 
 ```bash
-pigma msg play
-pigma msg play 187186        # 按歌曲 id 播放（先 `pigma msg list --json` 查 id）
-pigma msg search 周杰伦       # 返回: source + id + 歌名 - 歌手（在守护进程内搜索，跨实例可用）
-pigma msg play 11201139274454706721  # 播放上面搜到的某首 sonar 结果
-pigma msg toggle_play
-pigma msg next
-pigma msg volume 75
-pigma msg volume +5
-pigma msg list               # 列出当前播放队列
-pigma msg switch-list toplist --playlist 2
-pigma msg toggle_like
+boxpigma msg play
+boxpigma msg play 187186        # 按歌曲 id 播放（先 `boxpigma msg list --json` 查 id）
+boxpigma msg search 周杰伦       # 返回: source + id + 歌名 - 歌手（在守护进程内搜索，跨实例可用）
+boxpigma msg play 11201139274454706721  # 播放上面搜到的某首 sonar 结果
+boxpigma msg toggle_play
+boxpigma msg next
+boxpigma msg volume 75
+boxpigma msg volume +5
+boxpigma msg list               # 列出当前播放队列
+boxpigma msg switch-list toplist --playlist 2
+boxpigma msg toggle_like
 ```
 
 ---
@@ -151,23 +151,23 @@ pigma msg toggle_like
 `msg` 成功回 `{"ok":true}`。可用 socat / PowerShell / 脚本直接控制。
 
 > `action` 是内部标签对象，必须写成 `{"cmd":"msg","action":{"action":...}}` 的嵌套形式
-> （即 `pigma msg` 实际发送的 JSON）；写成 `{"action":"play"}` 会被服务端丢弃。
+> （即 `boxpigma msg` 实际发送的 JSON）；写成 `{"action":"play"}` 会被服务端丢弃。
 
 ```bash
 # 查询状态（回一行 JSON）
-printf '{"cmd":"status"}\n' | socat - "$HOME/.cache/pigma/pigma.sock"
+printf '{"cmd":"status"}\n' | socat - "$HOME/.cache/boxpigma/boxpigma.sock"
 # 列出播放队列
-printf '{"cmd":"list"}\n' | socat - "$HOME/.cache/pigma/pigma.sock"
+printf '{"cmd":"list"}\n' | socat - "$HOME/.cache/boxpigma/boxpigma.sock"
 # 搜索（回一行 JSON 数组，结果已注册到守护进程，可直接 play 其 id）
-printf '{"cmd":"search","keyword":"周杰伦"}\n' | socat - "$HOME/.cache/pigma/pigma.sock"
+printf '{"cmd":"search","keyword":"周杰伦"}\n' | socat - "$HOME/.cache/boxpigma/boxpigma.sock"
 # 播放控制（注意嵌套的 action 对象）
-printf '{"cmd":"msg","action":{"action":"next"}}\n' | socat - "$HOME/.cache/pigma/pigma.sock"
-printf '{"cmd":"msg","action":{"action":"play"}}\n' | socat - "$HOME/.cache/pigma/pigma.sock"
+printf '{"cmd":"msg","action":{"action":"next"}}\n' | socat - "$HOME/.cache/boxpigma/boxpigma.sock"
+printf '{"cmd":"msg","action":{"action":"play"}}\n' | socat - "$HOME/.cache/boxpigma/boxpigma.sock"
 # 音量：绝对（0.0-1.0）或相对增量
-printf '{"cmd":"msg","action":{"action":"volume","absolute":0.75}}\n' | socat - "$HOME/.cache/pigma/pigma.sock"
-printf '{"cmd":"msg","action":{"action":"volume","delta":0.05}}\n'    | socat - "$HOME/.cache/pigma/pigma.sock"
+printf '{"cmd":"msg","action":{"action":"volume","absolute":0.75}}\n' | socat - "$HOME/.cache/boxpigma/boxpigma.sock"
+printf '{"cmd":"msg","action":{"action":"volume","delta":0.05}}\n'    | socat - "$HOME/.cache/boxpigma/boxpigma.sock"
 # 切换队列（歌单端点可用 "playlist" 选第 N 个，1 起始）
-printf '{"cmd":"msg","action":{"action":"switch_list","endpoint":"toplist","playlist":2}}\n' | socat - "$HOME/.cache/pigma/pigma.sock"
+printf '{"cmd":"msg","action":{"action":"switch_list","endpoint":"toplist","playlist":2}}\n' | socat - "$HOME/.cache/boxpigma/boxpigma.sock"
 ```
 
 Windows 命名管道协议相同，socket 路径可用 `--socket <pipe-name>` 自定义。
@@ -203,8 +203,8 @@ Windows 命名管道协议相同，socket 路径可用 `--socket <pipe-name>` �
 
 ## 配置（简要）
 
-配置文件默认 `~/.config/pigma/config.toml`（Linux）。与 CLI 相关的项：
-- `cli_status_template`：`pigma status` 默认 plain 模板。
+配置文件默认 `~/.config/boxpigma/config.toml`（Linux）。与 CLI 相关的项：
+- `cli_status_template`：`boxpigma status` 默认 plain 模板。
 - `cli_status_format`：`plain` 或 `json`；命令行 `--json` 优先。
 - 其他项见 `config.example.toml`。
 
@@ -214,26 +214,26 @@ Windows 命名管道协议相同，socket 路径可用 `--socket <pipe-name>` �
 
 ```bash
 # 1. 后台守护 + 开始播放
-pigma -d
-pigma msg play
+boxpigma -d
+boxpigma msg play
 
-# 2. Waybar 状态模块（bash 脚本，每秒轮询；参考 waybar/pigma）
-waybar/pigma                              # 主状态：song – artist | vol% · mode
-waybar/pigma --icon like                  # 按钮图标：like | play | prev | next
-pigma status --json                       # 原始 JSON 输出（脚本内部调用）
-pigma status --template "{artist} – {name} [{status}]"
+# 2. Waybar 状态模块（bash 脚本，每秒轮询；参考 waybar/boxpigma）
+waybar/boxpigma                              # 主状态：song – artist | vol% · mode
+waybar/boxpigma --icon like                  # 按钮图标：like | play | prev | next
+boxpigma status --json                       # 原始 JSON 输出（脚本内部调用）
+boxpigma status --template "{artist} – {name} [{status}]"
 
 # 3. 音量快捷键
-pigma msg volume +5
-pigma msg volume -5
+boxpigma msg volume +5
+boxpigma msg volume -5
 
 # 4. 动态换队列
-pigma msg switch-list recommend_songs
+boxpigma msg switch-list recommend_songs
 
 # 5. 多实例（自定义 socket）
-pigma -d --socket /tmp/music.sock
-pigma status --socket /tmp/music.sock
-pigma msg --socket /tmp/music.sock play
+boxpigma -d --socket /tmp/music.sock
+boxpigma status --socket /tmp/music.sock
+boxpigma msg --socket /tmp/music.sock play
 ```
 
 ---
@@ -242,17 +242,17 @@ pigma msg --socket /tmp/music.sock play
 
 | 问题 | 解决 |
 |---|---|
-| `pigma status` 连接失败 | 确认实例在运行（TUI 或 `pigma -d`）；检查 `--socket` 路径 |
-| `-d` 后无播放 | 必须显式 `pigma msg play` |
+| `boxpigma status` 连接失败 | 确认实例在运行（TUI 或 `boxpigma -d`）；检查 `--socket` 路径 |
+| `-d` 后无播放 | 必须显式 `boxpigma msg play` |
 | 提示未登录 | 需登录端点（`liked` 等）要求已登录，先在 TUI 登录（`L` 键） |
-| 队列为空 | 实例未加载歌曲队列；先 `pigma msg switch-list <endpoint>` 切换或 `pigma -d` 加载端点 |
+| 队列为空 | 实例未加载歌曲队列；先 `boxpigma msg switch-list <endpoint>` 切换或 `boxpigma -d` 加载端点 |
 | `--playlist N` 越界 | 歌单序号与 TUI 列表顺序一致，先在 TUI 里确认 |
-| 未知动作 | `pigma msg --help` 查看合法动作 |
+| 未知动作 | `boxpigma msg --help` 查看合法动作 |
 
 ---
 
 ## Notes
 - 所有子命令都是即发即走（非阻塞），走本地 socket/管道，无需网络。
 - 交互界面与守护进程都暴露同一 IPC；守护进程可挂 systemd / Waybar。
-- 补全脚本：`pigma completions bash|zsh|fish|elvish|powershell`。
-- 完整帮助：`pigma --help`、`pigma status --help`、`pigma msg --help`。
+- 补全脚本：`boxpigma completions bash|zsh|fish|elvish|powershell`。
+- 完整帮助：`boxpigma --help`、`boxpigma status --help`、`boxpigma msg --help`。

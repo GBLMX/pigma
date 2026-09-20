@@ -39,7 +39,7 @@
 1. **克隆仓库**：
    ```bash
    git clone --recurse-submodules https://github.com/GBLMX/pigma.git
-   cd pigma
+   cd boxpigma
    ```
 
 2. **确保 Rust 已安装**：
@@ -89,6 +89,20 @@
 
 - 新增功能或修复 Bug 时，请添加相应的测试用例。
 - 运行 `cargo test` 确保所有测试通过。
+
+### 诊断卡死（界面无响应）
+
+界面不再重绘时，先确认是"活着的卡住"还是"死了"，再抓一次线程栈。从外部抓就够，不必给程序加代码：
+
+```bash
+eu-stack -p <pid>                                 # 每个线程的栈，最直接（elfutils）
+gdb -p <pid> -batch -ex 'thread apply all bt'     # 没有 eu-stack 时
+cat /proc/<pid>/task/*/wchan                      # 内核视角：线程卡在哪个系统调用
+```
+
+日志每天一个文件，保留最近 7 个：开发构建是工作目录下的 `debug.log.<日期>`，安装后是 `~/.config/boxpigma/debug.log.<日期>`；`-d` 守护进程模式同样写那里。
+
+> 曾试过 tokio 的进程内任务快照（`taskdump` + `SIGUSR1`）并放弃：接线是对的（信号确实到达、快照确实被采集到），但把快照**渲染**成回溯的那一步在本机上不返回，而且采集时的那个 `poll` 会把工作线程卡住，外面的 `timeout` 来不及生效 —— 一次信号就能让监听永久失效。上面三条外部命令才是可靠做法。
 
 ### 4. 推送并创建 Pull Request (PR)
 

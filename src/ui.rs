@@ -311,41 +311,22 @@ pub(crate) fn draw_queue(f: &mut Frame, app: &mut App, areas: &layout::LayoutAre
 /// the text to the terminal. A light theme in a dark terminal is where this shows up.
 #[cfg(test)]
 mod contrast_audit {
-    use ratatui::{Terminal, backend::TestBackend, style::Color};
+    use ratatui::{Terminal, backend::TestBackend};
 
-    use crate::{app::App, config::Config};
-
-    fn to_rgb(color: Color) -> Option<(f64, f64, f64)> {
-        match color {
-            Color::Rgb(r, g, b) => Some((r as f64, g as f64, b as f64)),
-            _ => None,
-        }
-    }
-
-    fn luminance((r, g, b): (f64, f64, f64)) -> f64 {
-        let f = |c: f64| {
-            let c = c / 255.0;
-            if c <= 0.03928 {
-                c / 12.92
-            } else {
-                ((c + 0.055) / 1.055).powf(2.4)
-            }
-        };
-        0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b)
-    }
-
-    fn contrast(fg: (f64, f64, f64), bg: (f64, f64, f64)) -> f64 {
-        let (la, lb) = (luminance(fg), luminance(bg));
-        let (hi, lo) = if la > lb { (la, lb) } else { (lb, la) };
-        (hi + 0.05) / (lo + 0.05)
-    }
+    use crate::{
+        app::App,
+        config::{
+            Config,
+            theme::{contrast_ratio, relative_luminance},
+        },
+    };
 
     fn audit(label: &str, app: &mut App, theme: &crate::config::Theme) {
         let mut terminal = Terminal::new(TestBackend::new(120, 32)).expect("backend");
         terminal.draw(|f| super::draw(f, app)).expect("draw");
         let buffer = terminal.backend().buffer().clone();
-        let theme_bg = to_rgb(theme.bg);
-        let theme_fg = to_rgb(theme.text);
+        let theme_bg = relative_luminance(theme.bg);
+        let theme_fg = relative_luminance(theme.text);
 
         let mut invisible: Vec<String> = Vec::new();
         let mut low: Vec<String> = Vec::new();
@@ -357,12 +338,12 @@ mod contrast_audit {
                     continue;
                 }
                 // What the terminal would actually end up showing.
-                let fg = to_rgb(cell.fg).or(theme_fg);
-                let bg = to_rgb(cell.bg).or(theme_bg);
+                let fg = relative_luminance(cell.fg).or(theme_fg);
+                let bg = relative_luminance(cell.bg).or(theme_bg);
                 let (Some(fg), Some(bg)) = (fg, bg) else {
                     continue;
                 };
-                let r = contrast(fg, bg);
+                let r = contrast_ratio(fg, bg);
                 let entry = format!(
                     "({x},{y}){symbol:?} fg={:?} bg={:?} {r:.2}",
                     cell.fg, cell.bg

@@ -57,7 +57,7 @@ impl Default for NcmClientBuilder {
 
 impl NcmClientBuilder {
     /// Path of the cookie persistence file (defaults to `cookies.json` in the current working
-    /// directory; pigma passes it in explicitly)
+    /// directory; boxpigma passes it in explicitly)
     pub fn cookie_path(mut self, path: PathBuf) -> Self {
         self.cookie_path = Some(path);
         self

@@ -1,14 +1,14 @@
 # Maintainer: GB LMX <GBLMX@users.noreply.github.com>
-pkgname=pigma-gblmx-bin
-_pkgname=pigma
-pkgver=0.2.14.gblmx.10
+pkgname=boxpigma-gblmx-bin
+_pkgname=boxpigma
+pkgver=1.0.0.gblmx.1
 pkgrel=1
 pkgdesc="A netease cloud music client (GBLMX fork build)"
 arch=('x86_64')
 url="https://github.com/GBLMX/pigma"
 license=('Apache-2.0')
-# Upstream's `pigma-bin` also provides `pigma`, so these entries cover it too: both
-# packages install /usr/bin/pigma and cannot be installed side by side.
+# Upstream's `boxpigma-bin` also provides `boxpigma`, so these entries cover it too: both
+# packages install /usr/bin/boxpigma and cannot be installed side by side.
 provides=("${_pkgname}")
 conflicts=("${_pkgname}")
 source=("${_pkgname}-${pkgver}.tar.gz::${url}/releases/download/v${pkgver}/${_pkgname}-x86_64-unknown-linux-gnu.tar.gz")

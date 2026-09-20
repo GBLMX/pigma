@@ -49,7 +49,7 @@ pub(super) fn draw(
     let logo = Line::from(vec![
         Span::styled("▓ ", Style::default().fg(colors.accent)),
         Span::styled(
-            "PIGMA",
+            "BOXPIGMA",
             Style::default()
                 .fg(colors.text)
                 .add_modifier(Modifier::BOLD),

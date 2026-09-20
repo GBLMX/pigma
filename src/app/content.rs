@@ -375,7 +375,10 @@ impl App {
                     // Download the cover (async client — no blocking runtime
                     // owned by App) and process the image off the runtime. The
                     // cache was already checked above; a redundant re-check here
-                    // would double the disk reads on every miss.
+                    // would double the disk reads on every miss. `cover_http`
+                    // carries connect/read deadlines plus a 30s total deadline,
+                    // so a cover whose CDN hangs ends this task instead of
+                    // leaving it parked forever.
                     let protocol = {
                         let Ok(resp) = cover_http.get(&small_url).send().await else {
                             return;
@@ -466,7 +469,7 @@ mod cover_bench {
     fn cached_covers() -> Vec<PathBuf> {
         let mut dirs: Vec<PathBuf> = Vec::new();
         if let Some(cache) = dirs::cache_dir() {
-            dirs.push(cache.join("pigma/covers"));
+            dirs.push(cache.join("boxpigma/covers"));
         }
         dirs.into_iter()
             .flat_map(|dir| std::fs::read_dir(dir).into_iter().flatten())

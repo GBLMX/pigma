@@ -4,6 +4,7 @@
 
 use std::io::{Write, stdout};
 
+use boxpigma::cli::{Cli, run_cli};
 use clap::{Parser, error::ErrorKind};
 use crossterm::{
     cursor,
@@ -11,7 +12,6 @@ use crossterm::{
     execute,
     style::ResetColor,
 };
-use pigma::cli::{Cli, run_cli};
 
 struct TerminalGuard;
 
@@ -20,10 +20,10 @@ impl Drop for TerminalGuard {
         let mut output = stdout();
         // Disable mouse reporting even when the app unwinds from a panic. The
         // ratatui panic hook restores raw mode and the alternate screen, but it
-        // does not know that Pigma enabled mouse capture separately.
+        // does not know that boxpigma enabled mouse capture separately.
         // Leave the kitty keyboard protocol before anything else prints: a terminal
         // left in it would feed the shell `CSI u` encodings instead of plain keys.
-        let _ = pigma::utils::terminal::disable_terminal_modes(&mut output);
+        let _ = boxpigma::utils::terminal::disable_terminal_modes(&mut output);
         // Hand the cursor shape back to whatever the user configured.
         let _ = execute!(output, cursor::SetCursorStyle::DefaultUserShape);
         let _ = execute!(output, DisableMouseCapture, ResetColor, cursor::Show);
@@ -73,6 +73,6 @@ async fn main() -> color_eyre::Result<()> {
     }
     execute!(stdout(), app.config.cursor_style.command())?;
     // Kitty keyboard protocol + bracketed paste; both are no-ops where unsupported.
-    pigma::utils::terminal::enable_terminal_modes(&mut stdout())?;
+    boxpigma::utils::terminal::enable_terminal_modes(&mut stdout())?;
     app.run(terminal).await
 }

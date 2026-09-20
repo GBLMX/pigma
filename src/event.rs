@@ -31,7 +31,7 @@ pub enum AppEvent {
     Navigation(NavigationEvent),
     Command(CommandEvent),
     Toast(String),
-    /// Control request received over the IPC socket (`pigma msg`).
+    /// Control request received over the IPC socket (`boxpigma msg`).
     Ipc(IpcEvent),
 }
 

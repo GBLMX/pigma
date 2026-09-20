@@ -52,17 +52,81 @@ impl CursorStyle {
 
 /// Ask the terminal to raise a desktop notification.
 ///
-/// `OSC 9` is the form every terminal with notifications implements — kitty (where `OSC 99`
-/// is the richer one, this is the compatible one), WezTerm, foot, iTerm2, Windows Terminal —
-/// and one that has no notifications simply drops the sequence, so nothing needs probing.
+/// Two forms, both out-of-band — they change no cells, so they cannot disturb the frame
+/// being drawn around them:
 ///
-/// Control characters are stripped first: a song title is remote data, and a stray `BEL` or
-/// `ESC` in it would otherwise end the sequence early or start another one.
-pub fn notify<W: Write>(out: &mut W, text: &str) -> io::Result<()> {
+/// * `OSC 99` — kitty's own, and the richer one. It carries a title and a body as separate
+///   payloads, names the application (`f=`, which is what a user filters by), and takes the
+///   payloads Base64-encoded (`e=1`). Base64 is why a song title containing `;`, `BEL` or
+///   `ESC` — a title is remote data — arrives intact instead of being stripped.
+/// * `OSC 9` — the iTerm2 form, which every terminal with notifications implements (kitty,
+///   WezTerm, foot, Windows Terminal among them). It carries one plain-text string, so
+///   control characters are stripped and the length is capped; a terminal without
+///   notifications drops the sequence, so nothing needs probing.
+///
+/// kitty is recognised from the environment, not from a query: this sequence has no reply,
+/// so probing would mean waiting for a timeout on every start.
+pub fn notify<W: Write>(out: &mut W, title: &str, body: &str) -> io::Result<()> {
+    let kitty = is_kitty_terminal(&|key: &str| std::env::var(key).ok());
+    notify_as(out, title, body, kitty)
+}
+
+/// The payload limit kitty documents is 2048 bytes before encoding. A song line is far
+/// shorter, but the text comes from the network, so it is clipped rather than trusted.
+const OSC99_MAX_PAYLOAD: usize = 2048;
+
+/// [`notify`] with the terminal's identity passed in instead of probed.
+fn notify_as<W: Write>(out: &mut W, title: &str, body: &str, kitty: bool) -> io::Result<()> {
+    if kitty {
+        return notify_osc99(out, title, body);
+    }
+
+    let text = if title.is_empty() {
+        body.to_string()
+    } else {
+        format!("{title} — {body}")
+    };
     let clean: String = text.chars().filter(|c| !c.is_control()).take(240).collect();
     write!(out, "\x1b]9;{clean}\x07")?;
     out.flush()
 }
+
+fn notify_osc99<W: Write>(out: &mut W, title: &str, body: &str) -> io::Result<()> {
+    use base64::Engine as _;
+
+    let encode = |text: &str| {
+        let mut used = 0usize;
+        let clipped: String = text
+            .chars()
+            .take_while(|c| {
+                used += c.len_utf8();
+                used <= OSC99_MAX_PAYLOAD
+            })
+            .collect();
+        base64::engine::general_purpose::STANDARD_NO_PAD.encode(clipped.as_bytes())
+    };
+
+    // `i=` is the notification id, so a later notification replaces the previous one instead
+    // of stacking up. `d=0` holds the notification back until the body arrives with `d=1`,
+    // which is what makes title and body one notification rather than two.
+    let app = base64::engine::general_purpose::STANDARD_NO_PAD.encode(b"boxpigma");
+    const ID: &str = "boxpigma";
+
+    if !title.is_empty() {
+        write!(
+            out,
+            "\x1b]99;i={ID}:f={app}:e=1:d=0;{}\x1b\\",
+            encode(title)
+        )?;
+    }
+    write!(
+        out,
+        "\x1b]99;i={ID}:f={app}:p=body:e=1:d=1;{}\x1b\\",
+        encode(body)
+    )?;
+    out.flush()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ImageProtocolChoice {
@@ -253,7 +317,7 @@ fn wezterm_sixel_supported(version: &str) -> bool {
 ///   start of an escape code", which is how an `Esc` press gets read as `Alt+<key>`
 ///   when another key follows it. It is implemented by kitty, ghostty, foot, wezterm,
 ///   alacritty, iTerm2, Windows Terminal and others. Only that one flag is pushed:
-///   the rest are for features Pigma does not use.
+///   the rest are for features boxpigma does not use.
 /// * `CSI ? 2004 h` — bracketed paste, so a paste arrives as one delimited block
 ///   instead of a burst of keystrokes (see [`crate::input::handle_paste`]).
 pub fn enable_terminal_modes<W: Write>(out: &mut W) -> io::Result<()> {
@@ -720,7 +784,7 @@ mod terminal_mode_tests {
 
     /// What the terminal answers is the only signal that separates a terminal with
     /// graphics from a shell that merely inherited the variables, so it wins over the
-    /// environment — including for terminals Pigma has never heard of.
+    /// environment — including for terminals boxpigma has never heard of.
     #[test]
     fn the_terminals_own_answer_wins_over_the_environment() {
         assert_eq!(
@@ -797,7 +861,7 @@ mod terminal_mode_tests {
 
     /// These bytes are the contract with the terminal, and the pop is the one that
     /// matters most: a terminal left in the keyboard protocol feeds the shell after
-    /// Pigma `CSI u` encodings instead of plain keys.
+    /// boxpigma `CSI u` encodings instead of plain keys.
     #[test]
     fn terminal_modes_are_entered_and_left_with_the_documented_sequences() {
         let mut out = Vec::new();
@@ -840,10 +904,11 @@ mod notification_tests {
 
     /// `OSC 9` is the form the terminals implement, and the payload is remote data: a `BEL`
     /// or `ESC` in a song title would otherwise end the sequence early or start another one.
+    /// Title and body are joined with a dash because this form carries a single string.
     #[test]
     fn a_notification_is_one_clean_osc_9() {
         let mut out = Vec::new();
-        notify(&mut out, "歌名 — 歌手").expect("notify");
+        notify_as(&mut out, "歌名", "歌手", false).expect("notify");
         assert_eq!(
             String::from_utf8(out).expect("utf8"),
             "\u{1b}]9;歌名 — 歌手\u{7}"
@@ -853,10 +918,81 @@ mod notification_tests {
     #[test]
     fn control_characters_cannot_escape_the_notification() {
         let mut out = Vec::new();
-        notify(&mut out, "a\u{7}b\u{1b}]9;evil").expect("notify");
+        notify_as(&mut out, "", "a\u{7}b\u{1b}]9;evil", false).expect("notify");
         let text = String::from_utf8(out).expect("utf8");
         assert_eq!(text, "\u{1b}]9;ab]9;evil\u{7}");
         assert_eq!(text.matches('\u{7}').count(), 1, "exactly one terminator");
+    }
+
+    /// kitty's own form keeps the halves apart, and Base64 is what lets a title containing
+    /// `;` or `ESC` through instead of being filtered away.
+    #[test]
+    fn the_kitty_form_keeps_title_and_body_apart() {
+        let mut out = Vec::new();
+        notify_as(&mut out, "a;b\u{1b}c", "artist", true).expect("notify");
+        let text = String::from_utf8(out).expect("utf8");
+
+        let payloads = osc99_payloads(&text);
+        assert_eq!(payloads.len(), 2, "a title payload and a body payload");
+        assert_eq!(decode(&payloads[0]), "a;b\u{1b}c");
+        assert_eq!(decode(&payloads[1]), "artist");
+
+        assert!(text.contains("p=body"), "the body says what it is");
+        assert!(text.contains("f="), "the application names itself");
+        // `d=0` holds the notification back until `d=1` arrives: the other order is two
+        // notifications rather than one.
+        assert!(text.find("d=0").expect("d=0") < text.find("d=1").expect("d=1"));
+    }
+
+    /// A notification with nothing to put in the title is one sequence, not an empty first.
+    #[test]
+    fn a_body_only_notification_has_no_title_sequence() {
+        let mut out = Vec::new();
+        notify_as(&mut out, "", "播放失败", true).expect("notify");
+        let text = String::from_utf8(out).expect("utf8");
+
+        assert_eq!(osc99_payloads(&text).len(), 1);
+        assert_eq!(text.matches("\u{1b}]99;").count(), 1);
+        assert!(!text.contains("d=0"));
+    }
+
+    /// The clip is counted in bytes — a CJK title is three bytes a character, so a character
+    /// count would overshoot kitty's documented 2048 — and it must not split a character.
+    #[test]
+    fn the_payload_stops_at_kitty_s_byte_limit() {
+        let long = "歌".repeat(2000);
+        let mut out = Vec::new();
+        notify_as(&mut out, &long, "body", true).expect("notify");
+        let text = String::from_utf8(out).expect("utf8");
+
+        let title = decode(&osc99_payloads(&text)[0]);
+        assert!(title.len() <= OSC99_MAX_PAYLOAD, "{}", title.len());
+        assert_eq!(title.chars().count(), 682, "2048 / 3, rounded down");
+        assert!(
+            title.chars().all(|c| c == '歌'),
+            "no broken character at the cut"
+        );
+    }
+
+    fn osc99_payloads(text: &str) -> Vec<String> {
+        text.split("\u{1b}\\")
+            .filter(|sequence| sequence.starts_with("\u{1b}]99;"))
+            .map(|sequence| {
+                sequence
+                    .rsplit(';')
+                    .next()
+                    .expect("every sequence has a payload")
+                    .to_string()
+            })
+            .collect()
+    }
+
+    fn decode(payload: &str) -> String {
+        use base64::Engine as _;
+        let bytes = base64::engine::general_purpose::STANDARD_NO_PAD
+            .decode(payload)
+            .expect("base64 payload");
+        String::from_utf8(bytes).expect("utf8 payload")
     }
 
     /// The config's choices have to land on distinct terminal shapes.

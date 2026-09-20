@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use ratatui_image::picker::Picker;
 use reqwest::Client;
@@ -10,6 +10,19 @@ use crate::{
     state::{COMMANDS, CommandItem, CommandPanel},
     utils::terminal::{ImageProtocol, choose_image_protocol},
 };
+
+/// Deadline for the connection phase (TCP + TLS, through the proxy when one is
+/// configured). An unreachable proxy or CDN host must fail, not hang the task.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Deadline for a single read: it restarts every time reqwest hands out a chunk,
+/// so it aborts a stalled socket and never caps how long a transfer may run.
+const READ_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Total deadline for one-shot requests (cover downloads). Never applied to the
+/// streaming client: `stream_download` holds one response body open for the
+/// length of a track, and a wall-clock deadline would cut playback short.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Used to decide whether a proxy is enabled based on `ProxyTarget`.
 pub(super) enum ProxyKind {
@@ -47,7 +60,7 @@ impl App {
     /// the one entry rendered as a submenu, because the list comes from the registry at runtime.
     pub(super) fn build_command_panel(theme_registry: &ThemeRegistry) -> CommandPanel {
         let theme_children: Vec<CommandItem> = theme_registry
-            .all_names()
+            .choosable_names()
             .into_iter()
             .map(|name| CommandItem::Action {
                 name: name.to_string(),
@@ -157,13 +170,41 @@ impl App {
         picker
     }
 
-    /// Build a blocking HTTP client for the given proxy address; an empty address connects directly.
-    pub(super) fn build_http_client(proxy: &str) -> color_eyre::Result<Client> {
-        let mut builder = Client::builder();
+    /// Build the client that streams audio; `proxy` is the streaming proxy (empty = direct).
+    ///
+    /// Only the connect and per-read deadlines apply. A total deadline would abort
+    /// playback mid-track: `stream_download` keeps a single response body open and
+    /// reads from it for as long as the track plays, so the only legitimate limit is
+    /// "no byte within [`READ_TIMEOUT`]" — which a stalled socket trips and a playing
+    /// track never does.
+    pub(super) fn build_stream_client(proxy: &str) -> color_eyre::Result<Client> {
+        Self::http_client_builder(proxy)?
+            .build()
+            .map_err(color_eyre::Report::msg)
+    }
+
+    /// Build the client for one-shot requests (cover downloads); `proxy` is the search/cover proxy (empty = direct).
+    ///
+    /// The whole body is consumed at once here, so the total deadline of
+    /// [`REQUEST_TIMEOUT`] is safe in addition to the shared connect/read deadlines —
+    /// a cover download that never completes must not keep its spawned task alive.
+    pub(super) fn build_cover_client(proxy: &str) -> color_eyre::Result<Client> {
+        Self::http_client_builder(proxy)?
+            .timeout(REQUEST_TIMEOUT)
+            .build()
+            .map_err(color_eyre::Report::msg)
+    }
+
+    /// Proxy plus the connect/read deadlines every client shares; the caller decides
+    /// whether a total deadline applies (streaming must not have one).
+    fn http_client_builder(proxy: &str) -> color_eyre::Result<reqwest::ClientBuilder> {
+        let mut builder = Client::builder()
+            .connect_timeout(CONNECT_TIMEOUT)
+            .read_timeout(READ_TIMEOUT);
         if !proxy.is_empty() {
             builder = builder.proxy(reqwest::Proxy::all(proxy).map_err(color_eyre::Report::msg)?);
         }
-        builder.build().map_err(color_eyre::Report::msg)
+        Ok(builder)
     }
 }
 

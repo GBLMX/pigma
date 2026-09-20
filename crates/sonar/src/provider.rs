@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use crate::{
     error::Result,
@@ -16,11 +16,34 @@ use self::{
 // Priorities are declared per source in `SonarSource::default_priority` and applied
 // through `SonarProvider::priority`'s default implementation.
 
+/// Deadline for the connection phase (TCP + TLS, through the proxy when one is
+/// configured). An unreachable proxy or CDN host must fail, not hang.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Deadline for a single read: it restarts every time reqwest hands out a chunk,
+/// so it aborts a stalled socket and never caps how long a transfer may run.
+const READ_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Total deadline for one provider request. Every provider issues short
+/// JSON/HTML calls (search, play-URL resolution, lyrics) and consumes the whole
+/// body, so a total deadline is safe here — unlike the caller's audio stream,
+/// which keeps one body open for the length of a track.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Build a `reqwest::Client` with the given user agent and an optional HTTP
 /// proxy (empty `proxy_url` = direct connection). Fallible so callers can
 /// surface an invalid proxy URL or a failed builder instead of panicking.
+///
+/// Bounded by the connect, read and total deadlines above: without them a
+/// stalled socket waits forever, which is how a provider call (including the
+/// cover-fallback search, which the finder's per-source timeout does not wrap)
+/// used to wedge the caller.
 pub(crate) fn build_client(proxy_url: &str, user_agent: &str) -> Result<Client> {
-    let mut builder = Client::builder().user_agent(user_agent);
+    let mut builder = Client::builder()
+        .user_agent(user_agent)
+        .connect_timeout(CONNECT_TIMEOUT)
+        .read_timeout(READ_TIMEOUT)
+        .timeout(REQUEST_TIMEOUT);
     if !proxy_url.is_empty() {
         builder = builder.proxy(reqwest::Proxy::all(proxy_url)?);
     }

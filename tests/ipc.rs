@@ -3,7 +3,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use pigma::ipc::{self, IpcEvent, QueueSnapshot, StatusSnapshot};
+use boxpigma::ipc::{self, IpcEvent, QueueSnapshot, StatusSnapshot};
 use tokio::io::AsyncBufReadExt;
 
 fn channel() -> (
@@ -15,24 +15,24 @@ fn channel() -> (
 
 /// A `SearchEngine` with no providers: the round trips exercise the IPC
 /// plumbing without hitting any network.
-fn stub_searcher() -> Arc<pigma::app::SearchEngine> {
+fn stub_searcher() -> Arc<boxpigma::app::SearchEngine> {
     let _ = rustls::crypto::ring::default_provider().install_default();
     let cache_dir =
-        std::env::temp_dir().join(format!("pigma-ipc-test-cache-{}", std::process::id()));
-    let cache = Arc::new(pigma::cache::CacheManager::new(
+        std::env::temp_dir().join(format!("boxpigma-ipc-test-cache-{}", std::process::id()));
+    let cache = Arc::new(boxpigma::cache::CacheManager::new(
         cache_dir.clone(),
         cache_dir,
         String::new(),
     ));
     let api = Arc::new(ncm_api::NcmClient::builder().build().expect("client"));
-    let service = pigma::service::ApiService::new(api, cache);
+    let service = boxpigma::service::ApiService::new(api, cache);
     let finder = Arc::new(
         sonar::SonarFinder::new(sonar::SearchConfig::new().with_providers(vec![])).expect("finder"),
     );
     let sonar_songs: Arc<Mutex<HashMap<u64, Arc<sonar::Song>>>> =
         Arc::new(Mutex::new(HashMap::new()));
-    let search_results: pigma::app::SearchResults = Arc::new(Mutex::new(HashMap::new()));
-    Arc::new(pigma::app::SearchEngine::new(
+    let search_results: boxpigma::app::SearchResults = Arc::new(Mutex::new(HashMap::new()));
+    Arc::new(boxpigma::app::SearchEngine::new(
         service,
         finder,
         sonar_songs,
@@ -45,7 +45,7 @@ fn stub_searcher() -> Arc<pigma::app::SearchEngine> {
 fn tmp_socket(tag: &str) -> std::path::PathBuf {
     #[cfg(unix)]
     {
-        let dir = std::env::temp_dir().join(format!("pigma-ipc-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("boxpigma-ipc-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         dir.join(format!("{tag}.sock"))
     }
@@ -53,7 +53,7 @@ fn tmp_socket(tag: &str) -> std::path::PathBuf {
     {
         // Named pipes live in a global namespace, so make the name unique per
         // test (parallel-safe) and per process.
-        std::path::PathBuf::from(format!(r"\\.\pipe\pigma-test-{}-{tag}", std::process::id()))
+        std::path::PathBuf::from(format!(r"\\.\pipe\boxpigma-test-{}-{tag}", std::process::id()))
     }
 }
 
@@ -101,14 +101,14 @@ async fn queue_round_trip() {
     let queue = QueueSnapshot {
         current_index: Some(1),
         songs: vec![
-            pigma::ipc::QueueEntry {
+            boxpigma::ipc::QueueEntry {
                 id: 1,
                 name: "Song A".into(),
                 singer: "Artist A".into(),
                 album: "Album A".into(),
                 duration_ms: 1000,
             },
-            pigma::ipc::QueueEntry {
+            boxpigma::ipc::QueueEntry {
                 id: 2,
                 name: "Song B".into(),
                 singer: "Artist B".into(),
@@ -155,7 +155,7 @@ async fn msg_round_trip_forwards_event() {
 
     let event = rx.recv().await.expect("receive event");
     match event {
-        pigma::event::Event::App(pigma::event::AppEvent::Ipc(IpcEvent::Pause)) => {}
+        boxpigma::event::Event::App(boxpigma::event::AppEvent::Ipc(IpcEvent::Pause)) => {}
         other => panic!("expected Ipc(Pause), got {other:?}"),
     }
 }
@@ -184,7 +184,7 @@ async fn msg_switch_list_round_trip() {
 
     let event = rx.recv().await.expect("receive event");
     match event {
-        pigma::event::Event::App(pigma::event::AppEvent::Ipc(IpcEvent::SwitchList {
+        boxpigma::event::Event::App(boxpigma::event::AppEvent::Ipc(IpcEvent::SwitchList {
             endpoint,
             playlist,
         })) => {
@@ -218,7 +218,7 @@ async fn msg_play_song_id_forwards_event() {
 
     let event = rx.recv().await.expect("receive event");
     match event {
-        pigma::event::Event::App(pigma::event::AppEvent::Ipc(IpcEvent::Play { song_id })) => {
+        boxpigma::event::Event::App(boxpigma::event::AppEvent::Ipc(IpcEvent::Play { song_id })) => {
             assert_eq!(song_id, Some(187186));
         }
         other => panic!("expected Ipc(Play{{song_id}}), got {other:?}"),
@@ -246,7 +246,7 @@ async fn msg_toggle_play_forwards_event() {
 
     let event = rx.recv().await.expect("receive event");
     match event {
-        pigma::event::Event::App(pigma::event::AppEvent::Ipc(IpcEvent::TogglePlay)) => {}
+        boxpigma::event::Event::App(boxpigma::event::AppEvent::Ipc(IpcEvent::TogglePlay)) => {}
         other => panic!("expected Ipc(TogglePlay), got {other:?}"),
     }
 }

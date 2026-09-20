@@ -1,4 +1,4 @@
-//! pigma library crate: the netease cloud music TUI and its CLI helpers.
+//! boxpigma library crate: the netease cloud music TUI and its CLI helpers.
 //!
 //! The modules are exposed so the binary entry point (`src/main.rs`) and the
 //! CLI subcommands (`src/cli.rs`) can share the app logic without duplicating

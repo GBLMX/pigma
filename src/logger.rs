@@ -1,27 +1,32 @@
-//! Logging setup and the in-app log buffer/sink surfaced in the splash view.
+//! Logging setup: a `tracing` subscriber writing into a rolling file.
+//!
+//! The 135 `log::*!` call sites keep using the facade — `tracing-log` bridges `Log` records
+//! into the subscriber, and `tracing_subscriber::fmt()` installs that bridge itself, so only
+//! the sink changed. What the hand-written `Log` impl could not do is done here by the
+//! appender: files roll daily and the oldest are pruned, so the log cannot grow without bound.
 
-use std::{fs::OpenOptions, io::Write, sync::Mutex};
+use std::path::PathBuf;
 
-use log::{Level, Log, Metadata, Record};
+use log::Level;
 use serde::{Deserialize, Serialize};
+use tracing_appender::rolling::{RollingFileAppender, Rotation};
+use tracing_subscriber::{filter::LevelFilter, fmt, fmt::time::LocalTime};
 
-use crate::{
-    config::Config,
-    utils::{local_timestamp, pigma_config_dir},
-};
+use crate::{config::Config, utils::boxpigma_config_dir};
+
+/// Daily files kept before the appender prunes the oldest.
+const LOG_FILES_KEPT: usize = 7;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Logger {
     pub log_level: Level,
 }
 
-use std::path::PathBuf;
-
-fn log_file() -> PathBuf {
+fn log_dir() -> PathBuf {
     if cfg!(debug_assertions) {
-        PathBuf::from("debug.log")
+        PathBuf::from(".")
     } else {
-        pigma_config_dir().join("debug.log")
+        boxpigma_config_dir()
     }
 }
 
@@ -36,44 +41,36 @@ impl Default for Logger {
     }
 }
 
-struct FileLogger {
-    file: Mutex<std::fs::File>,
-}
-
-impl Log for FileLogger {
-    fn enabled(&self, metadata: &Metadata) -> bool {
-        metadata.level() <= log::max_level()
-    }
-
-    fn log(&self, record: &Record) {
-        if !self.enabled(record.metadata()) {
-            return;
-        }
-        let ts = local_timestamp();
-        let mut file = self.file.lock().unwrap();
-        let _ = writeln!(
-            file,
-            "[{} {:<5} {}] {}",
-            ts,
-            record.level(),
-            record.module_path().unwrap_or_default(),
-            record.args()
-        );
-    }
-
-    fn flush(&self) {
-        let _ = self.file.lock().unwrap().flush();
+/// `log`'s levels and `tracing`'s filters are different types; these five are the mapping.
+fn filter(level: Level) -> LevelFilter {
+    match level {
+        Level::Error => LevelFilter::ERROR,
+        Level::Warn => LevelFilter::WARN,
+        Level::Info => LevelFilter::INFO,
+        Level::Debug => LevelFilter::DEBUG,
+        Level::Trace => LevelFilter::TRACE,
     }
 }
 
 pub fn init_logger(config: &Config) -> color_eyre::Result<()> {
-    let log_file = OpenOptions::new()
-        .append(true)
-        .create(true)
-        .open(log_file())?;
-    log::set_boxed_logger(Box::new(FileLogger {
-        file: Mutex::new(log_file),
-    }))?;
-    log::set_max_level(config.logger.log_level.to_level_filter());
+    let appender = RollingFileAppender::builder()
+        .rotation(Rotation::DAILY)
+        .filename_prefix("debug.log")
+        .max_log_files(LOG_FILES_KEPT)
+        .build(log_dir())?;
+
+    fmt()
+        .with_writer(appender)
+        // The file is read with `tail` and editors, never a terminal, so no escape codes.
+        .with_ansi(false)
+        // Module path per line, as the hand-written format carried.
+        .with_target(true)
+        // Local time: the hand-written format printed local timestamps and logs are read
+        // side by side with what the user was doing.
+        .with_timer(LocalTime::rfc_3339())
+        .with_max_level(filter(config.logger.log_level))
+        .try_init()
+        .map_err(|error| color_eyre::eyre::eyre!("installing the log subscriber: {error}"))?;
+
     Ok(())
 }

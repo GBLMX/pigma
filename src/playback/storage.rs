@@ -120,7 +120,7 @@ pub struct PlaylistStorage {
 }
 
 impl PlaylistStorage {
-    /// `base_dir` is the pigma cache root (`~/.cache/pigma`); playlists live in
+    /// `base_dir` is the boxpigma cache root (`~/.cache/boxpigma`); playlists live in
     /// its `playlists/` subdirectory.
     pub(super) fn new(base_dir: PathBuf) -> Self {
         let base_dir = base_dir.join("playlists");

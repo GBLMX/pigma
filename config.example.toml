@@ -1,13 +1,14 @@
 # =============================================================================
-# Pigma 配置文件示例
-# 配置文件路径: ~/.config/pigma/config.toml
+# boxpigma 配置文件示例
+# 配置文件路径: ~/.config/boxpigma/config.toml
 # 未配置的字段会使用默认值
 # =============================================================================
 
 # 配置文件的 schema 版本；旧文件缺少该字段时按 0 处理，加载时自动升级并备份原文件
 config_version = 1
 
-# 默认主题名称 (对应 themes 中定义的 name)
+# 默认主题名称 (对应 themes 中定义的 name); 也可写 "random": 每次启动随机挑一个
+# (:theme random 则立刻重掷一次, 并把抽到的那一个写回配置)
 default_theme = "default"
 
 # 快进/快退间隔 (秒)
@@ -22,11 +23,11 @@ navigation_position = "left"
 # 启动 splash 界面最短显示时长 (秒), 启动流程的进度条会按此时长播放动画,
 splash_duration_secs = 2.0
 
-# `pigma status` 的 plain 输出模板, 可用占位符:
+# `boxpigma status` 的 plain 输出模板, 可用占位符:
 #   {current}/{position} {duration} {artist} {name} {album} {volume} {status} {mode} {id} {liked}
 cli_status_template = "{name}  {artist}  {current}/{duration}  {status}  vol {volume}%"
 
-# `pigma status` 默认输出格式: "plain" 或 "json"
+# `boxpigma status` 默认输出格式: "plain" 或 "json"
 cli_status_format = "plain"
 
 # 是否捕获鼠标。捕获后可以点击播放栏控件、列表行、标签页；关掉则把终端自身的
@@ -71,7 +72,7 @@ content_cache_ttl = 300
 # 音质: "standard", "higher", "exhigh", "lossless", "hires", "jyeffect", "sky", "jymaster"
 quality = "standard"
 # 下载缓存目录 (相对于缓存目录或绝对路径)
-# 默认：~/.cache/pigma/downloads
+# 默认：~/.cache/boxpigma/downloads
 cache_dir = "downloads"
 # 缓存文件命名模板, 可用变量: {id}, {name}, {singer}, {album}
 cache_template = "{name}-{singer}"

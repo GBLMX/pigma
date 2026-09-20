@@ -1,5 +1,5 @@
 //! Main application state (`App`) and the wiring of views, events, navigation,
-//! search, login and theming for the pigma TUI.
+//! search, login and theming for the boxpigma TUI.
 
 mod builder;
 mod content;
@@ -40,13 +40,13 @@ use crate::{
     },
     ui,
     utils::{
+        boxpigma_cache_dir, boxpigma_config_dir,
         path::expand_tilde,
-        pigma_cache_dir, pigma_config_dir,
         terminal::{BACKGROUND, begin_synchronized_update, end_synchronized_update},
     },
 };
 
-/// Main application state and entry point for the pigma TUI.
+/// Main application state and entry point for the boxpigma TUI.
 pub struct App {
     pub config: Config,
     pub state: State,
@@ -54,17 +54,18 @@ pub struct App {
     pub theme_registry: ThemeRegistry,
     pub service: ApiService,
     pub picker: Picker,
-    /// Blocking HTTP client for cover downloads (honours the proxy config).
+    /// HTTP client for one-shot cover downloads (honours the proxy config); bounded by
+    /// [`Self::build_cover_client`]'s total deadline, since a cover is never streamed.
     pub cover_http: Client,
     /// Shared sonar finder used for per-provider search and playback fallback.
     pub finder: Arc<SonarFinder>,
     /// Original sonar songs for search results, keyed by synthetic song id.
     pub sonar_songs: Arc<Mutex<HashMap<u64, Arc<Song>>>>,
     /// Registry of recently searched songs (NCM and sonar) keyed by song id,
-    /// shared with the IPC `search` engine so `pigma msg play <id>` can enqueue
+    /// shared with the IPC `search` engine so `boxpigma msg play <id>` can enqueue
     /// and play a search result that is not in the playback queue.
     pub search_results: SearchResults,
-    /// Cross-provider search engine serving `pigma msg search <keyword>`.
+    /// Cross-provider search engine serving `boxpigma msg search <keyword>`.
     pub searcher: Arc<SearchEngine>,
     /// Song ID set of the user's "我喜欢的音乐" playlist, sharing the same `Arc` as `PlaybackEngine`.
     pub liked_ids: Arc<Mutex<HashSet<u64>>>,
@@ -77,9 +78,9 @@ pub struct App {
     pub(super) played_in_track: Duration,
     /// Playlists whose full tracks have already been merged into the playback queue for lazy pagination, avoiding repeated Enter presses refetching/truncating the queue.
     queued_playlists: HashSet<u64>,
-    /// Live playback snapshot served to `pigma status` over the IPC socket.
+    /// Live playback snapshot served to `boxpigma status` over the IPC socket.
     pub status: Arc<Mutex<StatusSnapshot>>,
-    /// Live playback queue served to `pigma status -L` over the IPC socket.
+    /// Live playback queue served to `boxpigma status -L` over the IPC socket.
     pub queue: Arc<Mutex<QueueSnapshot>>,
     /// Fan-out channel for snapshot changes, consumed by the IPC `subscribe`
     /// handler so long-running clients get event push.
@@ -99,7 +100,7 @@ pub struct App {
 impl App {
     /// `with_terminal` selects the interactive TUI event source (crossterm);
     /// pass `false` for headless daemon mode.
-    pub fn new(config: Config, with_terminal: bool) -> color_eyre::Result<Self> {
+    pub fn new(mut config: Config, with_terminal: bool) -> color_eyre::Result<Self> {
         let border = config.border.clone();
 
         // Resolve the appearance once, up front: the glyph set comes from the config, and
@@ -114,6 +115,22 @@ impl App {
         let tx = events.sender();
 
         let theme_registry = ThemeRegistry::new(config.themes.clone());
+
+        // `random` is a request, not a theme, so it is settled here — once. `resolve_theme` runs
+        // on every frame; rolling there would repaint the interface in a new theme each frame.
+        // The two slots roll separately, so `background = auto` with both set to `random` gets
+        // two independent picks.
+        use crate::config::RANDOM_THEME;
+        if config.default_theme == RANDOM_THEME {
+            config.default_theme = theme_registry.concrete_name(RANDOM_THEME);
+            log::info!("theme: random picked `{}`", config.default_theme);
+        }
+        if config.light_theme.as_deref() == Some(RANDOM_THEME) {
+            let picked = theme_registry.concrete_name(RANDOM_THEME);
+            log::info!("theme: random picked `{picked}` for the light slot");
+            config.light_theme = Some(picked);
+        }
+
         let command_panel = Self::build_command_panel(&theme_registry);
 
         // `normal` (domestic default): only YouTube goes through the proxy;
@@ -123,7 +140,7 @@ impl App {
         let youtube_proxy = Self::proxy_for(&config, builder::ProxyKind::Youtube);
         let stream_proxy = search_proxy;
 
-        let cookie_path = pigma_config_dir().join("cookies.json");
+        let cookie_path = boxpigma_config_dir().join("cookies.json");
         let mut api_builder = ncm_api::NcmClient::builder().cookie_path(cookie_path);
         if !ncm_proxy.is_empty() {
             api_builder = api_builder.proxy(ncm_proxy);
@@ -139,10 +156,10 @@ impl App {
             if expanded.is_absolute() {
                 expanded
             } else {
-                pigma_cache_dir().join(&config.cache.cache_dir)
+                boxpigma_cache_dir().join(&config.cache.cache_dir)
             }
         };
-        let base_dir = pigma_cache_dir();
+        let base_dir = boxpigma_cache_dir();
 
         let finder = Self::build_finder(&config, search_proxy, youtube_proxy)?;
 
@@ -169,8 +186,8 @@ impl App {
 
         let picker = Self::build_picker(&config.playerbar);
 
-        let stream_client = Self::build_http_client(stream_proxy)?;
-        let cover_http = Self::build_http_client(search_proxy)?;
+        let stream_client = Self::build_stream_client(stream_proxy)?;
+        let cover_http = Self::build_cover_client(search_proxy)?;
 
         let sonar_enabled = config.source_fallback.enabled;
         let sonar_songs: Arc<Mutex<HashMap<u64, Arc<sonar::Song>>>> =
@@ -370,7 +387,7 @@ impl App {
         }
     }
 
-    /// Apply a control request received over the IPC socket (`pigma msg`).
+    /// Apply a control request received over the IPC socket (`boxpigma msg`).
     async fn handle_ipc_event(&mut self, event: IpcEvent) {
         match event {
             IpcEvent::Previous => self.playback.prev(),
@@ -385,7 +402,7 @@ impl App {
             IpcEvent::Play { song_id } => {
                 if let Some(id) = song_id {
                     // Jump to a song in the active queue and play it. Songs
-                    // returned by `pigma msg search` are not queued, so fall
+                    // returned by `boxpigma msg search` are not queued, so fall
                     // back to the shared search-result registry and enqueue the
                     // result (sonar songs keep their synthetic id, which the
                     // playback source resolves via `sonar_songs`).
@@ -484,7 +501,7 @@ impl App {
         self.toast(format!("◧ 导航栏位置: {}", pos.label()));
     }
 
-    /// Interactive terminal entry point (`pigma` without subcommands). Draws
+    /// Interactive terminal entry point (`boxpigma` without subcommands). Draws
     /// the UI, serves the IPC socket, and pumps the event loop until quit.
     pub async fn run(mut self, mut terminal: DefaultTerminal) -> color_eyre::Result<()> {
         self.start_splash_boot();
@@ -556,9 +573,9 @@ impl App {
     /*                              CLI / headless daemon                          */
     /* -------------------------------------------------------------------------- */
 
-    /// Headless daemon mode (`pigma --daemon <endpoint>`): no terminal is opened.
+    /// Headless daemon mode (`boxpigma --daemon <endpoint>`): no terminal is opened.
     /// Loads the endpoint as the initial list, starts playing it, and runs the
-    /// IPC socket so `pigma status` / `pigma msg` can observe and control it.
+    /// IPC socket so `boxpigma status` / `boxpigma msg` can observe and control it.
     /// Stops on SIGINT/SIGTERM (saving the session).
     pub async fn run_headless(
         mut self,
@@ -613,7 +630,7 @@ impl App {
     }
 
     /// Resolve the `--daemon` endpoint and load its songs into the queue **without
-    /// starting playback**; the user starts it via `pigma msg play` / toggle.
+    /// starting playback**; the user starts it via `boxpigma msg play` / toggle.
     async fn bootstrap_headless(&mut self, api_str: &str, playlist_index: Option<usize>) {
         let loaded = self.load_endpoint(api_str, playlist_index).await;
         if loaded {
@@ -628,7 +645,7 @@ impl App {
 
     /// Resolve an endpoint string into playable songs and load them into the
     /// queue without starting playback. Shared by the daemon bootstrap
-    /// (`--daemon`) and the IPC `pigma msg switch-list` action. Returns whether
+    /// (`--daemon`) and the IPC `boxpigma msg switch-list` action. Returns whether
     /// songs were loaded.
     async fn load_endpoint(&mut self, api_str: &str, playlist_index: Option<usize>) -> bool {
         let api = ApiEndpoint::parse(api_str).unwrap_or(ApiEndpoint::RecommendSongs);

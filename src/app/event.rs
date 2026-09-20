@@ -162,7 +162,7 @@ impl App {
             }
             PlaybackEvent::Error(e) => {
                 if self.config.notify.errors {
-                    let _ = crate::utils::terminal::notify(&mut std::io::stdout(), &e);
+                    let _ = crate::utils::terminal::notify(&mut std::io::stdout(), "", &e);
                 }
                 self.playback.on_playback_error(e);
             }
@@ -389,10 +389,7 @@ impl App {
         let Some(song) = &self.playback.state.current_song else {
             return;
         };
-        let _ = crate::utils::terminal::notify(
-            &mut std::io::stdout(),
-            &format!("{} — {}", song.name, song.singer),
-        );
+        let _ = crate::utils::terminal::notify(&mut std::io::stdout(), &song.name, &song.singer);
     }
 }
 

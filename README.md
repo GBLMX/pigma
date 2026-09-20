@@ -1,22 +1,22 @@
-# pigma
+# boxpigma
 
 [![CI](https://github.com/GBLMX/pigma/actions/workflows/ci.yml/badge.svg)](https://github.com/GBLMX/pigma/actions/workflows/ci.yml)
 [![Release](https://github.com/GBLMX/pigma/actions/workflows/release.yml/badge.svg)](https://github.com/GBLMX/pigma/actions/workflows/release.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![AUR Version](https://img.shields.io/aur/version/pigma-gblmx-bin)](https://aur.archlinux.org/packages/pigma-gblmx-bin)
-![GitHub repo size](https://img.shields.io/github/repo-size/GBLMX/pigma)
+[![AUR Version](https://img.shields.io/aur/version/boxpigma-gblmx-bin)](https://aur.archlinux.org/packages/boxpigma-gblmx-bin)
+![GitHub repo size](https://img.shields.io/github/repo-size/GBLMX/boxpigma)
 
 
-<img width="100" src="./imgs/logo.png" alt="pigma" />
+<img width="100" src="./imgs/logo.png" alt="boxpigma" />
 
-pigma 的核心目标是把网易云音乐和本地音频播放的体验带进命令行环境：终端里的流式播放、歌词、歌单与队列管理，全部围绕键盘操作组织，基于 [Ratatui](https://ratatui.rs) 实现。
+boxpigma 的核心目标是把网易云音乐和本地音频播放的体验带进命令行环境：终端里的流式播放、歌词、歌单与队列管理，全部围绕键盘操作组织，基于 [Ratatui](https://ratatui.rs) 实现。
 
-本仓库是 [akirco/pigma](https://github.com/akirco/pigma) 的 fork，**持续维护中**：上游的进展在这里跟进，本仓库自己也带了一批改动（清单见下）。二进制与 AUR 包都从**本仓库**发布（[releases](https://github.com/GBLMX/pigma/releases)、`pigma-gblmx-bin`）。
+本仓库是 [akirco/pigma](https://github.com/akirco/pigma) 的 fork，**持续维护中**：上游的进展在这里跟进，本仓库自己也带了一批改动（清单见下）。二进制与 AUR 包都从**本仓库**发布（[releases](https://github.com/GBLMX/pigma/releases)、`boxpigma-gblmx-bin`）。
 
 <details>
 <summary><b>📖 点击展开/折叠目录 (Table of Contents)</b></summary>
 
-- [pigma](#pigma)
+- [boxpigma](#boxpigma)
   - [本仓库与原作者](#本仓库与原作者)
   - [Features](#features)
   - [Preview](#preview)
@@ -29,7 +29,7 @@ pigma 的核心目标是把网易云音乐和本地音频播放的体验带进�
     - [CLI 控制（status / msg）](#cli-控制status--msg)
       - [直接走 Unix socket（socat / 脚本）](#直接走-unix-socketsocat--脚本)
       - [Windows：命名管道控制（PowerShell）](#windows命名管道控制powershell)
-    - [无头守护进程模式（pigma -d）](#无头守护进程模式pigma--d)
+    - [无头守护进程模式（boxpigma -d）](#无头守护进程模式pigma--d)
   - [Configuration](#configuration)
     - [Columns Configuration](#columns-configuration)
       - [Column width types](#column-width-types)
@@ -58,7 +58,7 @@ pigma 的核心目标是把网易云音乐和本地音频播放的体验带进�
 | | |
 | --- | --- |
 | **上游** | [akirco/pigma](https://github.com/akirco/pigma) —— 作者 akirco，Apache-2.0。原始版权与许可声明见 [LICENSE](./LICENSE)，**未作改动** |
-| **本仓库** | GBLMX 的 fork，由 GBLMX 维护。这里的提交、[releases](https://github.com/GBLMX/pigma/releases) 与 AUR 包 `pigma-gblmx-bin` 都由本仓库负责，与原作者无关；上游是否采纳这些改动、上游自身的维护计划，本仓库不代表也不承诺 |
+| **本仓库** | GBLMX 的 fork，由 GBLMX 维护。这里的提交、[releases](https://github.com/GBLMX/pigma/releases) 与 AUR 包 `boxpigma-gblmx-bin` 都由本仓库负责，与原作者无关；上游是否采纳这些改动、上游自身的维护计划，本仓库不代表也不承诺 |
 | **向上游贡献** | 上游的 [CONTRIBUTING](./CONTRIBUTING.md) 仍然适用。本仓库的 `main` 已与上游分叉，向上游提 PR 请从独立分支（如 `feat/...`）出发，不要从 `main` |
 
 相对上游 `21c380d`（v0.2.14），本仓库自带的改动：
@@ -70,7 +70,7 @@ pigma 的核心目标是把网易云音乐和本地音频播放的体验带进�
 - **外观**：符号预设（`nerd`／`unicode`／`ascii`，不装 Nerd Font 也能用）· 按终端能力降级真彩色 · 依据终端背景自动选明/暗主题 · **背景也由主题绘制**（此前只给文字上色，浅色主题在深色终端上会变成零星灰字）· 内置 20 套主题 + `[themes.<名>]` 继承式自定义 · 高亮行的前景色按对比度自动选取，浅色主题下也读得出来
 - **新增**：频谱可视化 · 音高读数（自实现 YIN，无新增依赖）· 鼠标交互（点击 seek／切区／播放控制／模式／喜欢／静音）· vim 风格 `:` 命令行与 Tab 补全（密码/短信登录、退出登录、签到）· 听歌打卡（播满约 30 秒即上报，与官方客户端口径一致；短于 30 秒的歌以播完为准）· **歌词四种显示样式**（`:lyrics window|one_line|flow|plain`）· 歌词严格按解码位置对轴 · 终端开关：`mouse`／`cursor_style`／`[notify]` 桌面通知 · 随仓库提供的性能基准
 - **终端协议**：kitty 图形协议封面（可用 `[playerbar] image_protocol` 强制）· 同步刷新（整帧一次性呈现，也是 kitty 放图的规范要求）· kitty 键盘协议（`Esc` 不再被读成 `Alt+<key>`）· 括号粘贴 · 封面协议以**终端的回答**为准，tmux 内自动回退
-- **打包**：AUR `pigma-gblmx-bin`（独立包名，发布时带真实校验和）
+- **打包**：AUR `boxpigma-gblmx-bin`（独立包名，发布时带真实校验和）
 
 **注意：**
 
@@ -112,7 +112,7 @@ pigma 的核心目标是把网易云音乐和本地音频播放的体验带进�
 - [x] 主题背景完整绘制，高亮行对比度自动保证
 - [x] 随仓库的性能基准（`cargo test --release --lib -- --ignored`）
 - [x] 命令行控制（status/msg）+ JSON IPC（waybar 等）
-- [x] 守护进程模式（`pigma -d`）
+- [x] 守护进程模式（`boxpigma -d`）
 - [x] 重写splash
 - [ ] command panel重写，更多运行时配置支持
 - [ ] 云盘源作为fallback
@@ -156,20 +156,20 @@ bin install https://github.com/GBLMX/pigma
 
 `windows`
 
-从 [releases](https://github.com/GBLMX/pigma/releases) 下载 `pigma-x86_64-pc-windows-msvc.zip`（或 `aarch64` 版），解包后把 `pigma.exe` 放进 `%PATH%`。
+从 [releases](https://github.com/GBLMX/pigma/releases) 下载 `boxpigma-x86_64-pc-windows-msvc.zip`（或 `aarch64` 版），解包后把 `boxpigma.exe` 放进 `%PATH%`。
 
 `linux(aur)`
 ```sh
-yay -S pigma-gblmx-bin
+yay -S boxpigma-gblmx-bin
 
 #or
 
-paru -S pigma-gblmx-bin
+paru -S boxpigma-gblmx-bin
 ```
 
 `macOS`
 
-从 [releases](https://github.com/GBLMX/pigma/releases) 下载 `pigma-x86_64-apple-darwin.tar.gz`（Apple Silicon 用 `aarch64` 版），解包后把 `pigma` 放进 `$PATH`。
+从 [releases](https://github.com/GBLMX/pigma/releases) 下载 `boxpigma-x86_64-apple-darwin.tar.gz`（Apple Silicon 用 `aarch64` 版），解包后把 `boxpigma` 放进 `$PATH`。
 
 ### From source (cargo)
 
@@ -183,9 +183,9 @@ cargo install --git https://github.com/GBLMX/pigma.git
 
 ```sh
 git clone --recurse-submodules https://github.com/GBLMX/pigma.git
-cd pigma
+cd boxpigma
 cargo build --release
-# binary at target/release/pigma
+# binary at target/release/boxpigma
 ```
 
 ## Usage
@@ -227,7 +227,7 @@ cargo build --release
 | `:help` / `:login` | 快捷键面板 / 登录页 |
 | `:save` | 立即写回 `config.toml` |
 | `:theme <名字>` | 切换主题（`Tab` 会列出全部主题名） |
-| `:volume 75` / `:volume +5` / `:volume -10` | 音量（与 `pigma msg volume` 同一套语法） |
+| `:volume 75` / `:volume +5` / `:volume -10` | 音量（与 `boxpigma msg volume` 同一套语法） |
 | `:seek 90` / `:seek +15` / `:seek -30` / `:seek 50%` | 跳到某秒 / 相对跳转 / 百分比 |
 | `:visualizer on\|off` | 频谱显示开关（同 `v` 键） |
 | `:signin <账号> <密码>` | 邮箱或手机号 + 密码登录（`:login` 仍是二维码页） |
@@ -243,45 +243,45 @@ cargo build --release
 
 ### CLI 控制（status / msg）
 
-查询/控制一个**正在运行**的 pigma 实例（交互界面或守护进程均可），
-通过 `~/.cache/pigma/pigma.sock` 上的 Unix socket 通信：
+查询/控制一个**正在运行**的 boxpigma 实例（交互界面或守护进程均可），
+通过 `~/.cache/boxpigma/boxpigma.sock` 上的 Unix socket 通信：
 
 ```bash
 # 生成 shell 补全脚本（bash / zsh / fish / elvish / powershell）
 # bash
-pigma completions bash > ~/.local/share/bash-completion/completions/pigma
+boxpigma completions bash > ~/.local/share/bash-completion/completions/boxpigma
 
 # zsh
-pigma completions zsh > "${fpath[1]}/_pigma"
+boxpigma completions zsh > "${fpath[1]}/_pigma"
 
 # fish
-pigma completions fish > ~/.config/fish/completions/pigma.fish
+boxpigma completions fish > ~/.config/fish/completions/boxpigma.fish
 
 # powershell：生成脚本并在 $PROFILE 中自动加载（在 pwsh 里执行）
-pigma completions powershell | Out-File "$HOME/.config/powershell/pigma.ps1" -Encoding utf8
-Add-Content $PROFILE '. "$HOME/.config/powershell/pigma.ps1"'
+boxpigma completions powershell | Out-File "$HOME/.config/powershell/boxpigma.ps1" -Encoding utf8
+Add-Content $PROFILE '. "$HOME/.config/powershell/boxpigma.ps1"'
 
 ```
 
 | 命令 | 说明 |
 |---|---|
-| `pigma status` | 查询状态（默认 plain 文本） |
-| `pigma status --json` | 以 JSON 输出 |
-| `pigma status -L` | 列出当前播放队列（`>` 标记当前曲目），`-L --json` 输出原始 `QueueSnapshot` |
-| `pigma status --template "{name}  {artist}  {current}/{duration}  {status}  vol {volume}%"` | 自定义 plain 输出模板 |
-| `pigma msg list` | 列出当前播放队列（`▶` 标记当前曲目），`--json` 输出原始 `QueueSnapshot` |
-| `pigma msg next` / `pigma msg previous` | 下一首 / 上一首 |
-| `pigma msg pause` / `pigma msg play` | 暂停 / 播放（`pigma msg play <song-id>` 按 id 跳播队列中的歌曲） |
-| `pigma msg search <keyword>` | 搜索并返回歌曲数据（NCM + 已启用 sonar 源，标出 `source` 和 `id`），再 `pigma msg play <id>` 播放选中的那首 |
-| `pigma msg toggle_play` | 播放/暂停切换 |
-| `pigma msg mode` | 切换播放模式 |
-| `pigma msg like` / `pigma msg dislike` | 喜欢 / 不喜欢 |
-| `pigma msg toggle_like` | 喜欢/取消喜欢（切换当前曲目） |
-| `pigma msg switch-list <endpoint>` | 动态切换守护进程的队列到指定端点（如 `recommend_songs`、`toplist`），歌单端点可用 `--playlist N` 选第 N 个 |
-| `pigma msg volume 75` | 绝对音量（0-100） |
-| `pigma msg volume +5` / `-10` | 相对 ±%（与 TUI 的 `+` / `-` 一致，支持负数） |
+| `boxpigma status` | 查询状态（默认 plain 文本） |
+| `boxpigma status --json` | 以 JSON 输出 |
+| `boxpigma status -L` | 列出当前播放队列（`>` 标记当前曲目），`-L --json` 输出原始 `QueueSnapshot` |
+| `boxpigma status --template "{name}  {artist}  {current}/{duration}  {status}  vol {volume}%"` | 自定义 plain 输出模板 |
+| `boxpigma msg list` | 列出当前播放队列（`▶` 标记当前曲目），`--json` 输出原始 `QueueSnapshot` |
+| `boxpigma msg next` / `boxpigma msg previous` | 下一首 / 上一首 |
+| `boxpigma msg pause` / `boxpigma msg play` | 暂停 / 播放（`boxpigma msg play <song-id>` 按 id 跳播队列中的歌曲） |
+| `boxpigma msg search <keyword>` | 搜索并返回歌曲数据（NCM + 已启用 sonar 源，标出 `source` 和 `id`），再 `boxpigma msg play <id>` 播放选中的那首 |
+| `boxpigma msg toggle_play` | 播放/暂停切换 |
+| `boxpigma msg mode` | 切换播放模式 |
+| `boxpigma msg like` / `boxpigma msg dislike` | 喜欢 / 不喜欢 |
+| `boxpigma msg toggle_like` | 喜欢/取消喜欢（切换当前曲目） |
+| `boxpigma msg switch-list <endpoint>` | 动态切换守护进程的队列到指定端点（如 `recommend_songs`、`toplist`），歌单端点可用 `--playlist N` 选第 N 个 |
+| `boxpigma msg volume 75` | 绝对音量（0-100） |
+| `boxpigma msg volume +5` / `-10` | 相对 ±%（与 TUI 的 `+` / `-` 一致，支持负数） |
 
-`pigma status` 的 `--template` 支持占位符：`{name}` `{artist}` `{album}` `{current}`/`{position}`
+`boxpigma status` 的 `--template` 支持占位符：`{name}` `{artist}` `{album}` `{current}`/`{position}`
 `{duration}` `{volume}` `{status}` `{mode}` `{id}` `{liked}`。
 未指定时默认模板来自配置项 `cli_status_template`；`--json` 优先于配置项
 `cli_status_format`（见 [config.example.toml](./config.example.toml)）。
@@ -289,33 +289,33 @@ Add-Content $PROFILE '. "$HOME/.config/powershell/pigma.ps1"'
 #### 直接走 Unix socket（socat / 脚本）
 
 
-> **仅 Linux/macOS**：`status` / `msg` 子命令底层就是往 `~/.cache/pigma/pigma.sock`
+> **仅 Linux/macOS**：`status` / `msg` 子命令底层就是往 `~/.cache/boxpigma/boxpigma.sock`
 > 发一行 JSON。Windows 用的是命名管道，见下节。
-> 不想用 `pigma` 二进制时，可用 `socat` 或任何 Unix socket 客户端直接控制：
+> 不想用 `boxpigma` 二进制时，可用 `socat` 或任何 Unix socket 客户端直接控制：
 
 ```bash
 # 查询状态（返回一行 JSON）
-printf '{"cmd":"status"}\n' | socat - "$HOME/.cache/pigma/pigma.sock"
+printf '{"cmd":"status"}\n' | socat - "$HOME/.cache/boxpigma/boxpigma.sock"
 
 # 列出播放队列
-printf '{"cmd":"list"}\n' | socat - "$HOME/.cache/pigma/pigma.sock"
+printf '{"cmd":"list"}\n' | socat - "$HOME/.cache/boxpigma/boxpigma.sock"
 
-# 播放控制（注意 action 是嵌套对象，与 pigma msg 实际发送的 JSON 一致）
-printf '{"cmd":"msg","action":{"action":"next"}}\n'          | socat - "$HOME/.cache/pigma/pigma.sock"
-printf '{"cmd":"msg","action":{"action":"previous"}}\n'      | socat - "$HOME/.cache/pigma/pigma.sock"
-printf '{"cmd":"msg","action":{"action":"pause"}}\n'         | socat - "$HOME/.cache/pigma/pigma.sock"
-printf '{"cmd":"msg","action":{"action":"play"}}\n'          | socat - "$HOME/.cache/pigma/pigma.sock"
-printf '{"cmd":"msg","action":{"action":"mode"}}\n'          | socat - "$HOME/.cache/pigma/pigma.sock"
-printf '{"cmd":"msg","action":{"action":"like"}}\n'          | socat - "$HOME/.cache/pigma/pigma.sock"
-printf '{"cmd":"msg","action":{"action":"dislike"}}\n'       | socat - "$HOME/.cache/pigma/pigma.sock"
-printf '{"cmd":"msg","action":{"action":"toggle_like"}}\n'   | socat - "$HOME/.cache/pigma/pigma.sock"
+# 播放控制（注意 action 是嵌套对象，与 boxpigma msg 实际发送的 JSON 一致）
+printf '{"cmd":"msg","action":{"action":"next"}}\n'          | socat - "$HOME/.cache/boxpigma/boxpigma.sock"
+printf '{"cmd":"msg","action":{"action":"previous"}}\n'      | socat - "$HOME/.cache/boxpigma/boxpigma.sock"
+printf '{"cmd":"msg","action":{"action":"pause"}}\n'         | socat - "$HOME/.cache/boxpigma/boxpigma.sock"
+printf '{"cmd":"msg","action":{"action":"play"}}\n'          | socat - "$HOME/.cache/boxpigma/boxpigma.sock"
+printf '{"cmd":"msg","action":{"action":"mode"}}\n'          | socat - "$HOME/.cache/boxpigma/boxpigma.sock"
+printf '{"cmd":"msg","action":{"action":"like"}}\n'          | socat - "$HOME/.cache/boxpigma/boxpigma.sock"
+printf '{"cmd":"msg","action":{"action":"dislike"}}\n'       | socat - "$HOME/.cache/boxpigma/boxpigma.sock"
+printf '{"cmd":"msg","action":{"action":"toggle_like"}}\n'   | socat - "$HOME/.cache/boxpigma/boxpigma.sock"
 
 # 音量：绝对（0.0-1.0）或相对增量
-printf '{"cmd":"msg","action":{"action":"volume","absolute":0.75}}\n' | socat - "$HOME/.cache/pigma/pigma.sock"
-printf '{"cmd":"msg","action":{"action":"volume","delta":0.05}}\n'    | socat - "$HOME/.cache/pigma/pigma.sock"
+printf '{"cmd":"msg","action":{"action":"volume","absolute":0.75}}\n' | socat - "$HOME/.cache/boxpigma/boxpigma.sock"
+printf '{"cmd":"msg","action":{"action":"volume","delta":0.05}}\n'    | socat - "$HOME/.cache/boxpigma/boxpigma.sock"
 
 # 切换队列到指定端点（歌单端点可用 "playlist" 选第 N 个，1 起始）
-printf '{"cmd":"msg","action":{"action":"switch_list","endpoint":"toplist","playlist":2}}\n' | socat - "$HOME/.cache/pigma/pigma.sock"
+printf '{"cmd":"msg","action":{"action":"switch_list","endpoint":"toplist","playlist":2}}\n' | socat - "$HOME/.cache/boxpigma/boxpigma.sock"
 ```
 
 约定：每行请求须以换行结尾，服务端每连接处理一个请求并回一行 JSON
@@ -323,12 +323,12 @@ printf '{"cmd":"msg","action":{"action":"switch_list","endpoint":"toplist","play
 
 #### Windows：命名管道控制（PowerShell）
 
-Windows 上 IPC 走命名管道 `\\.\pipe\pigma`（可用 `--socket <pipe-name>` 自定义），
+Windows 上 IPC 走命名管道 `\\.\pipe\boxpigma`（可用 `--socket <pipe-name>` 自定义），
 协议相同（一行 JSON + 换行，服务端回一行 JSON）。用 PowerShell 控制：
 
 ```powershell
-function Send-Pigma($json) {
-    $pipe = New-Object System.IO.Pipes.NamedPipeClientStream('.', 'pigma', [System.IO.Pipes.PipeDirection]::InOut)
+function Send-boxpigma($json) {
+    $pipe = New-Object System.IO.Pipes.NamedPipeClientStream('.', 'boxpigma', [System.IO.Pipes.PipeDirection]::InOut)
     $pipe.Connect(5000)
     $sw = New-Object System.IO.StreamWriter($pipe)
     $sw.NewLine = "`n"
@@ -337,22 +337,22 @@ function Send-Pigma($json) {
     return $sr.ReadLine()
 }
 
-Send-Pigma '{"cmd":"status"}'                 # 查询状态
-Send-Pigma '{"cmd":"list"}'                   # 列出播放队列
-Send-Pigma '{"cmd":"msg","action":{"action":"next"}}'    # 下一首
-Send-Pigma '{"cmd":"msg","action":{"action":"volume","absolute":0.75}}'  # 音量 75%
+Send-boxpigma '{"cmd":"status"}'                 # 查询状态
+Send-boxpigma '{"cmd":"list"}'                   # 列出播放队列
+Send-boxpigma '{"cmd":"msg","action":{"action":"next"}}'    # 下一首
+Send-boxpigma '{"cmd":"msg","action":{"action":"volume","absolute":0.75}}'  # 音量 75%
 ```
 
-### 无头守护进程模式（pigma -d）
+### 无头守护进程模式（boxpigma -d）
 
-以无终端方式后台运行（可挂在 waybar / systemd 下），加载指定的 API 作为初始队列（**不自动播放**，用 `pigma msg play` 或 waybar 的 toggle 按钮开始）。
+以无终端方式后台运行（可挂在 waybar / systemd 下），加载指定的 API 作为初始队列（**不自动播放**，用 `boxpigma msg play` 或 waybar 的 toggle 按钮开始）。
 
 | 选项 | 说明 |
 |---|---|
-| `pigma -d` | 等价于 `pigma -d liked` |
-| `pigma -d toplist` | 加载指定端点 |
-| `pigma --daemon user_cloud_disk` | `-d` 的全写形式 |
-| `pigma -d toplist:3` | 歌单/榜单端点用 `:N` 选第 N 个（1 起始） |
+| `boxpigma -d` | 等价于 `boxpigma -d liked` |
+| `boxpigma -d toplist` | 加载指定端点 |
+| `boxpigma --daemon user_cloud_disk` | `-d` 的全写形式 |
+| `boxpigma -d toplist:3` | 歌单/榜单端点用 `:N` 选第 N 个（1 起始） |
 
 支持的内置 API 与导航项一致：
 
@@ -375,31 +375,31 @@ Send-Pigma '{"cmd":"msg","action":{"action":"volume","absolute":0.75}}'  # 音�
 | `search` | 其他 | 搜索热榜（无可播队列） |
 | `top_singers` | 其他 | 热门歌手（无可播队列） |
 
-歌单类端点解析出来是一组歌单，默认加载第一个；`-d` 可用 `ENDPOINT:N`（如 `pigma -d toplist:3`）选择第 N 个（1 起始），`msg switch-list` 可用 `--playlist N`。序号与 TUI 中列表显示的顺序一致，可先在 TUI 里查看：
+歌单类端点解析出来是一组歌单，默认加载第一个；`-d` 可用 `ENDPOINT:N`（如 `boxpigma -d toplist:3`）选择第 N 个（1 起始），`msg switch-list` 可用 `--playlist N`。序号与 TUI 中列表显示的顺序一致，可先在 TUI 里查看：
 
-启动后即用 `pigma status` / `pigma msg` 控制；`SIGINT`/`SIGTERM` 会保存会话并干净退出。
+启动后即用 `boxpigma status` / `boxpigma msg` 控制；`SIGINT`/`SIGTERM` 会保存会话并干净退出。
 
 **Waybar 集成**：
 
-  - 参考[waybar](./waybar)。状态模块用 bash 脚本 `waybar/pigma`，每秒调 `pigma status --json` 获取状态并格式化为 waybar JSON。脚本内置 `ensure_daemon`，首次调用时自动启动 daemon。
+  - 参考[waybar](./waybar)。状态模块用 bash 脚本 `waybar/boxpigma`，每秒调 `boxpigma status --json` 获取状态并格式化为 waybar JSON。脚本内置 `ensure_daemon`，首次调用时自动启动 daemon。
 
 ```jsonc
 // ~/.config/waybar/config.jsonc 核心片段
-"custom/pigma": {
-  "exec": "~/.config/waybar/scripts/pigma",
+"custom/boxpigma": {
+  "exec": "~/.config/waybar/scripts/boxpigma",
   "interval": 1,
   "return-type": "json",
-  "on-click-right": "pigma msg mode",
-  "on-scroll-up": "pigma msg volume +5",
-  "on-scroll-down": "pigma msg volume -5"
+  "on-click-right": "boxpigma msg mode",
+  "on-scroll-up": "boxpigma msg volume +5",
+  "on-scroll-down": "boxpigma msg volume -5"
 }
 ```
 
 ## Configuration
 Config file location:
 
-- linux: `~/.config/pigma/config.toml`
-- macOS: `$HOME/Library/Application Support/pigma/config.tomnl`
+- linux: `~/.config/boxpigma/config.toml`
+- macOS: `$HOME/Library/Application Support/boxpigma/config.tomnl`
 - windows:`RoamingAppData`
 
 ### 配置版本与迁移
@@ -768,7 +768,7 @@ default_theme = "my_theme"
 
 ```sh
 git clone https://github.com/GBLMX/pigma.git
-cd pigma
+cd boxpigma
 git submodule update --init --recursive
 cargo run
 cargo +nightly fmt
@@ -778,7 +778,7 @@ cargo +nightly fmt
 
 - 完善 waybar/systemd 集成文档与示例配置
 - 守护进程模式下更多端点的支持（榜单/歌单自动展开）
-- `pigma msg` 更多动作（seek、queue 操作等）
+- `boxpigma msg` 更多动作（seek、queue 操作等）
 
 ## License
 

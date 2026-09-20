@@ -32,3 +32,48 @@ impl App {
         Self::resolve_theme(&self.config, &self.theme_registry)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::RANDOM_THEME;
+
+    /// A config that asks for `random` must be settled before anything draws. `resolve_theme`
+    /// runs on every frame and `random` is not a theme, so a name left unresolved would log a
+    /// warning on each frame and quietly show `default` instead.
+    #[tokio::test]
+    async fn a_random_theme_is_settled_before_the_first_frame() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let config = Config {
+            default_theme: RANDOM_THEME.to_string(),
+            ..Config::default()
+        };
+
+        let app = App::new(config, false).expect("app");
+
+        assert_ne!(app.config.default_theme, RANDOM_THEME);
+        assert!(
+            app.theme_registry.get(&app.config.default_theme).is_some(),
+            "`{}` does not resolve",
+            app.config.default_theme
+        );
+        assert_eq!(app.current_theme().name, app.config.default_theme);
+    }
+
+    /// The light slot rolls separately: with `background = auto` both slots can be `random`.
+    #[tokio::test]
+    async fn both_slots_settle_independently() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let config = Config {
+            default_theme: RANDOM_THEME.to_string(),
+            light_theme: Some(RANDOM_THEME.to_string()),
+            ..Config::default()
+        };
+
+        let app = App::new(config, false).expect("app");
+
+        let light = app.config.light_theme.as_deref().expect("light slot");
+        assert_ne!(light, RANDOM_THEME);
+        assert!(app.theme_registry.get(light).is_some(), "`{light}`");
+    }
+}

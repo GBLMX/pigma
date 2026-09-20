@@ -1,5 +1,5 @@
 name: 🐛 Bug report
-description: Report a bug to help improve pigma
+description: Report a bug to help improve boxpigma
 title: "[Bug] "
 labels: ["bug"]
 body:
@@ -47,8 +47,8 @@ body:
   - type: input
     id: version
     attributes:
-      label: pigma version
-      description: The version or commit you are running (run `pigma --version` if available).
+      label: boxpigma version
+      description: The version or commit you are running (run `boxpigma --version` if available).
       placeholder: "0.1.0 / commit abc123"
     validations:
       required: false

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 pub struct CacheConfig {
     /// Content cache TTL in seconds (0 to disable).
     pub content_cache_ttl: u64,
-    /// Save-on-play cache directory (absolute path or a path relative to ~/.cache/pigma/).
+    /// Save-on-play cache directory (absolute path or a path relative to ~/.cache/boxpigma/).
     pub cache_dir: String,
     /// Cache file naming template. Variables: {id} {name} {singer} {album}.
     /// Example: "{name}-{singer}"

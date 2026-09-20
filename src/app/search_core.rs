@@ -2,7 +2,7 @@
 //!
 //! The TUI search is async-fire-and-forget (spawns a task, pushes
 //! [`crate::event::NavigationEvent`]s, updates navigation state) while the
-//! IPC server must answer `pigma msg search` synchronously, so the *orchestration*
+//! IPC server must answer `boxpigma msg search` synchronously, so the *orchestration*
 //! lives apart (see `super::search` for the TUI side) — but the actual search
 //! execution, result conversion and registration are shared here: both paths
 //! call [`search_ncm`] / [`search_sonar`].
@@ -22,7 +22,7 @@ use crate::{
 };
 
 /// Registry of recently searched songs keyed by song id, shared with `App` so
-/// `pigma msg play <id>` can enqueue and play a result that is not part of the
+/// `boxpigma msg play <id>` can enqueue and play a result that is not part of the
 /// active playback queue.
 pub type SearchResults = Arc<Mutex<HashMap<u64, Arc<SongInfo>>>>;
 
@@ -109,7 +109,7 @@ impl SearchEngine {
 }
 
 /// Search NetEase Cloud Music for `keyword` and register the hits by id so
-/// `pigma msg play <id>` can enqueue them later. Returns the API `ContentState`
+/// `boxpigma msg play <id>` can enqueue them later. Returns the API `ContentState`
 /// unchanged (the TUI surfaces the error string verbatim).
 pub async fn search_ncm(
     service: &ApiService,
@@ -129,7 +129,7 @@ pub async fn search_ncm(
 /// Search the sonar providers in `finder` (the TUI passes a single-provider
 /// finder to restrict to the selected source; the IPC engine passes the shared
 /// all-provider finder). Registers every hit in the shared registries so a
-/// later `pigma msg play <id>` resolves. Returns `Err` with the raw error text.
+/// later `boxpigma msg play <id>` resolves. Returns `Err` with the raw error text.
 pub async fn search_sonar(
     finder: &SonarFinder,
     sonar_songs: &Arc<Mutex<HashMap<u64, Arc<Song>>>>,
@@ -177,7 +177,7 @@ pub fn to_song_info(song: &Song) -> SongInfo {
     }
 }
 
-/// Register a batch of search hits by id so `pigma msg play <id>` can later
+/// Register a batch of search hits by id so `boxpigma msg play <id>` can later
 /// enqueue and play them even though they are not part of the active queue.
 pub fn register_search_results(search_results: &SearchResults, songs: &[Arc<SongInfo>]) {
     if let Ok(mut map) = search_results.lock() {

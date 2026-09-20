@@ -23,7 +23,7 @@ pub use notify::*;
 pub use playerbar::*;
 use serde::{Deserialize, Serialize};
 pub use symbols::*;
-pub use theme::{ColorSpec, Theme, ThemeRegistry, UserTheme, theme_fallback};
+pub use theme::{ColorSpec, RANDOM_THEME, Theme, ThemeRegistry, UserTheme, theme_fallback};
 pub use titles::*;
 
 use crate::{
@@ -119,10 +119,10 @@ pub struct Config {
     /// sonar fallback source config (multi-source fallback when NCM playback fails).
     #[serde(default)]
     pub source_fallback: SonarConfig,
-    /// Default template for `pigma status` (plain format).
+    /// Default template for `boxpigma status` (plain format).
     #[serde(default = "default_cli_status_template")]
     pub cli_status_template: String,
-    /// Default format for `pigma status`: `plain` or `json`.
+    /// Default format for `boxpigma status`: `plain` or `json`.
     #[serde(default = "default_cli_status_format")]
     pub cli_status_format: String,
 }
@@ -259,7 +259,7 @@ impl Default for Config {
 
 impl Config {
     pub fn load() -> Self {
-        Self::load_from(&utils::pigma_config_dir().join("config.toml"))
+        Self::load_from(&utils::boxpigma_config_dir().join("config.toml"))
     }
 
     /// Load a config from an explicit path, upgrading a file written by an older release.
@@ -344,7 +344,7 @@ impl Config {
     }
 
     pub fn save(&self) {
-        let dir = utils::pigma_config_dir();
+        let dir = utils::boxpigma_config_dir();
         if let Err(e) = fs::create_dir_all(&dir) {
             log::error!("Failed to create config directory: {e}");
             return;
@@ -438,8 +438,10 @@ mod tests {
     /// Scratch directory for the file-backed tests: they run in parallel, so the name
     /// carries the test's own label.
     fn scratch_dir(label: &str) -> std::path::PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("pigma-config-test-{}-{label}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "boxpigma-config-test-{}-{label}",
+            std::process::id()
+        ));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("create scratch dir");
         dir
