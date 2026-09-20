@@ -277,6 +277,7 @@ cargo build --release
 | `:sign` | 网易云每日签到（云贝） |
 | `:layout default\|modern\|minimal` | 播放条布局（`modern` 下频谱只有封面列的 8 格宽，另两种布局是整行） |
 | `:pitch on\|off` | 音高读数开关（同 `V` 键） |
+| `:spin on\|off` | 播放条封面旋转开关（同 `t` 键；默认关闭，暂停即停在当前角度） |
 | `:lyrics window\|one_line\|flow\|plain` | 歌词显示样式（`Tab` 会列出四种与各自说明） |
 | `:notify song_change\|errors on\|off` | 切歌提示 / 播放错误提示开关 |
 | `:mouse on\|off` | 鼠标捕获开关（影响滚轮与双击；当场写终端转义序列） |

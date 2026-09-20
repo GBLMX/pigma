@@ -254,6 +254,11 @@ pub(super) fn handle_main_key(app: &mut App, key_event: KeyEvent) -> color_eyre:
             let on = !app.config.playerbar.visible.pitch;
             app.set_pitch(on);
         }
+        // `t` turns the record, exactly like `:spin`.
+        KeyCode::Char('t' | 'T') => {
+            let on = !app.config.playerbar.spinning_cover;
+            app.set_spinning_cover(on);
+        }
         _ => {}
     }
     Ok(())

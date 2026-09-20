@@ -80,6 +80,7 @@ pub const COMMANDS: &[Command] = &[
     simple("layout", "播放条布局", None),
     simple("border", "边框模式开关", Some("b")),
     simple("navpos", "切换导航栏位置", Some("z")),
+    simple("spin", "封面旋转开关", Some("t")),
     simple("save", "立即写回配置", None),
     simple("quit", "退出程序", Some("q")),
     // Aliases the command line accepts; the palette shows the canonical name.

@@ -49,6 +49,8 @@ pub(crate) enum ExCommand {
     Border,
     /// Cycle the navigation bar's position (the `z` key).
     NavPos,
+    /// Turn the record on the player bar; `None` toggles, like the `t` key.
+    Spin(Option<bool>),
     /// Write to the download cache while playing; `None` toggles. The engine copied the
     /// setting when it was built, so the switch has to reach it too.
     SaveOnPlay(Option<bool>),
@@ -158,6 +160,7 @@ impl ExCommand {
             "visualizer" => Ok(Self::Visualizer(optional_on_off(args.first().copied())?)),
             "border" => Ok(Self::Border),
             "navpos" => Ok(Self::NavPos),
+            "spin" => Ok(Self::Spin(optional_on_off(args.first().copied())?)),
             "saveonplay" => Ok(Self::SaveOnPlay(optional_on_off(args.first().copied())?)),
             "notify" => match args.as_slice() {
                 [] => Err("`notify` 需要一个开关（song_change / errors）".to_string()),
@@ -437,7 +440,7 @@ fn candidate_names(head: &str, typed: &str, themes: &[&str]) -> Vec<String> {
     } else {
         match name {
             "theme" => themes.to_vec(),
-            "visualizer" | "pitch" | "mouse" | "saveonplay" => vec!["off", "on"],
+            "visualizer" | "pitch" | "mouse" | "saveonplay" | "spin" => vec!["off", "on"],
             "notify" => NotifySwitch::ALL
                 .iter()
                 .map(|switch| switch.name())
@@ -677,6 +680,10 @@ pub(crate) fn execute(app: &mut App, command: ExCommand) -> Result<(), String> {
             let on = on.unwrap_or(!app.config.playerbar.visible.visualizer);
             app.set_visualizer(on);
         }
+        ExCommand::Spin(on) => {
+            let on = on.unwrap_or(!app.config.playerbar.spinning_cover);
+            app.set_spinning_cover(on);
+        }
         ExCommand::Pitch(on) => {
             let on = on.unwrap_or(!app.config.playerbar.visible.pitch);
             app.set_pitch(on);
@@ -794,6 +801,13 @@ mod tests {
             ExCommand::parse("visualizer"),
             Ok(ExCommand::Visualizer(None))
         );
+        assert_eq!(
+            ExCommand::parse("spin off"),
+            Ok(ExCommand::Spin(Some(false)))
+        );
+        assert_eq!(ExCommand::parse("spin on"), Ok(ExCommand::Spin(Some(true))));
+        // Bare, it toggles — the same thing the `t` key does.
+        assert_eq!(ExCommand::parse("spin"), Ok(ExCommand::Spin(None)));
         assert_eq!(ExCommand::parse("pitch"), Ok(ExCommand::Pitch(None)));
         assert_eq!(
             ExCommand::parse("layout default"),
@@ -1095,6 +1109,7 @@ mod tests {
             candidate_names("", "s", &THEMES),
             vec![
                 "sign",
+                "spin",
                 "save",
                 "seek",
                 "signin",

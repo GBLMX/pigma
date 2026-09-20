@@ -348,6 +348,15 @@ impl App {
         self.toast(format!("音高: {}", if on { "开" } else { "关" }));
     }
 
+    /// `[playerbar] spinning_cover`: the record turns while a track plays. The frame reads this
+    /// config every time it draws, so the flip is on screen at once; saving is what makes it
+    /// survive the next start.
+    pub fn set_spinning_cover(&mut self, on: bool) {
+        self.config.playerbar.spinning_cover = on;
+        self.config.save();
+        self.toast(format!("封面旋转: {}", if on { "开" } else { "关" }));
+    }
+
     /// Refresh the IPC status snapshot from the live playback state. The status
     /// (current song + progress) is cheap and rebuilt each loop; the full queue
     /// listing is only rebuilt when the queue actually changed.
