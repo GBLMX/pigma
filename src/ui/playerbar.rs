@@ -36,7 +36,7 @@ pub(super) struct LayoutArea {
 /// Split the layouts' spare row between the spectrum and the pitch readout, so enabling
 /// both does not draw them over each other. Either half is the whole row when only one
 /// of the two is visible.
-pub(super) fn spectrum_row(area: Rect, visible: &PlayerbarVisible) -> (Rect, Rect) {
+pub(crate) fn spectrum_row(area: Rect, visible: &PlayerbarVisible) -> (Rect, Rect) {
     const PITCH_WIDTH: u16 = 14;
 
     if visible.visualizer && visible.pitch && area.width > PITCH_WIDTH {

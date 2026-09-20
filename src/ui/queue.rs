@@ -14,6 +14,7 @@ use super::{
     scrollbar::{calc_scroll_offset, render_scrollbar},
     title::render_title,
 };
+use crate::state::QueueHits;
 use crate::{
     config::Theme,
     playback::PlaybackEngine,
@@ -34,6 +35,7 @@ fn tab_style(colors: &Theme, selected: bool, playing: bool) -> Style {
         .add_modifier(Modifier::BOLD)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn draw_queue_table(
     f: &mut Frame,
     playback: &PlaybackEngine,
@@ -41,8 +43,12 @@ pub(super) fn draw_queue_table(
     bs: &BlockStyle<'_>,
     title_template: &str,
     tab_scroll: &mut u16,
+    hits: &mut QueueHits,
     area: Rect,
 ) {
+    hits.tabs.clear();
+    hits.table = Rect::default();
+    hits.offset = 0;
     let colors = bs.colors;
     let count = playback.queue_len();
     let key = playback.queue_key();
@@ -68,6 +74,8 @@ pub(super) fn draw_queue_table(
         let mut total = 0usize;
         let mut selected_start = None;
         let mut selected_width = 0;
+        // Tab spans in laid-out order, converted to screen space once the scroll is known.
+        let mut tab_spans: Vec<(String, usize, usize)> = Vec::new();
 
         for (i, k) in keys.iter().enumerate() {
             if i > 0 {
@@ -76,6 +84,8 @@ pub(super) fn draw_queue_table(
             }
             let label = clip_long_text(k, 24);
             let label_w = UnicodeWidthStr::width(label.as_str());
+            // The label span is `" {label} "`, so the clickable width includes both pads.
+            tab_spans.push((k.clone(), total, label_w + 2));
             let is_selected = Some(i) == selected_tab;
             let is_playing = Some(i) == playing_tab;
             if is_selected {
@@ -107,6 +117,24 @@ pub(super) fn draw_queue_table(
         }
 
         f.render_widget(Paragraph::new(line).scroll((0, *tab_scroll)), tabs_area);
+
+        let scroll = *tab_scroll as usize;
+        for (key, start, width) in tab_spans {
+            let left = start.max(scroll);
+            let right = (start + width).min(scroll + tabs_area.width as usize);
+            if left >= right {
+                continue;
+            }
+            hits.tabs.push((
+                key,
+                Rect {
+                    x: tabs_area.x + (left - scroll) as u16,
+                    y: tabs_area.y,
+                    width: (right - left) as u16,
+                    height: 1,
+                },
+            ));
+        }
         body
     };
 
@@ -177,6 +205,9 @@ pub(super) fn draw_queue_table(
             .style(row_style)
         })
         .collect();
+
+    hits.table = table_area;
+    hits.offset = offset;
 
     let table = Table::new(
         rows,

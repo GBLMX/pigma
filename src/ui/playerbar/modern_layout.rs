@@ -26,7 +26,24 @@ impl Playerbar for ModernLayout {
 
         let cover_area = cols[0];
 
+        // This layout fills every row, so the spectrum takes the bottom row of the cover
+        // column — and only when it is enabled, so nobody else loses a row of art.
+        let wants_bars = config.visible.visualizer;
         let cover_height = (if is_sixel && area.height >= 5 { 4 } else { 3 }).min(area.height);
+        let cover_height = if wants_bars && cover_height > 1 {
+            cover_height - 1
+        } else {
+            cover_height
+        };
+        let spectrum_row = if wants_bars && cover_height < area.height {
+            Rect {
+                y: area.y + cover_height,
+                height: 1,
+                ..cover_area
+            }
+        } else {
+            Rect::default()
+        };
         let cover_area = Rect {
             y: area.y,
             height: cover_height,
@@ -76,8 +93,9 @@ impl Playerbar for ModernLayout {
             controls: bottom_cols[1],
             volume: vol_mode_cols[0],
             mode_icon: vol_mode_cols[1],
-            // This layout fills every row with the cover block, so `visualizer` keeps its
-            // zero rect and the spectrum is not drawn on it.
+            visualizer: spectrum_row,
+            // No room for the pitch readout: the row it could use is only as wide as the
+            // cover column.
             ..Default::default()
         }
     }
@@ -112,5 +130,31 @@ impl Playerbar for ModernLayout {
         if config.visible.mode_icon {
             widgets::draw_mode_icon(f, player, colors, layout.mode_icon);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::layout::Rect;
+
+    use super::*;
+
+    /// This layout fills every row with something, so the spectrum can only come from the
+    /// cover column — and only when it is enabled, so nobody else loses a row of art.
+    #[test]
+    fn the_spectrum_takes_a_row_from_the_cover_when_enabled() {
+        let area = Rect::new(0, 0, 80, 3);
+        let mut config = PlayerbarConfig::default();
+        let layout = ModernLayout.layout(area, &config, false);
+        assert_eq!(layout.cover.height, 3, "the cover keeps the full height");
+        assert_eq!(layout.visualizer.height, 0, "nothing is given up unasked");
+
+        config.visible.visualizer = true;
+        let layout = ModernLayout.layout(area, &config, false);
+        assert_eq!(layout.cover.height, 2);
+        assert_eq!(layout.visualizer.height, 1);
+        assert_eq!(layout.visualizer.y, layout.cover.y + layout.cover.height);
+        assert_eq!(layout.visualizer.width, layout.cover.width);
+        assert_eq!(layout.visualizer.x, layout.cover.x);
     }
 }

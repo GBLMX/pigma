@@ -51,6 +51,17 @@ pub(super) fn progress_fraction(area: Rect, column: u16) -> Option<f64> {
     Some((offset / width).clamp(0.0, 1.0))
 }
 
+/// Whether a published area contains the point. A zero-sized area never does, which is
+/// what a layout with no room for something publishes.
+pub(super) fn contains(area: Rect, column: u16, row: u16) -> bool {
+    area.width > 0
+        && area.height > 0
+        && column >= area.x
+        && column < area.x + area.width
+        && row >= area.y
+        && row < area.y + area.height
+}
+
 /// Which navigation item is under the cursor, from the areas published by the last draw.
 pub(super) fn nav_item(
     hits: &[(usize, usize, Rect)],
@@ -58,13 +69,15 @@ pub(super) fn nav_item(
     row: u16,
 ) -> Option<(usize, usize)> {
     hits.iter()
-        .find(|(_, _, area)| {
-            column >= area.x
-                && column < area.x + area.width
-                && row >= area.y
-                && row < area.y + area.height
-        })
+        .find(|(_, _, area)| contains(*area, column, row))
         .map(|(section, item, _)| (*section, *item))
+}
+
+/// Display key of the queue tab under the cursor.
+pub(super) fn queue_tab(tabs: &[(String, Rect)], column: u16, row: u16) -> Option<&str> {
+    tabs.iter()
+        .find(|(_, area)| contains(*area, column, row))
+        .map(|(key, _)| key.as_str())
 }
 
 #[cfg(test)]
@@ -145,5 +158,33 @@ mod tests {
         );
         assert_eq!(nav_item(&hits, 25, 1), None, "outside the sidebar");
         assert_eq!(nav_item(&[], 5, 1), None);
+    }
+
+    #[test]
+    fn queue_tab_matches_the_published_labels() {
+        let tabs = vec![
+            ("我喜欢的音乐".to_string(), area(2, 1, 12, 1)),
+            ("daily".to_string(), area(16, 1, 7, 1)),
+        ];
+        assert_eq!(queue_tab(&tabs, 3, 1), Some("我喜欢的音乐"));
+        assert_eq!(queue_tab(&tabs, 18, 1), Some("daily"));
+        assert_eq!(queue_tab(&tabs, 15, 1), None, "the gap between tabs");
+        assert_eq!(queue_tab(&tabs, 3, 2), None, "the row below the tabs");
+        assert_eq!(queue_tab(&[], 3, 1), None);
+    }
+
+    /// `contains` is what every area check goes through, so its edges are the contract:
+    /// half-open on both axes, never true for an area with no size.
+    #[test]
+    fn contains_is_half_open_and_ignores_empty_areas() {
+        let rect = area(4, 10, 3, 2);
+        assert!(contains(rect, 4, 10));
+        assert!(contains(rect, 6, 11));
+        assert!(!contains(rect, 7, 11), "right edge is exclusive");
+        assert!(!contains(rect, 6, 12), "bottom edge is exclusive");
+        assert!(!contains(rect, 3, 10));
+        assert!(!contains(area(4, 10, 0, 2), 4, 10));
+        assert!(!contains(area(4, 10, 3, 0), 4, 10));
+        assert!(!contains(Rect::default(), 0, 0));
     }
 }

@@ -10,7 +10,7 @@ mod help;
 mod login;
 mod lyrics;
 mod navigation;
-mod playerbar;
+pub(crate) mod playerbar;
 mod queue;
 mod scrollbar;
 mod skeleton;
@@ -91,6 +91,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
                 is_sixel,
             );
             app.state.gauge_area = playerbar_areas.gauge;
+            app.state.volume_area = playerbar_areas.volume;
+            app.state.cover_area = playerbar_areas.cover;
+            app.state.spectrum_row_area = playerbar_areas.visualizer;
 
             match page {
                 Page::Main => {
@@ -201,6 +204,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
                         &bs,
                         &app.config.titles.playlist,
                         &mut app.state.navigation.queue_tab_scroll_x,
+                        &mut app.state.queue_hits,
                         lay.content,
                     );
                 }

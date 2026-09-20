@@ -36,7 +36,7 @@ use crate::{
     service::{ApiEndpoint, ApiService},
     state::{
         ContentState, HelpState, LoginState, NavState, NavigationState, Page, PromptState,
-        SearchProvider, SearchState, SplashState, State, TableMode,
+        QueueHits, SearchProvider, SearchState, SplashState, State, TableMode,
     },
     ui,
     utils::{path::expand_tilde, pigma_cache_dir, pigma_config_dir, terminal::BACKGROUND},
@@ -201,6 +201,11 @@ impl App {
             content_offset: 0,
             gauge_area: Rect::default(),
             prompt: PromptState::default(),
+            queue_hits: QueueHits::default(),
+            volume_area: Rect::default(),
+            cover_area: Rect::default(),
+            spectrum_row_area: Rect::default(),
+            volume_before_mute: None,
         };
         state.navigation.search.providers = search_providers;
         let search_results: SearchResults = Arc::new(Mutex::new(HashMap::new()));

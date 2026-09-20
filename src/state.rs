@@ -7,6 +7,7 @@ pub mod help;
 pub mod login;
 pub mod navigation;
 pub mod prompt;
+pub mod queue_page;
 pub mod search;
 pub mod splash;
 
@@ -18,6 +19,7 @@ pub use help::*;
 pub use login::*;
 pub use navigation::*;
 pub use prompt::*;
+pub use queue_page::*;
 pub use search::*;
 pub use splash::*;
 
@@ -99,6 +101,15 @@ pub struct State {
     pub gauge_area: Rect,
     /// The vim-style `:` command line.
     pub prompt: PromptState,
+    /// Tabs and table of the queue page, for click-to-switch and click-to-play.
+    pub queue_hits: QueueHits,
+    /// Player bar rects for click targets: the volume icon, the cover, and the row that
+    /// hosts the spectrum and the pitch readout.
+    pub volume_area: Rect,
+    pub cover_area: Rect,
+    pub spectrum_row_area: Rect,
+    /// Volume to restore when the volume icon is clicked again.
+    pub volume_before_mute: Option<f64>,
 }
 
 #[cfg(test)]
