@@ -1,4 +1,4 @@
-# pigma (In development)
+# pigma
 
 [![CI](https://github.com/GBLMX/pigma/actions/workflows/ci.yml/badge.svg)](https://github.com/GBLMX/pigma/actions/workflows/ci.yml)
 [![Release](https://github.com/GBLMX/pigma/actions/workflows/release.yml/badge.svg)](https://github.com/GBLMX/pigma/actions/workflows/release.yml)
@@ -9,14 +9,14 @@
 
 <img width="100" src="./imgs/logo.png" alt="pigma" />
 
-A NetEase Cloud Music (网易云音乐) or local audio playback TUI client built with [Ratatui](https://ratatui.rs).
+pigma 的核心目标是把网易云音乐和本地音频播放的体验带进命令行环境：终端里的流式播放、歌词、歌单与队列管理，全部围绕键盘操作组织，基于 [Ratatui](https://ratatui.rs) 实现。
 
-> 本仓库是 [akirco/pigma](https://github.com/akirco/pigma) 的 fork：`main` 上有本仓库自己的修复与功能（点击 seek／频谱与音高读数／`:` 命令行与补全／按终端能力自动适配配色与字形），二进制与 AUR 包都从**本仓库**发布 —— [releases](https://github.com/GBLMX/pigma/releases) 与 `pigma-gblmx-bin`。
+本仓库是 [akirco/pigma](https://github.com/akirco/pigma) 的 fork，**持续维护中**：上游的进展在这里跟进，本仓库自己也带了一批改动 —— 鼠标交互（点击 seek／切区／起播）、频谱与音高读数、`:` 命令行与补全、按终端能力自动适配配色与字形。二进制与 AUR 包都从**本仓库**发布（[releases](https://github.com/GBLMX/pigma/releases)、`pigma-gblmx-bin`）。
 
 <details>
 <summary><b>📖 点击展开/折叠目录 (Table of Contents)</b></summary>
 
-- [pigma (In development)](#pigma-in-development)
+- [pigma](#pigma)
   - [Features](#features)
   - [Preview](#preview)
   - [Install](#install)
@@ -51,8 +51,7 @@ A NetEase Cloud Music (网易云音乐) or local audio playback TUI client built
 
 **注意：**
 
-> 该项目仅供学习与研究使用.
-> 另外由于个人原因，该项目正在寻找维护人员，有兴趣联系
+> 该项目仅供学习与研究使用。
 
 **升级提示：`config.toml` 现在带 `config_version`，旧文件（没有该字段，按 v0 处理）在加载时会自动升级，并把原文件备份为 `config.toml.bak-v0`；反之，来自更新版本的配置文件按原样使用（未识别的字段忽略，不会被降级覆盖）。**
 
@@ -115,7 +114,7 @@ A NetEase Cloud Music (网易云音乐) or local audio playback TUI client built
 
 ## Install
 
-> 本仓库是 [akirco/pigma](https://github.com/akirco/pigma) 的 fork：**这里的二进制、AUR 包和安装命令都对应本仓库的 [releases](https://github.com/GBLMX/pigma/releases)**，上游的安装渠道装到的是不含本仓库改动的版本。
+> 本节所有命令都对应本仓库的 [releases](https://github.com/GBLMX/pigma/releases)；上游的安装渠道装到的是不含本仓库改动的版本。
 >
 > Note: the `gnu` Linux builds depend on system audio libraries (e.g. `alsa-lib`).
 
