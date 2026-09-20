@@ -172,6 +172,17 @@ jobs:
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}
           sed -i "s/^pkgver=.*/pkgver=$VERSION/" ./PKGBUILD
+      - name: Fill in the source checksum
+        # The asset only exists once the `release` job above has published it, so the
+        # checksum is computed here instead of being committed: an AUR `-bin` package
+        # should verify what it downloads rather than ship sha256sums=('SKIP').
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          ASSET="pigma-x86_64-unknown-linux-gnu.tar.gz"
+          curl -sSfLO "https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/${ASSET}"
+          SUM=$(sha256sum "${ASSET}" | cut -d' ' -f1)
+          sed -i "s/^sha256sums=.*/sha256sums=('${SUM}')/" ./PKGBUILD
+          grep -E '^(pkgver|sha256sums)=' ./PKGBUILD
       - name: Publish AUR package
         uses: KSXGitHub/github-actions-deploy-aur@v3
         with:
