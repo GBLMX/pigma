@@ -46,7 +46,7 @@ ncm-api = { path = "crates/ncm-api" }
 qrcode = "0.14.1"
 rand = "0.10.2"
 ratatui = { version = "0.30.2", default-features = false, features = ["crossterm_0_29", "layout-cache", "serde"] }
-ratatui-image = { version = "11.0.6", default-features = false, features = ["crossterm"] }
+ratatui-image = { version = "11.1.0", default-features = false, features = ["crossterm"] }
 reqwest = { workspace = true }
 # rodio = { version = "0.22.2", default-features = false, features = ["flac", "mp3", "mp4", "playback", "vorbis", "wav"] }
 rodio = { version = "0.22.2", default-features = false, features = ["playback", "symphonia-aac", "symphonia-flac", "symphonia-isomp4", "symphonia-mp3", "symphonia-vorbis", "symphonia-wav"] }

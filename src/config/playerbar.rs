@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::utils::{GradientPreset, deserialize_optional};
+use crate::utils::{GradientPreset, deserialize_optional, terminal::ImageProtocolChoice};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -52,6 +52,11 @@ pub struct PlayerbarConfig {
     /// Progress bar gradient preset. An empty string or unknown name disables the gradient.
     #[serde(default, deserialize_with = "deserialize_optional")]
     pub gradient_preset: Option<GradientPreset>,
+    /// How covers are drawn. `auto` asks the terminal and trusts its answer; force
+    /// `kitty`, `iterm2`, `sixel` or `halfblocks` where the detection cannot know
+    /// better (tmux with `allow-passthrough`, a multiplexer, an ssh hop).
+    #[serde(default)]
+    pub image_protocol: ImageProtocolChoice,
     #[serde(default)]
     pub layout: LayoutType,
     #[serde(default)]
@@ -83,6 +88,7 @@ impl Default for PlayerbarConfig {
             unfilled_color: default_pb_unfilled_color(),
             unfilled_color_cached: default_pb_unfilled_color_cached(),
             gradient_preset: None,
+            image_protocol: ImageProtocolChoice::default(),
             layout: LayoutType::default(),
             visible: PlayerbarVisible::default(),
         }

@@ -39,7 +39,11 @@ use crate::{
         QueueHits, SearchProvider, SearchState, SplashState, State, TableMode,
     },
     ui,
-    utils::{path::expand_tilde, pigma_cache_dir, pigma_config_dir, terminal::BACKGROUND},
+    utils::{
+        path::expand_tilde,
+        pigma_cache_dir, pigma_config_dir,
+        terminal::{BACKGROUND, begin_synchronized_update, end_synchronized_update},
+    },
 };
 
 /// Main application state and entry point for the pigma TUI.
@@ -163,7 +167,7 @@ impl App {
 
         let service = ApiService::new(api.clone(), cache.clone());
 
-        let picker = Self::build_picker();
+        let picker = Self::build_picker(&config.playerbar);
 
         let stream_client = Self::build_http_client(stream_proxy)?;
         let cover_http = Self::build_http_client(search_proxy)?;
@@ -493,7 +497,16 @@ impl App {
         );
         while self.state.running {
             self.update_status_snapshot();
-            terminal.draw(|frame| self.draw(frame))?;
+            // Present one whole frame at a time (`DECSET 2026`) instead of letting the
+            // terminal show it while it is still being written — most visible while the
+            // spectrum redraws. Terminals without the mode ignore both sequences, and
+            // the update is closed before the draw error is propagated: kitty drops a
+            // frame whose end never arrives, so it must never be left open.
+            let mut out = std::io::stdout();
+            begin_synchronized_update(&mut out)?;
+            let drawn = terminal.draw(|frame| self.draw(frame));
+            end_synchronized_update(&mut out)?;
+            drawn?;
             self.handle_events().await?;
 
             let splash_ready = self.state.splash.shown_at.elapsed().as_secs_f64()

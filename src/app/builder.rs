@@ -8,7 +8,7 @@ use super::App;
 use crate::{
     config::{Config, ProxyTarget, ThemeRegistry},
     state::{CommandAction, CommandItem, CommandPanel},
-    utils::terminal::{ImageProtocol, best_image_protocol},
+    utils::terminal::{ImageProtocol, choose_image_protocol},
 };
 
 /// Used to decide whether a proxy is enabled based on `ProxyTarget`.
@@ -112,24 +112,43 @@ impl App {
         Ok(Arc::new(finder))
     }
 
-    /// Build the image picker for the current terminal and select the best image protocol (Kitty/Sixel).
-    pub(super) fn build_picker() -> Picker {
-        let mut picker = ratatui_image::picker::Picker::from_query_stdio()
-            .unwrap_or_else(|_| ratatui_image::picker::Picker::halfblocks());
+    /// Build the image picker for the current terminal and settle on a protocol.
+    ///
+    /// The picker queries the terminal itself — graphics support and the cell size in
+    /// pixels — and that answer is what [`choose_image_protocol`] trusts first; the
+    /// configuration can override the result. The decision is logged, because "the
+    /// cover looks wrong" is otherwise impossible to answer from a bug report.
+    pub(super) fn build_picker(playerbar: &crate::config::PlayerbarConfig) -> Picker {
+        use ratatui_image::picker::{Picker, ProtocolType};
 
-        match best_image_protocol() {
-            Some(ImageProtocol::Kitty) => {
-                log::debug!("ImageProtocol::Kitty");
-                picker.set_protocol_type(ratatui_image::picker::ProtocolType::Kitty);
-            }
-            Some(ImageProtocol::Sixel) => {
-                picker.set_protocol_type(ratatui_image::picker::ProtocolType::Sixel);
-                log::debug!("ImageProtocol::Sixel");
-            }
-            None => {
-                log::debug!("ImageProtocol::None");
-            }
-        }
+        // A terminal that does not answer falls back to half blocks, which is what
+        // upstream recommends: the fixed-cell-size constructors are deprecated, and a
+        // guessed cell size would scale every cover wrongly anyway.
+        let mut picker = Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks());
+
+        let queried = match picker.protocol_type() {
+            ProtocolType::Kitty => Some(ImageProtocol::Kitty),
+            ProtocolType::Iterm2 => Some(ImageProtocol::ITerm2),
+            ProtocolType::Sixel => Some(ImageProtocol::Sixel),
+            _ => None,
+        };
+
+        let tmux = picker.tmux_detected();
+        let chosen = choose_image_protocol(playerbar.image_protocol, queried, tmux, |key| {
+            std::env::var(key).ok()
+        });
+
+        log::debug!(
+            "covers: config={:?} queried={queried:?} tmux={tmux} -> {chosen:?}",
+            playerbar.image_protocol
+        );
+
+        picker.set_protocol_type(match chosen {
+            Some(ImageProtocol::Kitty) => ProtocolType::Kitty,
+            Some(ImageProtocol::ITerm2) => ProtocolType::Iterm2,
+            Some(ImageProtocol::Sixel) => ProtocolType::Sixel,
+            None => ProtocolType::Halfblocks,
+        });
         picker
     }
 

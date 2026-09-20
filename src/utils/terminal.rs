@@ -1,72 +1,135 @@
 use std::{
     env,
-    io::{BufRead, BufReader, Write},
+    io::{self, BufRead, BufReader, Write},
     sync::LazyLock,
 };
 
+use crossterm::{
+    event::{
+        DisableBracketedPaste, EnableBracketedPaste, KeyboardEnhancementFlags,
+        PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+    },
+    execute,
+    terminal::{BeginSynchronizedUpdate, EndSynchronizedUpdate},
+};
 use serde::{Deserialize, Serialize};
 
+/// A graphics protocol a terminal can draw cover art with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImageProtocol {
     Kitty,
+    ITerm2,
     Sixel,
 }
 
-pub fn best_image_protocol() -> Option<ImageProtocol> {
-    if kitty_available() {
-        Some(ImageProtocol::Kitty)
-    } else if sixel_available() {
-        Some(ImageProtocol::Sixel)
-    } else {
-        None
-    }
+/// Config-facing choice for [`crate::config::PlayerbarConfig::image_protocol`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ImageProtocolChoice {
+    /// Ask the terminal and trust what it says.
+    #[default]
+    Auto,
+    /// Force the kitty graphics protocol.
+    Kitty,
+    /// Force the iTerm2 inline-image protocol.
+    #[serde(rename = "iterm2")]
+    ITerm2,
+    /// Force sixels.
+    Sixel,
+    /// Never use graphics: draw covers with half blocks.
+    Halfblocks,
 }
 
-fn kitty_available() -> bool {
-    if env::var("KITTY_WINDOW_ID").is_ok()
-        || env::var("KITTY_PID").is_ok()
-        || env::var("GHOSTTY_RESOURCES_DIR").is_ok()
+/// Decide how covers are drawn.
+///
+/// `queried` is what the terminal answered when asked (the kitty graphics query, or
+/// the sixel flag in DA1). That answer is the only signal that tells a graphics-capable
+/// terminal apart from a shell that merely inherited the variables, so it is trusted
+/// ahead of anything read from the environment — with two exceptions, both of which
+/// come from upstream's compatibility matrix:
+///
+/// * WezTerm, Rio and iTerm2 answer the kitty graphics query, but that matrix is
+///   explicit that only iTerm2's own protocol renders bug-free there ("would support
+///   Sixel and Kitty, but only iTerm2 actually works bug-free").
+/// * Inside tmux, graphics only reach the real terminal when the user turned
+///   passthrough on, and there is no way to ask. Guessing wrong paints graphics over
+///   the UI, so half blocks win; `image_protocol` overrides that.
+pub fn choose_image_protocol(
+    choice: ImageProtocolChoice,
+    queried: Option<ImageProtocol>,
+    tmux_detected: bool,
+    lookup: impl Fn(&str) -> Option<String>,
+) -> Option<ImageProtocol> {
+    match choice {
+        ImageProtocolChoice::Kitty => return Some(ImageProtocol::Kitty),
+        ImageProtocolChoice::ITerm2 => return Some(ImageProtocol::ITerm2),
+        ImageProtocolChoice::Sixel => return Some(ImageProtocol::Sixel),
+        ImageProtocolChoice::Halfblocks => return None,
+        ImageProtocolChoice::Auto => {}
+    }
+
+    if tmux_detected {
+        return None;
+    }
+
+    if matches!(
+        lookup("TERM_PROGRAM").as_deref(),
+        Some("WezTerm" | "rio" | "iterm.app")
+    ) {
+        return Some(ImageProtocol::ITerm2);
+    }
+
+    if let Some(protocol) = queried {
+        return Some(protocol);
+    }
+
+    // The query went unanswered (or the terminal only reported half blocks): fall back
+    // to what the environment says about the terminals known to render sixels.
+    if sixel_available(&lookup) {
+        return Some(ImageProtocol::Sixel);
+    }
+
+    // Kitty and Ghostty are the reference implementations of the kitty protocol. Both
+    // are recognised from their own variables, because `TERM_PROGRAM` is not set on
+    // every launch path (a shell that did not set it does not pass it on).
+    if is_kitty_terminal(&lookup) {
+        return Some(ImageProtocol::Kitty);
+    }
+
+    None
+}
+
+fn is_kitty_terminal(lookup: &impl Fn(&str) -> Option<String>) -> bool {
+    if lookup("KITTY_WINDOW_ID").is_some()
+        || lookup("KITTY_PID").is_some()
+        || lookup("GHOSTTY_RESOURCES_DIR").is_some()
     {
         return true;
     }
 
-    match env::var("TERM_PROGRAM").as_deref() {
-        Ok("kitty" | "ghostty" | "rio" | "WezTerm") => return true,
-        Ok("iterm.app") => {
-            if version_gte(
-                &env::var("TERM_PROGRAM_VERSION").unwrap_or_default(),
-                3,
-                5,
-                0,
-            ) {
-                return true;
-            }
-        }
-        Ok("konsole") if is_konsole_version_gte(22, 4, 0) => {
-            return true;
-        }
-        _ => {}
+    if matches!(lookup("TERM_PROGRAM").as_deref(), Some("kitty" | "ghostty")) {
+        return true;
     }
 
     matches!(
-        env::var("TERM").as_deref(),
-        Ok(t) if t.to_lowercase().contains("kitty") || t == "xterm-ghostty"
+        lookup("TERM").as_deref(),
+        Some(t) if t.to_lowercase().contains("kitty") || t == "xterm-ghostty"
     )
 }
 
-fn sixel_available() -> bool {
-    if env::var("FOOT_VERSION").is_ok() {
+fn sixel_available(lookup: &impl Fn(&str) -> Option<String>) -> bool {
+    if lookup("FOOT_VERSION").is_some() {
         return true;
     }
 
-    if env::var("WT_SESSION").is_ok() {
+    if lookup("WT_SESSION").is_some() {
         return true;
     }
 
-    match env::var("TERM_PROGRAM").as_deref() {
-        Ok("vscode") => {
+    match lookup("TERM_PROGRAM").as_deref() {
+        Some("vscode") => {
             if version_gte(
-                &env::var("TERM_PROGRAM_VERSION").unwrap_or_default(),
+                &lookup("TERM_PROGRAM_VERSION").unwrap_or_default(),
                 1,
                 80,
                 0,
@@ -74,10 +137,10 @@ fn sixel_available() -> bool {
                 return true;
             }
         }
-        Ok("rio") => {
+        Some("rio") => {
             // Rio started supporting the graphics protocol reasonably well after 0.0.12
             if version_gte(
-                &env::var("TERM_PROGRAM_VERSION").unwrap_or_default(),
+                &lookup("TERM_PROGRAM_VERSION").unwrap_or_default(),
                 0,
                 0,
                 12,
@@ -85,20 +148,18 @@ fn sixel_available() -> bool {
                 return true;
             }
         }
-        Ok("mintty") => return true,
-        Ok("WezTerm") => {
-            if wezterm_sixel_supported(&env::var("WEZTERM_VERSION").unwrap_or_default()) {
+        Some("mintty") => return true,
+        Some("WezTerm") => {
+            if wezterm_sixel_supported(&lookup("WEZTERM_VERSION").unwrap_or_default()) {
                 return true;
             }
         }
-        Ok("konsole") => {
-            if is_konsole_version_gte(22, 4, 0) {
-                return true;
-            }
-        }
-        Ok("WindowsTerminal" | "Windows_Terminal")
+        // Konsole is deliberately absent: upstream's compatibility matrix lists its
+        // sixel support as not really fixed (as of 24.12), so it is left to the
+        // terminal's own answer instead of being assumed capable here.
+        Some("WindowsTerminal" | "Windows_Terminal")
             if version_gte(
-                &env::var("TERM_PROGRAM_VERSION").unwrap_or_default(),
+                &lookup("TERM_PROGRAM_VERSION").unwrap_or_default(),
                 1,
                 22,
                 0,
@@ -110,8 +171,8 @@ fn sixel_available() -> bool {
     }
 
     matches!(
-        env::var("TERM").as_deref(),
-        Ok(t) if t.to_lowercase().starts_with("foot") || t.to_lowercase().starts_with("mlterm")
+        lookup("TERM").as_deref(),
+        Some(t) if t.to_lowercase().starts_with("foot") || t.to_lowercase().starts_with("mlterm")
     )
 }
 
@@ -142,16 +203,46 @@ fn wezterm_sixel_supported(version: &str) -> bool {
     false
 }
 
-fn is_konsole_version_gte(major: u32, minor: u32, patch: u32) -> bool {
-    let ver_str = env::var("KONSOLE_VERSION").unwrap_or_default();
-    if ver_str.contains('.') {
-        version_gte(&ver_str, major, minor, patch)
-    } else if let Ok(num) = ver_str.parse::<u32>() {
-        let target = major * 10000 + minor * 100 + patch;
-        num >= target
-    } else {
-        false
-    }
+/// Put the terminal into the modes the UI relies on, and take them back out again.
+///
+/// Both sequences are ignored by terminals that do not implement them, so neither
+/// needs a capability probe and neither can break a terminal that lacks them:
+///
+/// * `CSI > 1 u` — the kitty keyboard protocol, flag 1 (disambiguate escape codes):
+///   "pressing the Esc key generates the byte 0x1b which also is used to indicate the
+///   start of an escape code", which is how an `Esc` press gets read as `Alt+<key>`
+///   when another key follows it. It is implemented by kitty, ghostty, foot, wezterm,
+///   alacritty, iTerm2, Windows Terminal and others. Only that one flag is pushed:
+///   the rest are for features Pigma does not use.
+/// * `CSI ? 2004 h` — bracketed paste, so a paste arrives as one delimited block
+///   instead of a burst of keystrokes (see [`crate::input::handle_paste`]).
+pub fn enable_terminal_modes<W: Write>(out: &mut W) -> io::Result<()> {
+    execute!(
+        out,
+        EnableBracketedPaste,
+        PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+    )
+}
+
+/// Undo [`enable_terminal_modes`]. Runs on the way out, including after a panic.
+pub fn disable_terminal_modes<W: Write>(out: &mut W) -> io::Result<()> {
+    execute!(out, DisableBracketedPaste, PopKeyboardEnhancementFlags)
+}
+
+/// Open a synchronized update (`DECSET 2026`): the terminal buffers everything
+/// drawn until [`end_synchronized_update`] and puts it on screen in one go.
+///
+/// `ratatui` does not do this itself, and without it a frame is visible while it is
+/// being written — most obviously while the spectrum redraws many times a second.
+/// Terminals without the mode ignore the sequence; kitty discards a frame whose end
+/// never arrives, so every open must be closed.
+pub fn begin_synchronized_update<W: Write>(out: &mut W) -> io::Result<()> {
+    execute!(out, BeginSynchronizedUpdate)
+}
+
+/// Close the update opened by [`begin_synchronized_update`].
+pub fn end_synchronized_update<W: Write>(out: &mut W) -> io::Result<()> {
+    execute!(out, EndSynchronizedUpdate)
 }
 
 /// How many colors the terminal can display; themes are down-sampled to it.
@@ -542,5 +633,163 @@ mod tests {
         let mut silent = std::io::Cursor::new(Vec::new());
         let mut sent = Vec::new();
         assert_eq!(query_background_luminance(&mut silent, &mut sent), None);
+    }
+}
+
+#[cfg(test)]
+mod terminal_mode_tests {
+    use std::collections::HashMap;
+
+    use super::*;
+
+    fn env_of(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
+        let map: HashMap<String, String> = pairs
+            .iter()
+            .map(|(key, value)| (key.to_string(), value.to_string()))
+            .collect();
+        move |key: &str| map.get(key).cloned()
+    }
+
+    fn auto(env: &[(&str, &str)], queried: Option<ImageProtocol>) -> Option<ImageProtocol> {
+        choose_image_protocol(ImageProtocolChoice::Auto, queried, false, env_of(env))
+    }
+
+    /// Kitty is recognised from the variables kitty itself sets, not only from
+    /// `TERM_PROGRAM` — which is absent when the shell that launched it did not set it.
+    #[test]
+    fn kitty_is_recognised_from_its_own_variables() {
+        for env in [
+            vec![("TERM", "xterm-kitty"), ("KITTY_WINDOW_ID", "1")],
+            vec![("KITTY_PID", "42")],
+            vec![("TERM_PROGRAM", "ghostty")],
+        ] {
+            assert_eq!(auto(&env, None), Some(ImageProtocol::Kitty), "{env:?}");
+        }
+
+        assert_eq!(
+            auto(&[("TERM", "foot")], None),
+            Some(ImageProtocol::Sixel),
+            "sixel terminals are the fallback when the query did not answer"
+        );
+        assert_eq!(
+            auto(&[("TERM", "xterm-256color")], None),
+            None,
+            "half blocks"
+        );
+    }
+
+    /// What the terminal answers is the only signal that separates a terminal with
+    /// graphics from a shell that merely inherited the variables, so it wins over the
+    /// environment — including for terminals Pigma has never heard of.
+    #[test]
+    fn the_terminals_own_answer_wins_over_the_environment() {
+        assert_eq!(
+            auto(&[("TERM", "xterm-256color")], Some(ImageProtocol::Kitty)),
+            Some(ImageProtocol::Kitty),
+            "an unknown terminal that answered the kitty query gets kitty graphics"
+        );
+        assert_eq!(
+            auto(&[("TERM", "xterm-kitty")], Some(ImageProtocol::Sixel)),
+            Some(ImageProtocol::Sixel),
+            "and a terminal that answered sixel gets sixels"
+        );
+    }
+
+    /// Upstream's compatibility matrix is explicit that WezTerm, Rio and iTerm2 accept
+    /// the kitty graphics query while only their own protocol renders bug-free there,
+    /// so the documented mapping has to override the answer they give.
+    #[test]
+    fn terminals_that_answer_more_than_they_render_are_corrected() {
+        for program in ["WezTerm", "rio", "iterm.app"] {
+            assert_eq!(
+                auto(&[("TERM_PROGRAM", program)], Some(ImageProtocol::Kitty)),
+                Some(ImageProtocol::ITerm2),
+                "{program}"
+            );
+        }
+    }
+
+    /// Inside tmux, graphics only reach the real terminal when the user enabled
+    /// passthrough, and that cannot be probed — so the safe fallback wins, unless the
+    /// config forces a protocol.
+    #[test]
+    fn tmux_falls_back_unless_the_protocol_is_forced() {
+        let env = [("TERM", "xterm-kitty"), ("KITTY_WINDOW_ID", "1")];
+        assert_eq!(
+            choose_image_protocol(
+                ImageProtocolChoice::Auto,
+                Some(ImageProtocol::Kitty),
+                true,
+                env_of(&env)
+            ),
+            None,
+            "half blocks inside tmux"
+        );
+        assert_eq!(
+            choose_image_protocol(
+                ImageProtocolChoice::Kitty,
+                Some(ImageProtocol::Kitty),
+                true,
+                env_of(&env)
+            ),
+            Some(ImageProtocol::Kitty),
+            "image_protocol = \"kitty\" overrides it (tmux with allow-passthrough)"
+        );
+    }
+
+    /// The config can force every protocol, including turning graphics off.
+    #[test]
+    fn the_config_can_force_a_protocol() {
+        let env = [("TERM", "xterm-256color")];
+        for (choice, expected) in [
+            (ImageProtocolChoice::Kitty, Some(ImageProtocol::Kitty)),
+            (ImageProtocolChoice::ITerm2, Some(ImageProtocol::ITerm2)),
+            (ImageProtocolChoice::Sixel, Some(ImageProtocol::Sixel)),
+            (ImageProtocolChoice::Halfblocks, None),
+        ] {
+            assert_eq!(
+                choose_image_protocol(choice, None, false, env_of(&env)),
+                expected,
+                "{choice:?}"
+            );
+        }
+    }
+
+    /// These bytes are the contract with the terminal, and the pop is the one that
+    /// matters most: a terminal left in the keyboard protocol feeds the shell after
+    /// Pigma `CSI u` encodings instead of plain keys.
+    #[test]
+    fn terminal_modes_are_entered_and_left_with_the_documented_sequences() {
+        let mut out = Vec::new();
+        enable_terminal_modes(&mut out).expect("enable");
+        assert_eq!(
+            String::from_utf8(out).expect("utf8"),
+            "\u{1b}[?2004h\u{1b}[>1u",
+            "bracketed paste on, then keyboard protocol with disambiguation"
+        );
+
+        let mut out = Vec::new();
+        disable_terminal_modes(&mut out).expect("disable");
+        // The spec's pop is `CSI < number u`, number defaulting to 1, so the explicit
+        // form is the documented one. It has to be written while still on the
+        // alternate screen: the main and alternate screens keep separate stacks.
+        assert_eq!(
+            String::from_utf8(out).expect("utf8"),
+            "\u{1b}[?2004l\u{1b}[<1u",
+            "paste off, keyboard protocol popped"
+        );
+    }
+
+    /// One frame lives between these two, and kitty drops a frame whose end never
+    /// arrives — so the loop must always write both.
+    #[test]
+    fn synchronized_updates_bracket_a_frame() {
+        let mut out = Vec::new();
+        begin_synchronized_update(&mut out).expect("begin");
+        end_synchronized_update(&mut out).expect("end");
+        assert_eq!(
+            String::from_utf8(out).expect("utf8"),
+            "\u{1b}[?2026h\u{1b}[?2026l"
+        );
     }
 }

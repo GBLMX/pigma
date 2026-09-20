@@ -22,6 +22,30 @@ use crate::{
     state::Page,
 };
 
+/// Insert a pasted block into whichever single-line editor has focus.
+///
+/// Every editor in the UI is a [`TextInput`], and only one of them can have focus, so
+/// this mirrors the key dispatch: the command line owns input while it is open,
+/// otherwise the search box. Text goes in at the cursor, and control characters are
+/// dropped — a pasted document must not turn its own newlines into Enter presses.
+pub fn handle_paste(app: &mut App, text: &str) {
+    let input = if app.state.prompt.active {
+        Some(&mut app.state.prompt.input)
+    } else if app.state.navigation.search.active {
+        Some(&mut app.state.navigation.search.input)
+    } else {
+        None
+    };
+
+    let Some(input) = input else {
+        return;
+    };
+
+    for ch in text.chars().filter(|c| !c.is_control()) {
+        input.enter_char(ch);
+    }
+}
+
 pub fn handle_key_events(app: &mut App, key_event: KeyEvent) -> color_eyre::Result<()> {
     if key_event.modifiers == KeyModifiers::CONTROL {
         match key_event.code {

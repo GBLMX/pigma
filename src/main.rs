@@ -21,6 +21,9 @@ impl Drop for TerminalGuard {
         // Disable mouse reporting even when the app unwinds from a panic. The
         // ratatui panic hook restores raw mode and the alternate screen, but it
         // does not know that Pigma enabled mouse capture separately.
+        // Leave the kitty keyboard protocol before anything else prints: a terminal
+        // left in it would feed the shell `CSI u` encodings instead of plain keys.
+        let _ = pigma::utils::terminal::disable_terminal_modes(&mut output);
         let _ = execute!(output, DisableMouseCapture, ResetColor, cursor::Show);
         // On the panic path the ratatui panic hook has already called restore(),
         // so only call it on clean exits to avoid restoring the terminal twice.
@@ -62,5 +65,7 @@ async fn main() -> color_eyre::Result<()> {
     let terminal = ratatui::init();
     let _terminal_guard = TerminalGuard;
     execute!(stdout(), EnableMouseCapture)?;
+    // Kitty keyboard protocol + bracketed paste; both are no-ops where unsupported.
+    pigma::utils::terminal::enable_terminal_modes(&mut stdout())?;
     app.run(terminal).await
 }

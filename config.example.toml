@@ -104,6 +104,19 @@ unfilled_color_cached = "warning"
 # 可选: "warm", "cubehelix", "rainbow", "turbo", "spectral", "viridis"
 gradient_preset = ""
 
+# 封面用什么协议画。"auto" 先问终端、按终端的回答决定，只在该终端不回话时才看环境变量；
+# 自动模式还会避开 tmux（图形不一定透传，猜错会画花界面）与已知"答得比画得好"的终端
+# （WezTerm / Rio / iTerm2 会应答 kitty 查询，但只有 iTerm2 协议在那里无 bug）。
+#
+#   "auto"       —— 问终端（推荐）
+#   "kitty"      —— kitty 图形协议（kitty 0.28+ / ghostty 等）
+#   "iterm2"     —— iTerm2 内联图片协议（WezTerm / Rio / iTerm2）
+#   "sixel"      —— 六像素图（foot / mlterm / xterm -ti 340 ...）
+#   "halfblocks" —— 不用图形协议，用半块字符画（任何终端都能看）
+#
+# 在 tmux 里开了 allow-passthrough，或自动判断不合心意时，直接写死即可。
+image_protocol = "auto"
+
 # 播放栏各组件可见性(建议暂时别用，音量控制没写好)
 [playerbar.visible]
 # 是否显示封面

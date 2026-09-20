@@ -90,6 +90,9 @@ impl App {
                 CrosstermEvent::Key(key) if key.kind == crossterm::event::KeyEventKind::Press => {
                     input::handle_key_events(self, key)?
                 }
+                // Bracketed paste (`enable_terminal_modes`): the block is a paste, not
+                // typing, so its newlines must not press Enter.
+                CrosstermEvent::Paste(text) => input::handle_paste(self, &text),
                 CrosstermEvent::Mouse(mouse) => {
                     input::handle_mouse_event(self, mouse.kind, mouse.column, mouse.row);
                 }
