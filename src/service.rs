@@ -482,6 +482,51 @@ impl ApiService {
         }
     }
 
+    /// Email or phone number plus password. The API picks the endpoint itself: an
+    /// 11-digit account is treated as a mainland China phone number.
+    pub async fn login_password(
+        &self,
+        account: &str,
+        password: &str,
+    ) -> Result<ncm_api::LoginInfo, ncm_api::NcmError> {
+        self.client.login(account, password).await
+    }
+
+    /// Send the SMS login code (mainland China numbers).
+    pub async fn send_sms_code(&self, phone: &str) -> Result<(), ncm_api::NcmError> {
+        self.client.captcha("86", phone).await
+    }
+
+    /// Log in with a phone number and the code from [`Self::send_sms_code`].
+    pub async fn login_sms(
+        &self,
+        phone: &str,
+        code: &str,
+    ) -> Result<ncm_api::LoginInfo, ncm_api::NcmError> {
+        self.client.login_cellphone("86", phone, code).await
+    }
+
+    /// Drop the session: on the server when it can be reached, and locally either way.
+    pub async fn logout(&self) -> Result<(), ncm_api::NcmError> {
+        let result = self.client.logout().await;
+        self.client.clear_music_u();
+        result.map(|_| ())
+    }
+
+    /// The daily 云贝 check-in.
+    pub async fn daily_sign(&self) -> Result<ncm_api::Msg, ncm_api::NcmError> {
+        self.client.daily_task("0").await
+    }
+
+    /// Report a song that played through, which is what makes the cloud count the listen.
+    pub async fn report_play(
+        &self,
+        song_id: u64,
+        duration_ms: u64,
+    ) -> Result<(), ncm_api::NcmError> {
+        self.client.report_play(song_id, duration_ms, None).await
+    }
+
     pub async fn login_qr_create(&self) -> Result<(String, String), ncm_api::NcmError> {
         self.client.login_qr_create().await
     }

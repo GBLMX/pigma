@@ -29,6 +29,22 @@ impl App {
         });
     }
 
+    /// After the session is gone: forget the user, drop the liked set that belonged to
+    /// them, and go back to the login page.
+    pub(super) fn handle_logout_done(&mut self) {
+        self.state.navigation.user = None;
+        self.state.login.loading = false;
+        self.state.login.error = None;
+        if let Ok(mut liked) = self.liked_ids.lock() {
+            liked.clear();
+        }
+        self.playback.state.liked = false;
+        self.toast("已退出登录".to_string());
+        self.state
+            .events
+            .send(NavigationEvent::Navigate(Page::Login));
+    }
+
     pub(super) fn handle_login_success(&mut self, info: ncm_api::LoginInfo) {
         self.toast(format!("登录成功: {}", info.nickname));
         let uid = info.uid;

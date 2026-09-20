@@ -47,9 +47,14 @@ pub enum SplashEvent {
 #[derive(Clone, Debug)]
 pub enum AuthEvent {
     Login,
+    /// The session is gone; the UI has to forget the user it was showing.
+    LoggedOut,
     Success(LoginInfo),
     Error(String),
-    QRCreated { url: String, key: String },
+    QRCreated {
+        url: String,
+        key: String,
+    },
     QRStatus(String),
 }
 

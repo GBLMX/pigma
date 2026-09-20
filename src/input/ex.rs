@@ -10,22 +10,27 @@ use crossterm::event::{KeyCode, KeyEvent};
 use crate::{
     app::App,
     cli::parse_volume,
-    event::{AppEvent, NavigationEvent},
+    event::{AppEvent, AuthEvent, NavigationEvent},
     ipc::MsgAction,
     state::Page,
     text_input::TextInput,
 };
 
 /// Command names the prompt knows, used for `Tab` completion and suggestions.
-const COMMANDS: [&str; 11] = [
+const COMMANDS: [&str; 16] = [
     "help",
     "layout",
     "login",
+    "logout",
     "pitch",
     "q",
     "quit",
     "save",
     "seek",
+    "sign",
+    "signin",
+    "sms",
+    "smslogin",
     "theme",
     "visualizer",
     "volume",
@@ -44,6 +49,21 @@ pub(super) enum ExCommand {
     Visualizer(bool),
     Pitch(bool),
     Layout(String),
+    /// Email (or phone number) plus password.
+    Signin {
+        account: String,
+        password: String,
+    },
+    /// Send the SMS login code to a phone number.
+    Sms(String),
+    /// Log in with a phone number and the code it received.
+    SmsLogin {
+        phone: String,
+        code: String,
+    },
+    Logout,
+    /// The daily 云贝 check-in.
+    Sign,
 }
 
 impl ExCommand {
@@ -53,27 +73,70 @@ impl ExCommand {
         let Some(name) = parts.next() else {
             return Err("缺少命令".to_string());
         };
-        let argument = parts.next();
-        if parts.next().is_some() {
-            return Err(format!("`{name}` 只接受一个参数"));
-        }
+        let args: Vec<&str> = parts.collect();
 
-        let required = |what: &str| {
-            argument
-                .map(str::to_string)
-                .ok_or_else(|| format!("`{name}` 需要一个{what}"))
+        let required = |what: &str| -> Result<String, String> {
+            match args.as_slice() {
+                [value] => Ok((*value).to_string()),
+                [] => Err(format!("`{name}` 需要一个{what}")),
+                _ => Err(format!("`{name}` 只接受一个参数")),
+            }
+        };
+        let required_pair = |first: &str, second: &str| -> Result<(String, String), String> {
+            match args.as_slice() {
+                [a, b] => Ok(((*a).to_string(), (*b).to_string())),
+                [] => Err(format!("`{name}` 需要{first}与{second}")),
+                [_] => Err(format!("`{name}` 还需要{second}")),
+                _ => Err(format!("`{name}` 只接受两个参数")),
+            }
+        };
+        let no_args = || -> Result<(), String> {
+            if args.is_empty() {
+                Ok(())
+            } else {
+                Err(format!("`{name}` 不接受参数"))
+            }
         };
 
         match name {
-            "q" | "quit" => Ok(Self::Quit),
-            "help" => Ok(Self::Help),
-            "login" => Ok(Self::Login),
-            "save" => Ok(Self::Save),
+            "q" | "quit" => {
+                no_args()?;
+                Ok(Self::Quit)
+            }
+            "help" => {
+                no_args()?;
+                Ok(Self::Help)
+            }
+            "login" => {
+                no_args()?;
+                Ok(Self::Login)
+            }
+            "logout" => {
+                no_args()?;
+                Ok(Self::Logout)
+            }
+            "sign" => {
+                no_args()?;
+                Ok(Self::Sign)
+            }
+            "save" => {
+                no_args()?;
+                Ok(Self::Save)
+            }
+            "signin" => {
+                let (account, password) = required_pair("账号", "密码")?;
+                Ok(Self::Signin { account, password })
+            }
+            "sms" => Ok(Self::Sms(required("手机号")?)),
+            "smslogin" => {
+                let (phone, code) = required_pair("手机号", "验证码")?;
+                Ok(Self::SmsLogin { phone, code })
+            }
             "theme" => Ok(Self::Theme(required("主题名")?)),
             "volume" => Ok(Self::Volume(required("音量")?)),
             "seek" => Ok(Self::Seek(required("跳转位置")?)),
-            "visualizer" => Ok(Self::Visualizer(parse_on_off(argument)?)),
-            "pitch" => Ok(Self::Pitch(parse_on_off(argument)?)),
+            "visualizer" => Ok(Self::Visualizer(parse_on_off(args.first().copied())?)),
+            "pitch" => Ok(Self::Pitch(parse_on_off(args.first().copied())?)),
             "layout" => Ok(Self::Layout(required("布局名")?)),
             other => Err(format!("未知命令: {other}")),
         }
@@ -246,6 +309,66 @@ fn execute(app: &mut App, command: ExCommand) -> Result<(), String> {
         ExCommand::Visualizer(on) => app.set_visualizer(on),
         ExCommand::Pitch(on) => app.set_pitch(on),
         ExCommand::Layout(name) => app.set_playerbar_layout(&name)?,
+        ExCommand::Logout => {
+            let service = app.service.clone();
+            let sender = app.state.events.sender();
+            app.toast("正在退出登录…".to_string());
+            tokio::spawn(async move {
+                if let Err(error) = service.logout().await {
+                    log::warn!("logout: {error}");
+                }
+                let _ = sender.send(AuthEvent::LoggedOut.into());
+            });
+        }
+        ExCommand::Sign => {
+            let service = app.service.clone();
+            let sender = app.state.events.sender();
+            tokio::spawn(async move {
+                let message = match service.daily_sign().await {
+                    Ok(msg) => msg.msg,
+                    Err(error) => format!("签到失败: {error}"),
+                };
+                let _ = sender.send(AppEvent::Toast(message).into());
+            });
+        }
+        ExCommand::Signin { account, password } => {
+            let service = app.service.clone();
+            let sender = app.state.events.sender();
+            app.toast("正在登录…".to_string());
+            tokio::spawn(async move {
+                let event = match service.login_password(&account, &password).await {
+                    Ok(info) => AuthEvent::Success(info),
+                    Err(error) => AuthEvent::Error(format!("登录失败: {error}")),
+                };
+                let _ = sender.send(event.into());
+            });
+        }
+        ExCommand::Sms(phone) => {
+            let service = app.service.clone();
+            let sender = app.state.events.sender();
+            app.toast("正在发送验证码…".to_string());
+            tokio::spawn(async move {
+                let message = match service.send_sms_code(&phone).await {
+                    Ok(()) => {
+                        format!("验证码已发送到 {phone}（用 `:smslogin {phone} <验证码>` 登录）")
+                    }
+                    Err(error) => format!("验证码发送失败: {error}"),
+                };
+                let _ = sender.send(AppEvent::Toast(message).into());
+            });
+        }
+        ExCommand::SmsLogin { phone, code } => {
+            let service = app.service.clone();
+            let sender = app.state.events.sender();
+            app.toast("正在登录…".to_string());
+            tokio::spawn(async move {
+                let event = match service.login_sms(&phone, &code).await {
+                    Ok(info) => AuthEvent::Success(info),
+                    Err(error) => AuthEvent::Error(format!("登录失败: {error}")),
+                };
+                let _ = sender.send(event.into());
+            });
+        }
     }
     Ok(())
 }
@@ -311,6 +434,28 @@ mod tests {
             ExCommand::parse("layout default"),
             Ok(ExCommand::Layout("default".to_string()))
         );
+        assert_eq!(
+            ExCommand::parse("signin someone@example.com hunter2"),
+            Ok(ExCommand::Signin {
+                account: "someone@example.com".to_string(),
+                password: "hunter2".to_string(),
+            })
+        );
+        assert_eq!(
+            ExCommand::parse("sms 13800000000"),
+            Ok(ExCommand::Sms("13800000000".to_string()))
+        );
+        assert_eq!(
+            ExCommand::parse("smslogin 13800000000 246810"),
+            Ok(ExCommand::SmsLogin {
+                phone: "13800000000".to_string(),
+                code: "246810".to_string(),
+            })
+        );
+        assert_eq!(ExCommand::parse("logout"), Ok(ExCommand::Logout));
+        assert_eq!(ExCommand::parse("sign"), Ok(ExCommand::Sign));
+        // `:login` keeps opening the QR page; the password form is its own command
+        assert_eq!(ExCommand::parse("login"), Ok(ExCommand::Login));
         // surrounding whitespace is the user's business, not an error
         assert_eq!(ExCommand::parse("  q  "), Ok(ExCommand::Quit));
     }
@@ -333,6 +478,17 @@ mod tests {
         let bad_layout = ExCommand::parse("layout").unwrap_err();
         assert!(bad_layout.contains("布局名"), "got {bad_layout}");
 
+        for (line, missing) in [
+            ("signin someone@example.com", "密码"),
+            ("signin a b c", "只接受两个参数"),
+            ("smslogin 13800000000", "验证码"),
+            ("sms", "手机号"),
+            ("logout now", "不接受参数"),
+        ] {
+            let error = ExCommand::parse(line).unwrap_err();
+            assert!(error.contains(missing), "{line}: got {error}");
+        }
+
         assert!(ExCommand::parse("   ").is_err());
     }
 
@@ -351,9 +507,15 @@ mod tests {
 
     #[test]
     fn tab_extends_to_the_common_prefix_when_ambiguous() {
-        // `s` could be save or seek, so nothing can be added
+        // `sig` could be sign or signin, so it extends to what the two share
+        assert_eq!(candidate_names("", "sig", &THEMES), vec!["sign", "signin"]);
+        assert_eq!(completion("sig", &THEMES), Some("sign".to_string()));
+        // `s` is the start of six commands, so there is nothing to add
         assert_eq!(completion("s", &THEMES), None);
-        assert_eq!(candidate_names("", "s", &THEMES), vec!["save", "seek"]);
+        assert_eq!(
+            candidate_names("", "s", &THEMES),
+            vec!["save", "seek", "sign", "signin", "sms", "smslogin"]
+        );
         // an empty line offers every command
         assert_eq!(candidate_names("", "", &THEMES).len(), COMMANDS.len());
         assert_eq!(completion("", &THEMES), None);

@@ -66,6 +66,7 @@ impl App {
         match event {
             AuthEvent::Login => self.handle_login(),
             AuthEvent::Success(info) => self.handle_login_success(info),
+            AuthEvent::LoggedOut => self.handle_logout_done(),
             AuthEvent::Error(e) => self.handle_login_error(e),
             AuthEvent::QRCreated { url, key } => self.handle_qr_created(url, key),
             AuthEvent::QRStatus(text) => self.handle_qr_status(text),
@@ -80,7 +81,18 @@ impl App {
                 self.playback.on_playback_progress(position, total);
             }
             PlaybackEvent::Finished => {
-                self.playback.finish_and_snapshot();
+                // NetEase only counts a listen when the client reports it, and that record
+                // is what feeds 最近播放 and the recommendations. Only songs that ran to the
+                // end count — a skip is not a listen.
+                let finished = self.playback.finish_and_snapshot();
+                if let Some((song_id, duration_ms, progress)) = finished
+                    && progress >= 0.9
+                {
+                    let service = self.service.clone();
+                    tokio::spawn(async move {
+                        let _ = service.report_play(song_id, duration_ms).await;
+                    });
+                }
             }
             PlaybackEvent::Error(e) => {
                 self.playback.on_playback_error(e);
