@@ -1,10 +1,10 @@
 # pigma (In development)
 
-[![CI](https://github.com/akirco/pigma/actions/workflows/ci.yml/badge.svg)](https://github.com/akirco/pigma/actions/workflows/ci.yml)
-[![Release](https://github.com/akirco/pigma/actions/workflows/release.yml/badge.svg)](https://github.com/akirco/pigma/actions/workflows/release.yml)
+[![CI](https://github.com/GBLMX/pigma/actions/workflows/ci.yml/badge.svg)](https://github.com/GBLMX/pigma/actions/workflows/ci.yml)
+[![Release](https://github.com/GBLMX/pigma/actions/workflows/release.yml/badge.svg)](https://github.com/GBLMX/pigma/actions/workflows/release.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![AUR Version](https://img.shields.io/aur/version/pigma-gblmx-bin)](https://aur.archlinux.org/packages/pigma-gblmx-bin)
-![GitHub repo size](https://img.shields.io/github/repo-size/akirco/pigma)
+![GitHub repo size](https://img.shields.io/github/repo-size/GBLMX/pigma)
 
 
 <img width="100" src="./imgs/logo.png" alt="pigma" />
@@ -113,6 +113,8 @@ A NetEase Cloud Music (网易云音乐) or local audio playback TUI client built
 
 ## Install
 
+> 本仓库是 [akirco/pigma](https://github.com/akirco/pigma) 的 fork：**这里的二进制、AUR 包和安装命令都对应本仓库的 [releases](https://github.com/GBLMX/pigma/releases)**，上游的安装渠道装到的是不含本仓库改动的版本。
+>
 > Note: the `gnu` Linux builds depend on system audio libraries (e.g. `alsa-lib`).
 
 ### From releases
@@ -121,15 +123,12 @@ A NetEase Cloud Music (网易云音乐) or local audio playback TUI client built
 
 ```sh
 # https://github.com/marcosnils/bin
-bin install https://github.com/akirco/pigma
+bin install https://github.com/GBLMX/pigma
 ```
 
-`windows(scoop)`
+`windows`
 
-```sh
-scoop bucket add aki 'https://github.com/akirco/aki-apps.git'
-scoop install aki/pigma
-```
+从 [releases](https://github.com/GBLMX/pigma/releases) 下载 `pigma-x86_64-pc-windows-msvc.zip`（或 `aarch64` 版），解包后把 `pigma.exe` 放进 `%PATH%`。
 
 `linux(aur)`
 ```sh
@@ -142,21 +141,20 @@ paru -S pigma-gblmx-bin
 
 `macOS`
 
-```sh
-brew tap akirco/pigma
-brew install pigma
-```
+从 [releases](https://github.com/GBLMX/pigma/releases) 下载 `pigma-x86_64-apple-darwin.tar.gz`（Apple Silicon 用 `aarch64` 版），解包后把 `pigma` 放进 `$PATH`。
 
 ### From source (cargo)
 
 ```sh
-cargo install --git https://github.com/akirco/pigma.git
+cargo install --git https://github.com/GBLMX/pigma.git
 ```
 
 ### Build from source
 
+`crates/sonar` 用到 `crates/y7dl` 子模块，克隆时要一并取回：
+
 ```sh
-git clone https://github.com/akirco/pigma.git
+git clone --recurse-submodules https://github.com/GBLMX/pigma.git
 cd pigma
 cargo build --release
 # binary at target/release/pigma
@@ -680,7 +678,7 @@ default key `b`).
 ## Development
 
 ```sh
-git clone https://github.com/akirco/pigma.git
+git clone https://github.com/GBLMX/pigma.git
 cd pigma
 git submodule update --init --recursive
 cargo run

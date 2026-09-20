@@ -38,7 +38,7 @@
 
 1. **克隆仓库**：
    ```bash
-   git clone https://github.com/akirco/pigma.git
+   git clone --recurse-submodules https://github.com/GBLMX/pigma.git
    cd pigma
    ```
 
