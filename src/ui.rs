@@ -356,9 +356,6 @@ mod contrast_audit {
             let theme = registry.get(&name).cloned().unwrap_or_default();
 
             // Each user-facing view, audited on its own.
-            if !name.contains("light") && !name.contains("latte") && name != "solarized" {
-                continue;
-            }
             let views: Vec<View> = vec![
                 ("主界面", |_app| {}),
                 ("帮助/操作方式", |app| {
