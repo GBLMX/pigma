@@ -181,3 +181,32 @@ mod tests {
         assert!(windowed[32] > 0.99, "centre must stay near unity");
     }
 }
+
+/// Benchmarks — not correctness tests. Run with
+/// `cargo test --release --lib -- --ignored --nocapture dsp_bench`.
+#[cfg(test)]
+mod dsp_bench {
+    use std::hint::black_box;
+
+    use super::*;
+
+    #[test]
+    #[ignore = "benchmark"]
+    fn fft_and_window_cost() {
+        println!("DSP（每帧 30 次的预算内）:");
+        for size in [512usize, 1024, 2048] {
+            let mut data: Vec<Complex> = (0..size)
+                .map(|i| Complex::new((i as f64 * 0.01).sin(), 0.0))
+                .collect();
+            crate::bench_util::time(&format!("fft {size} 点"), 2000, || {
+                fft(black_box(&mut data));
+            });
+        }
+
+        let samples: Vec<f32> = (0..2048).map(|i| (i as f32 * 0.02).sin()).collect();
+        let mut windowed = Vec::with_capacity(2048);
+        crate::bench_util::time("hann 2048 点", 20000, || {
+            hann_into(black_box(&samples), black_box(&mut windowed));
+        });
+    }
+}

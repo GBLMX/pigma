@@ -454,3 +454,60 @@ fn apply_cover(
         *guard = Some(protocol);
     }
 }
+
+/// Benchmark of the cover path on the covers actually cached on this machine.
+/// `cargo test --release --lib -- --ignored --nocapture cover_bench`
+#[cfg(test)]
+mod cover_bench {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    fn cached_covers() -> Vec<PathBuf> {
+        let mut dirs: Vec<PathBuf> = Vec::new();
+        if let Some(cache) = dirs::cache_dir() {
+            dirs.push(cache.join("pigma/covers"));
+        }
+        dirs.into_iter()
+            .flat_map(|dir| std::fs::read_dir(dir).into_iter().flatten())
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("jpg"))
+            })
+            .take(5)
+            .collect()
+    }
+
+    #[test]
+    #[ignore = "benchmark"]
+    fn decoding_and_masking_a_cover_costs() {
+        let covers = cached_covers();
+        if covers.is_empty() {
+            println!("  没有缓存封面，跳过：先播一首歌让封面落盘");
+            return;
+        }
+
+        let picker = ratatui_image::picker::Picker::halfblocks();
+        println!("封面（真实缓存图，{} 张）:", covers.len());
+        for path in &covers {
+            let Ok(data) = std::fs::read(path) else {
+                continue;
+            };
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            crate::bench_util::time(
+                &format!("解码+裁方+圆形蒙版+协议 {name}"),
+                5,
+                || {
+                    let protocol =
+                        build_cover_protocol(std::hint::black_box(&data), picker.clone());
+                    std::hint::black_box(protocol);
+                },
+            );
+        }
+    }
+}

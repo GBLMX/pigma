@@ -190,3 +190,56 @@ mod tests {
         }
     }
 }
+
+/// Benchmark of one playerbar frame through a real `TestBackend`, at the size of the
+/// terminal this was written on. `cargo test --release --lib -- --ignored --nocapture frame_bench`
+#[cfg(test)]
+mod frame_bench {
+    use ratatui::{Terminal, backend::TestBackend, layout::Rect};
+
+    use super::*;
+    use crate::{
+        config::{BorderConfig, PlayerbarConfig, Theme},
+        playback::{BANDS, PlaybackState},
+    };
+
+    #[test]
+    #[ignore = "benchmark"]
+    fn a_playerbar_frame_costs() {
+        const WIDTH: u16 = 168;
+        const HEIGHT: u16 = 36;
+
+        let theme = Theme::default();
+        let border = BorderConfig::default();
+        let bs = BlockStyle {
+            colors: &theme,
+            border: &border,
+            tick: 0,
+        };
+        let player = PlaybackState {
+            visualizer: vec![0.7; BANDS],
+            ..PlaybackState::default()
+        };
+        let mut config = PlayerbarConfig::default();
+        config.visible.visualizer = true;
+        config.visible.cover = true;
+
+        let area = Rect::new(0, 0, WIDTH, HEIGHT);
+        let mut terminal = Terminal::new(TestBackend::new(WIDTH, HEIGHT)).expect("backend");
+        let mut tick = 0u64;
+
+        let per_call = crate::bench_util::time("playerbar 整帧（含频谱）", 400, || {
+            tick = tick.wrapping_add(1);
+            let bs = BlockStyle { tick, ..bs };
+            terminal
+                .draw(|f| {
+                    draw(f, &player, tick, &bs, &config, area, false);
+                })
+                .expect("draw");
+        });
+        println!(
+            "    以 30 fps 运行时占单核: {:.3}%",
+            crate::bench_util::core_share(per_call, 30.0)
+        );
+    }
+}

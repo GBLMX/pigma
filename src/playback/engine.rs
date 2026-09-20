@@ -918,3 +918,43 @@ impl PlaybackEngine {
         }));
     }
 }
+
+/// Benchmark of the work `update_analysis` does every 33 ms while playing.
+/// `cargo test --release --lib -- --ignored --nocapture analysis_bench`
+#[cfg(test)]
+mod analysis_bench {
+    use std::hint::black_box;
+
+    use super::*;
+
+    #[test]
+    #[ignore = "benchmark"]
+    fn one_analysis_frame_costs() {
+        const RATE: u32 = 44_100;
+        // A stereo tap, like the real one: interleaved, so the buffer sees two channels.
+        let buffer = spectrum::SpectrumBuffer::new();
+        let interleaved: Vec<f32> = (0..2048 * 4)
+            .map(|i| {
+                let t = i as f32 / RATE as f32;
+                (0.3 * (2.0 * std::f32::consts::PI * 220.0 * t).sin())
+                    + 0.1 * (2.0 * std::f32::consts::PI * 3000.0 * t).sin()
+            })
+            .collect();
+        buffer.push(&interleaved, 2, RATE);
+
+        let mut mono = Vec::with_capacity(4096);
+        let mut spectrum = Spectrum::new();
+        let mut pitch = PitchTracker::new();
+
+        let per_call = crate::bench_util::time("tap 快照 + 频谱 + 音高", 3000, || {
+            mono.clear();
+            buffer.snapshot(black_box(&mut mono));
+            spectrum.analyze(black_box(&mono), RATE);
+            pitch.analyze(black_box(&mono), RATE);
+        });
+        println!(
+            "    以 30 fps 运行时占单核: {:.3}%",
+            crate::bench_util::core_share(per_call, 30.0)
+        );
+    }
+}
