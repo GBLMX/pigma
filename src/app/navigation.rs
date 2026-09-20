@@ -278,15 +278,19 @@ impl App {
 
         self.toast(format!("⬆ 正在上传 {}...", song.name));
 
+        // The file the song came from: `local_path` is the scanned file, while `album` only
+        // still holds a path for songs built before that field existed — it is the album
+        // tag now, so reading it first is what keeps a tagged local file uploadable.
+        let local_path = song.local_path.as_deref().unwrap_or(song.album.as_str());
         let is_local = song.copyright == ncm_api::SongCopyright::Free
-            && !song.album.is_empty()
-            && std::path::Path::new(&song.album).exists();
+            && !local_path.is_empty()
+            && std::path::Path::new(local_path).exists();
         let service = self.service.clone();
         let cache = self.service.cache().clone();
         let sender = self.state.events.sender();
         let song_id = song.id;
         let cached_path: Option<PathBuf> = if is_local {
-            Some(std::path::PathBuf::from(&song.album))
+            Some(std::path::PathBuf::from(local_path))
         } else {
             const EXTS: &[&str] = &["mp3", "flac", "m4a", "ogg"];
             EXTS.iter().find_map(|ext| {

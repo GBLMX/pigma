@@ -3,7 +3,9 @@
 //! Every dispatcher reads this table instead of matching on the variant itself — `ui::draw`
 //! takes the drawing entry points from it, the main key map asks it which page a key opens,
 //! and the help popup writes its page rows from it. Adding a page is a variant on [`Page`],
-//! a row here and the page's own drawing — nothing else has to learn about the page.
+//! a row here and the page's own drawing — nothing else has to learn about the page. A page
+//! that is *about* something rather than about the app (an artist, say) gets `key: None` and
+//! is opened by whatever knows what it is about: the row that names it.
 
 use ratatui::{Frame, layout::Rect};
 
@@ -21,6 +23,10 @@ pub enum Page {
     Main,
     Lyrics,
     Playlist,
+    /// One artist's profile, hot songs and albums. It is about a single row of the
+    /// hot-artists table rather than about the app, which is why it has no key: see
+    /// [`Page::spec`].
+    Artist,
     Login,
 }
 
@@ -29,6 +35,7 @@ pub struct PageSpec {
     /// Chinese name, as the help key map writes it.
     pub name: &'static str,
     /// The key that opens the page — and, pressed on the page itself, leaves it again.
+    /// `None` when no key names the page: it is opened and left by what it is about.
     pub key: Option<char>,
     /// How the page draws.
     pub render: PageRender,
@@ -49,11 +56,12 @@ pub enum PageRender {
 
 impl Page {
     /// Every page, in table order.
-    pub const ALL: [Page; 5] = [
+    pub const ALL: [Page; 6] = [
         Page::Splash,
         Page::Main,
         Page::Lyrics,
         Page::Playlist,
+        Page::Artist,
         Page::Login,
     ];
 
@@ -87,6 +95,19 @@ impl Page {
                 render: PageRender::Shell {
                     layout: layout::content,
                     content: ui::draw_queue,
+                },
+            },
+            Page::Artist => &PageSpec {
+                name: "歌手详情 / 主界面",
+                // No key on purpose: the page is about one artist, so it is opened from that
+                // artist's row in the hot-artists table (Enter), not from anywhere in the app.
+                // Its entry and exit keys live with that row, in `input::main`, and Esc is
+                // what leaves the page — the table's `key` column has no way to name an
+                // artist, so a key here would open a page with nothing in it.
+                key: None,
+                render: PageRender::Shell {
+                    layout: layout::content,
+                    content: ui::draw_artist,
                 },
             },
             Page::Login => &PageSpec {

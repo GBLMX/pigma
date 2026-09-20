@@ -106,6 +106,7 @@ mod tests {
             pic_url: String::new(),
             duration: 0,
             copyright: SongCopyright::Free,
+            local_path: None,
         })
     }
 

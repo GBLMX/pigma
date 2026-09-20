@@ -144,6 +144,7 @@ pub(crate) fn parse_cloud_disk_songs(value: &Value) -> Result<CloudDiskResult, S
                     .to_string(),
                 duration: simple["dt"].as_u64().unwrap_or(0),
                 copyright: SongCopyright::Unknown,
+                local_path: None,
             })
         })
         .collect::<Result<Vec<_>, _>>()?;

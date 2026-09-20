@@ -7,7 +7,7 @@ use sonar::SonarFinder;
 use super::App;
 use crate::{
     config::{Config, ProxyTarget, ThemeRegistry},
-    state::{COMMANDS, CommandItem, CommandPanel},
+    state::{CommandItem, CommandPanel, palette_items},
     utils::terminal::{ImageProtocol, choose_image_protocol},
 };
 
@@ -55,9 +55,10 @@ impl App {
 
     /// Build the command palette from the one command table.
     ///
-    /// Every entry comes from [`COMMANDS`], so the palette cannot drift from the `:` command
-    /// line again: the same text that names a command there is what Enter runs here. Themes are
-    /// the one entry rendered as a submenu, because the list comes from the registry at runtime.
+    /// Every entry comes from [`COMMANDS`] — the plain commands, then one submenu per config
+    /// section the table names — so the palette cannot drift from the `:` command line again:
+    /// the same text that names a command there is what Enter runs here. Themes are the one
+    /// submenu built here instead, because the list of them is only known at runtime.
     pub(super) fn build_command_panel(theme_registry: &ThemeRegistry) -> CommandPanel {
         let theme_children: Vec<CommandItem> = theme_registry
             .choosable_names()
@@ -75,23 +76,9 @@ impl App {
             name: "切换主题".to_string(),
             children: theme_children,
         }];
+        commands.extend(palette_items());
 
-        commands.extend(
-            COMMANDS
-                .iter()
-                .filter(|command| command.name != "theme" && command.in_palette)
-                .map(|command| CommandItem::Action {
-                    name: command.name.to_string(),
-                    summary: command.summary,
-                    key: command.key,
-                    ex: command.ex.to_string(),
-                    needs_argument: command.needs_argument,
-                }),
-        );
-
-        let mut command_panel = CommandPanel::new();
-        command_panel.levels = vec![commands];
-        command_panel
+        CommandPanel::with_root("COMMANDS", commands)
     }
 
     /// Build the sonar finder per config, applying the search/YouTube proxy.
@@ -213,42 +200,113 @@ mod command_panel_tests {
     use super::*;
     use crate::state::COMMANDS;
 
+    /// Every entry the panel can reach, root list and submenus alike: the label, the command
+    /// line it runs and whether Enter prefills instead of running it.
+    fn entries(panel: &CommandPanel) -> Vec<(String, String, bool)> {
+        fn walk(items: &[CommandItem], found: &mut Vec<(String, String, bool)>) {
+            for item in items {
+                match item {
+                    CommandItem::Action {
+                        name,
+                        ex,
+                        needs_argument,
+                        ..
+                    } => found.push((name.clone(), ex.clone(), *needs_argument)),
+                    CommandItem::SubMenu { children, .. } => walk(children, found),
+                }
+            }
+        }
+
+        let mut found = Vec::new();
+        walk(panel.current_items().expect("a root level"), &mut found);
+        found
+    }
+
     /// The palette is built from the table, so it cannot fall behind it: every command the `:`
-    /// line knows has an entry (themes are the submenu above them).
+    /// line knows has an entry somewhere in it, and nothing else is there.
     #[test]
     fn the_palette_lists_every_command() {
         let registry = ThemeRegistry::new(Default::default());
         let panel = App::build_command_panel(&registry);
-        let items = panel.current_items().expect("built with one level");
 
-        let listed: Vec<&str> = items
+        let mut listed: Vec<String> = entries(&panel).into_iter().map(|(_, ex, _)| ex).collect();
+        // Themes are the one submenu whose children the registry supplies.
+        listed.retain(|ex| !ex.starts_with("theme "));
+
+        let mut expected: Vec<String> = COMMANDS
             .iter()
-            .filter_map(|item| match item {
-                CommandItem::Action { name, .. } => Some(name.as_str()),
-                CommandItem::SubMenu { .. } => None,
-            })
+            .filter(|command| command.in_palette && command.name != "theme")
+            .map(|command| command.ex.to_string())
             .collect();
 
-        let expected: Vec<&str> = COMMANDS
-            .iter()
-            .filter(|c| c.in_palette && c.name != "theme")
-            .map(|c| c.name)
-            .collect();
-        for command in expected
-            .iter()
-            .map(|name| COMMANDS.iter().find(|c| c.name == *name).unwrap())
-        {
-            assert!(
-                listed.contains(&command.name),
-                "{} is missing from the palette: {listed:?}",
-                command.name
+        listed.sort_unstable();
+        expected.sort_unstable();
+        assert_eq!(listed, expected, "the palette and the table disagree");
+    }
+
+    /// The settings are reachable where the table files them, and the popup says which section
+    /// is open — the title comes from the submenu, not from a list of its own.
+    #[test]
+    fn the_settings_submenus_come_from_the_table() {
+        let registry = ThemeRegistry::new(Default::default());
+        let mut panel = App::build_command_panel(&registry);
+
+        for (section, expected) in [
+            ("通知", vec!["notify song_change", "notify errors"]),
+            ("终端", vec!["mouse", "cursor"]),
+            ("歌词", vec!["lyrics", "lyricgradient"]),
+            ("缓存", vec!["saveonplay"]),
+        ] {
+            let index = panel
+                .current_items()
+                .expect("root level")
+                .iter()
+                .position(
+                    |item| matches!(item, CommandItem::SubMenu { name, .. } if name == section),
+                )
+                .unwrap_or_else(|| panic!("no {section} submenu"));
+            panel.selected = index;
+            panel.enter();
+
+            let opened = entries(&panel);
+            assert_eq!(
+                opened
+                    .iter()
+                    .map(|(_, ex, _)| ex.as_str())
+                    .collect::<Vec<_>>(),
+                expected,
+                "{section} lists something else"
             );
+            assert_eq!(
+                panel.current_title(),
+                format!("\u{25BA} {section} \u{25C4}")
+            );
+            panel.back();
         }
-        assert_eq!(
-            listed.len(),
-            expected.len(),
-            "the palette and the table disagree: {listed:?}"
-        );
+    }
+
+    /// Whatever the palette offers has to be a real command: the ones that take an argument
+    /// open the command line instead of running, and everything else runs as it stands.
+    #[test]
+    fn every_palette_entry_is_a_command() {
+        let registry = ThemeRegistry::new(Default::default());
+        let panel = App::build_command_panel(&registry);
+
+        for (label, ex, needs_argument) in entries(&panel) {
+            match crate::input::ex::ExCommand::parse(&ex) {
+                Ok(_) => assert!(
+                    !needs_argument,
+                    "{label}: {ex} takes an argument but runs without one"
+                ),
+                Err(error) => {
+                    assert!(needs_argument, "{label}: {ex} does not parse: {error}");
+                    assert!(
+                        !error.contains("未知命令"),
+                        "{label}: {ex} is not a command at all: {error}"
+                    );
+                }
+            }
+        }
     }
 
     /// Themes come from the registry at runtime, and picking one has to run `theme <name>`.

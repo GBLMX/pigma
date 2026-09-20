@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    future::Future,
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -35,10 +36,25 @@ const PREBUFFER_BYTES: u64 = 512 * 1024;
 /// wait forever — start playback anyway once the timeout is reached.
 const PREBUFFER_TIMEOUT: Duration = Duration::from_secs(8);
 
+/// Entries fetched per request when scanning the user's cloud disk (`/api/v1/cloud/get` pages with
+/// `offset`/`limit`; it offers no search).
+const CLOUD_DISK_PAGE: u32 = 100;
+
+/// How many cloud-disk entries the fallback scans before giving up. The disk is only scanned after
+/// NCM streaming and the third-party sources both failed, so the scan spends a few requests for a
+/// chance to play a song the user owns; past this bound playback should fail with the original
+/// error instead of walking an arbitrarily large disk.
+const CLOUD_DISK_SCAN_LIMIT: u32 = 500;
+
+/// How far an upload's duration (ms) may differ from the catalogue entry's duration and still be
+/// the same recording: both sides are encoded and tagged independently, so exact equality would
+/// reject the right upload. Only consulted when neither side reports `0`.
+const CLOUD_MATCH_DURATION_MS: u64 = 5_000;
+
 /// Why a song could not be turned into a playable stream.
 ///
 /// The class drives behaviour instead of the message text: [`SourceError::Network`]
-/// is retried once, every other class falls through to the third-party sources
+/// is retried once, every other class falls through to the fallback sources
 /// immediately. Messages stay user-facing, so the UI shows the same wording as
 /// before.
 #[derive(Debug, thiserror::Error)]
@@ -63,7 +79,7 @@ pub(super) enum SourceError {
 }
 
 /// Whether a failed NCM attempt should be retried instead of falling back to the
-/// third-party sources: only a transport failure is worth a second try, and only once.
+/// other sources: only a transport failure is worth a second try, and only once.
 /// Every other class (no play URL, provider failure) would fail the same way again.
 fn should_retry_ncm(error: &SourceError, attempt: u32) -> bool {
     matches!(error, SourceError::Network(_)) && attempt < 1
@@ -79,6 +95,176 @@ fn should_record_cache(mark_cache: bool, complete: bool, sent: &AtomicBool) -> b
     mark_cache && complete && !sent.swap(true, Ordering::SeqCst)
 }
 
+/// The file a `Free` song plays from: `local_path` is the real path, `album` is the fallback for
+/// songs that still carry their path there (and the only source when a file has no album tag,
+/// which leaves `local_path` unset).
+fn local_file_path(song: &SongInfo) -> &str {
+    song.local_path.as_deref().unwrap_or(song.album.as_str())
+}
+
+/// Normalize a title/singer for the cloud-disk match: drop bracketed segments (`(Remastered 2011)`,
+/// `[Live]`), ignore case, and keep letters and digits only, so `"Hello, World!"` and
+/// `"hello world"` compare equal.
+///
+/// An upload carries the file's own tags, usually from a different release than the catalogue entry
+/// being played, so punctuation, spacing and edition suffixes differ as a rule — a byte-exact
+/// comparison would miss nearly every upload. Bracketed segments are dropped rather than compared
+/// because the entry a user uploads often names the same recording without the edition marker the
+/// catalogue adds; the duration check is what keeps a different recording out.
+fn cloud_match_key(text: &str) -> String {
+    let mut key = String::new();
+    let mut depth = 0u32;
+    for c in text.chars().flat_map(char::to_lowercase) {
+        match c {
+            '(' | '[' | '（' | '【' => depth += 1,
+            ')' | ']' | '）' | '】' => depth = depth.saturating_sub(1),
+            _ if depth == 0 && c.is_alphanumeric() => key.push(c),
+            _ => {}
+        }
+    }
+    key
+}
+
+/// Find the cloud-disk entry that is the user's upload of `song`, if the disk holds one.
+///
+/// The title must agree once normalized, and the singer must overlap — one release writes `"A/B"`
+/// where another writes `"A"` — because a disk can hold several uploads of the same title. Duration
+/// only decides between candidates that already match: it is in ms, and NCM reports `0` for an
+/// upload it could not match to a catalogue song, which must not disqualify the entry.
+fn pick_cloud_match(song: &SongInfo, disk: &[SongInfo]) -> Option<u64> {
+    let name = cloud_match_key(&song.name);
+    if name.is_empty() {
+        return None;
+    }
+    let singer = cloud_match_key(&song.singer);
+
+    let mut best: Option<(u64, u64)> = None; // (duration difference, cloud song id)
+    for entry in disk {
+        if cloud_match_key(&entry.name) != name {
+            continue;
+        }
+        let entry_singer = cloud_match_key(&entry.singer);
+        let singers_agree = singer.is_empty()
+            || entry_singer.is_empty()
+            || entry_singer.contains(&singer)
+            || singer.contains(&entry_singer);
+        if !singers_agree {
+            continue;
+        }
+
+        let difference = if entry.duration != 0 && song.duration != 0 {
+            let difference = entry.duration.abs_diff(song.duration);
+            if difference > CLOUD_MATCH_DURATION_MS {
+                continue; // both sides timed the audio, and it is a different recording
+            }
+            difference
+        } else {
+            u64::MAX // one side does not know its duration: usable, but loses to a timed entry
+        };
+
+        if best.is_none_or(|(best_difference, _)| difference < best_difference) {
+            best = Some((difference, entry.id));
+        }
+    }
+    best.map(|(_, id)| id)
+}
+
+/// Run the streaming chain for a song whose cached copy and local file cannot be used: NCM player
+/// URLs (one retry, only for a transport failure), then the third-party sources, then the user's
+/// own cloud disk.
+///
+/// The three resolvers are callbacks so tests can pin the order of the chain and the error it
+/// reports with fake resolvers — none of the real ones can be exercised without a login, an
+/// uploaded disk entry and a third-party provider. `sonar` is `None` when the third-party sources
+/// are disabled.
+///
+/// Adding the cloud disk must not change what a caller sees when nothing can play the song: the
+/// third-party failure is still reported when that step ran, and the NCM failure otherwise.
+async fn resolve_streaming<N, NF, S, SF, C, CF>(
+    song: &SongInfo,
+    mut ncm: N,
+    sonar: Option<S>,
+    mut cloud: C,
+) -> Result<AudioInput, SourceError>
+where
+    N: FnMut() -> NF,
+    NF: Future<Output = Result<AudioInput, SourceError>>,
+    S: FnOnce() -> SF,
+    SF: Future<Output = Result<AudioInput, SourceError>>,
+    C: FnMut() -> CF,
+    CF: Future<Output = Option<AudioInput>>,
+{
+    let mut attempt = 0u32;
+    let (error, retried) = loop {
+        match ncm().await {
+            Ok(input) => return Ok(input),
+            Err(e) if should_retry_ncm(&e, attempt) => {
+                log::warn!(
+                    "NCM解析失败，重试 {}/2: {} - {}: {}",
+                    attempt + 1,
+                    song.name,
+                    song.singer,
+                    e
+                );
+                attempt += 1;
+            }
+            Err(e) => break (e, attempt > 0),
+        }
+    };
+
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    log::info!(
+        "[HEAP] after resolve_ncm FAIL (id={}): {} kB — {}",
+        song.id,
+        mem_rss_kb(),
+        error
+    );
+    if retried {
+        #[cfg(all(target_os = "linux", target_env = "gnu"))]
+        log::info!(
+            "[HEAP] after resolve_ncm retries exhausted (id={}): {} kB",
+            song.id,
+            mem_rss_kb()
+        );
+        log::warn!(
+            "NCM网络错误，2次重试失败，改用兜底源: {} - {}",
+            song.name,
+            song.singer
+        );
+    }
+
+    // The third-party sources come first: they need no login, and they often carry the track.
+    if let Some(sonar) = sonar {
+        log::info!(
+            "NCM解析失败，尝试sonar fallback: {} - {} ({})",
+            song.name,
+            song.singer,
+            error
+        );
+        let sonar_error = match sonar().await {
+            Ok(input) => return Ok(input),
+            Err(e) => e,
+        };
+        log::info!(
+            "sonar 兜底失败，尝试云盘 fallback: {} - {} ({})",
+            song.name,
+            song.singer,
+            sonar_error
+        );
+        // The third-party failure is the more informative of the two, and it is what the caller saw
+        // before the cloud disk existed, so it stays the reported error.
+        return cloud().await.ok_or(sonar_error);
+    }
+
+    log::info!(
+        "sonar 未启用，尝试云盘 fallback: {} - {} ({})",
+        song.name,
+        song.singer,
+        error
+    );
+    cloud().await.ok_or(error)
+}
+
 /// Buffer state shared with the stream download progress callback, used to judge whether
 /// enough has been buffered before starting playback.
 #[derive(Clone)]
@@ -89,7 +275,8 @@ struct StreamProgress {
     completed: Arc<AtomicBool>,
 }
 
-/// Resolves audio inputs for songs via local files, NCM streaming, or sonar fallback.
+/// Resolves audio inputs for songs via local files, NCM streaming, the third-party sources, or the
+/// user's own cloud disk.
 #[derive(Clone)]
 pub struct AudioSource {
     service: ApiService,
@@ -349,7 +536,17 @@ impl AudioSource {
 
     /// Try to resolve a song from NCM streaming.
     async fn resolve_ncm(&self, song: &SongInfo) -> Result<AudioInput, SourceError> {
-        let urls = self.service.fetch_song_urls(&[song.id], self.quality).await;
+        self.resolve_ncm_id(song, song.id).await
+    }
+
+    /// Try to resolve a song from NCM streaming by fetching the player URL of `id`.
+    ///
+    /// `id` is the song's catalogue id for [`Self::resolve_ncm`] and the id of the matching
+    /// cloud-disk entry for the cloud fallback: a cloud song is served by the same player-URL API,
+    /// so both paths share the URL request, the empty/trial-URL guard and the stream setup. `song`
+    /// stays the song being played either way — it owns the cache key and the events.
+    async fn resolve_ncm_id(&self, song: &SongInfo, id: u64) -> Result<AudioInput, SourceError> {
+        let urls = self.service.fetch_song_urls(&[id], self.quality).await;
 
         let urls = match urls {
             Ok(u) => u,
@@ -379,6 +576,58 @@ impl AudioSource {
         self.build_stream(url, song, ext, None).await
     }
 
+    /// Last resort before playback is declared failed: find the song in the user's own cloud disk
+    /// and stream the uploaded copy. A track NCM refuses to hand out a URL for (VIP-only,
+    /// copyright, region) is still playable when the user uploaded it themselves.
+    ///
+    /// Everything that cannot produce a stream is silent and returns `None` — no login, no match, a
+    /// failing cloud API, an unusable cloud URL — so the caller keeps its original error: playback
+    /// was asked for, and a second, vaguer failure message ("云盘里没有这首歌") would replace a
+    /// precise one ("需要 VIP"). The disk is paged from the start because the endpoint only offsets
+    /// into a list and offers no search; the scan stops at [`CLOUD_DISK_SCAN_LIMIT`] entries.
+    async fn resolve_cloud(&self, song: &SongInfo) -> Option<AudioInput> {
+        let mut offset = 0u32;
+        while offset < CLOUD_DISK_SCAN_LIMIT {
+            let page = match self
+                .service
+                .client()
+                .user_cloud_disk(offset, CLOUD_DISK_PAGE)
+                .await
+            {
+                Ok(page) => page,
+                Err(e) => {
+                    // Not logged in, or the cloud API is unhappy: the fallback is optional, so the
+                    // original failure is reported instead.
+                    log::info!("云盘兜底跳过：获取云盘列表失败 (offset={offset}): {e}");
+                    return None;
+                }
+            };
+
+            if let Some(id) = pick_cloud_match(song, &page.songs) {
+                log::info!(
+                    "云盘兜底命中: {} - {} (songId={id}, offset={offset})",
+                    song.name,
+                    song.singer
+                );
+                return match self.resolve_ncm_id(song, id).await {
+                    Ok(input) => Some(input),
+                    Err(e) => {
+                        log::info!("云盘地址解析失败，放弃云盘兜底: {e}");
+                        None
+                    }
+                };
+            }
+
+            if !page.has_more || page.songs.is_empty() {
+                break;
+            }
+            offset += CLOUD_DISK_PAGE;
+        }
+
+        log::info!("云盘兜底未命中: {} - {}", song.name, song.singer);
+        None
+    }
+
     /// Return a previously cached audio file for `song`, if one exists.
     async fn resolve_cached(&self, song: &SongInfo) -> Option<AudioInput> {
         let ext = self.cache.find_cached_extension(song.id)?.to_string();
@@ -391,16 +640,15 @@ impl AudioSource {
         Some(SharedReader(Arc::new(Mutex::new(Box::new(file)))))
     }
 
-    /// Open a local file for a `Free` song whose `album` field is a real path.
+    /// Open a local file for a `Free` song; see [`local_file_path`] for which field holds it.
     async fn resolve_local(&self, song: &SongInfo) -> Option<AudioInput> {
         if song.copyright != ncm_api::SongCopyright::Free {
             return None;
         }
-        let path = std::path::Path::new(&song.album);
+        let path = std::path::PathBuf::from(local_file_path(song));
         if !path.exists() {
             return None;
         }
-        let path = path.to_path_buf();
         let file = tokio::task::spawn_blocking(move || std::fs::File::open(path))
             .await
             .ok()?
@@ -433,63 +681,34 @@ impl AudioSource {
             return Ok(input);
         }
 
-        // 4. NCM streaming: transient network failures retried once, then sonar fallback.
-        for attempt in 0..2 {
-            match self.resolve_ncm(song).await {
-                Ok(input) => return Ok(input),
-                Err(e) if should_retry_ncm(&e, attempt) => {
-                    log::warn!(
-                        "NCM解析失败，重试 {}/2: {} - {}: {}",
-                        attempt + 1,
-                        song.name,
-                        song.singer,
-                        e
-                    );
-                }
-                Err(e) => {
-                    #[cfg(all(target_os = "linux", target_env = "gnu"))]
-                    log::info!(
-                        "[HEAP] after resolve_ncm FAIL (id={}): {} kB — {}",
-                        song.id,
-                        mem_rss_kb(),
-                        e
-                    );
-                    if self.sonar_enabled {
-                        log::info!(
-                            "NCM解析失败，尝试sonar fallback: {} - {} ({})",
-                            song.name,
-                            song.singer,
-                            e
-                        );
-                        return self.resolve_providers(song).await;
-                    }
-                    return Err(e);
-                }
-            }
-        }
-
-        #[cfg(all(target_os = "linux", target_env = "gnu"))]
-        log::info!(
-            "[HEAP] after resolve_ncm retries exhausted (id={}): {} kB",
-            song.id,
-            mem_rss_kb()
-        );
-        log::warn!(
-            "NCM网络错误，2次重试失败，fallback到sonar: {} - {}",
-            song.name,
-            song.singer
-        );
-        if self.sonar_enabled {
-            self.resolve_providers(song).await
-        } else {
-            Err(SourceError::Network("2次重试失败".into()))
-        }
+        // 4. NCM streaming, then the third-party sources, then the user's own cloud disk: the song
+        //    is only declared unplayable when all three failed.
+        let sonar = self.sonar_enabled.then_some(|| self.resolve_providers(song));
+        resolve_streaming(song, || self.resolve_ncm(song), sonar, || self.resolve_cloud(song)).await
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{io::Read, sync::atomic::AtomicU32};
+
+    /// The catalog song under test: VIP-only (so NCM is the one that fails on it), four minutes of
+    /// audio at the durations uploads are usually tagged with.
+    fn test_song() -> SongInfo {
+        SongInfo {
+            id: 42,
+            name: "Hello, World!".into(),
+            singer: "A/B".into(),
+            artist_id: 1,
+            album: "An Album".into(),
+            album_id: 2,
+            pic_url: String::new(),
+            duration: 240_000,
+            copyright: ncm_api::SongCopyright::VipOnly,
+            local_path: None,
+        }
+    }
 
     /// The NCM retry/fallback policy: a transport failure gets exactly one retry, while
     /// an unplayable song falls through to the third-party sources immediately (retrying
@@ -537,6 +756,195 @@ mod tests {
         assert!(
             !should_record_cache(true, true, &sent),
             "a repeated completion callback must not record twice"
+        );
+    }
+
+    /// A local song plays from `local_path`. `album` is only the fallback for songs that still
+    /// carry their path there: it stopped being the path once a local file gained a real album
+    /// tag, and reading it there sends tagged files into the network fallbacks even though the
+    /// file is on disk.
+    #[test]
+    fn local_songs_prefer_the_path_over_the_album() {
+        let mut song = test_song();
+
+        song.local_path = Some("/music/local.flac".into());
+        song.album = "An Album".into();
+        assert_eq!(local_file_path(&song), "/music/local.flac");
+
+        song.local_path = None;
+        song.album = "/music/legacy.mp3".into();
+        assert_eq!(local_file_path(&song), "/music/legacy.mp3");
+    }
+
+    /// The cloud-disk match has to survive hand-tagged uploads: titles and artists are compared
+    /// case- and punctuation-insensitively, an artist that appears on either side is enough, and a
+    /// duration NCM does not know (`0`) must not disqualify the entry — while a title that is a
+    /// different recording by another artist, or a different length, must not be played.
+    #[test]
+    fn cloud_match_tolerates_upload_tags() {
+        let song = test_song();
+        let upload = |id: u64, name: &str, singer: &str, duration: u64| SongInfo {
+            id,
+            name: name.to_string(),
+            singer: singer.to_string(),
+            duration,
+            ..test_song()
+        };
+
+        assert_eq!(
+            pick_cloud_match(
+                &song,
+                &[upload(7, "Hello, World! (Remastered 2011)", "a/B", 0)]
+            ),
+            Some(7),
+            "spacing, case, a tag suffix and an unknown duration must still match"
+        );
+        assert_eq!(
+            pick_cloud_match(&song, &[upload(7, "Hello, World!", "someone else", 0)]),
+            None,
+            "an upload of another artist must not be played as this song"
+        );
+        assert_eq!(
+            pick_cloud_match(&song, &[upload(7, "Hello, World! Tonight", "A", 240_000)]),
+            None,
+            "a title that merely starts the same is a different song"
+        );
+        assert_eq!(
+            pick_cloud_match(
+                &song,
+                &[
+                    upload(7, "Hello, World!", "A", 0),
+                    upload(9, "hello world", "A", 240_500),
+                ]
+            ),
+            Some(9),
+            "with two uploads, the one whose duration fits the catalogue entry wins"
+        );
+        assert_eq!(
+            pick_cloud_match(&song, &[upload(7, "Hello, World!", "A", 60_000)]),
+            None,
+            "a minute-long recording is not this song"
+        );
+    }
+
+    /// Stands in for "the third-party sources are disabled": the chain must never call it.
+    type NoSonar = fn() -> std::future::Ready<Result<AudioInput, SourceError>>;
+
+    /// An in-memory stand-in for a resolved stream, carrying the bytes of the step that produced
+    /// it: the real inputs have one type, so a test cannot tell them apart otherwise.
+    fn fake_input(marker: &[u8]) -> AudioInput {
+        SharedReader(Arc::new(Mutex::new(Box::new(std::io::Cursor::new(
+            marker.to_vec(),
+        )))))
+    }
+
+    /// The marker bytes of a [`fake_input`].
+    fn marker_of(input: &AudioInput) -> Vec<u8> {
+        let mut marker = Vec::new();
+        input
+            .0
+            .lock()
+            .expect("the fake reader is not poisoned")
+            .read_to_end(&mut marker)
+            .expect("an in-memory reader cannot fail");
+        marker
+    }
+
+    /// The streaming chain with fake resolvers, because no real one can be exercised offline: the
+    /// cloud disk is the last resort, so it must not be asked when NCM streaming already worked
+    /// (that would be a request on the common path), it must hand over its URL when the sources
+    /// before it failed, and when nothing can play the song the caller must see the error the
+    /// chain reported before the cloud disk existed.
+    #[tokio::test]
+    async fn streaming_chain_consults_the_cloud_disk_last() {
+        let song = test_song();
+
+        // (a) NCM streaming works: neither fallback is touched, least of all the cloud disk.
+        let cloud_asked = AtomicBool::new(false);
+        let input = resolve_streaming(
+            &song,
+            || async { Ok(fake_input(b"ncm")) },
+            Some(|| async { Ok(fake_input(b"sonar")) }),
+            || async {
+                cloud_asked.store(true, Ordering::SeqCst);
+                Some(fake_input(b"cloud"))
+            },
+        )
+        .await
+        .expect("NCM streaming succeeded");
+        assert_eq!(marker_of(&input), b"ncm");
+        assert!(
+            !cloud_asked.load(Ordering::SeqCst),
+            "普通解析成功时不该访问云盘"
+        );
+
+        // (b) NCM and the third-party sources fail, the cloud disk holds the song: the uploaded
+        // copy is played.
+        let input = resolve_streaming(
+            &song,
+            || async { Err(SourceError::Unavailable("该歌曲暂无播放源".into())) },
+            Some(|| async { Err(SourceError::Provider("sonar 兜底失败".into())) }),
+            || async { Some(fake_input(b"cloud")) },
+        )
+        .await
+        .expect("the cloud disk matched");
+        assert_eq!(marker_of(&input), b"cloud");
+
+        // (c) the cloud disk cannot play it either: the reported error is the one the chain
+        // produced before the cloud disk was added — the third-party failure when that step ran,
+        // the NCM failure when the third-party sources are disabled.
+        let error = resolve_streaming(
+            &song,
+            || async { Err(SourceError::Unavailable("该歌曲暂无播放源".into())) },
+            Some(|| async { Err(SourceError::Provider("sonar 兜底失败".into())) }),
+            || async { None },
+        )
+        .await
+        .expect_err("nothing can play the song");
+        assert!(
+            matches!(&error, SourceError::Provider(message) if message == "sonar 兜底失败"),
+            "云盘未命中时必须返回兜底源的错误, got {error:?}"
+        );
+
+        let error = resolve_streaming(
+            &song,
+            || async { Err(SourceError::Unavailable("该歌曲暂无播放源".into())) },
+            None::<NoSonar>,
+            || async { None },
+        )
+        .await
+        .expect_err("nothing can play the song");
+        assert!(
+            matches!(&error, SourceError::Unavailable(message) if message == "该歌曲暂无播放源"),
+            "云盘未命中时必须返回 NCM 的错误, got {error:?}"
+        );
+
+        // (d) the retry policy still runs in front of both fallbacks: a transport failure is
+        // retried once, and the cloud disk is asked after that second attempt, not instead of it.
+        let attempts = AtomicU32::new(0);
+        let cloud_asked = AtomicBool::new(false);
+        let error = resolve_streaming(
+            &song,
+            || async {
+                attempts.fetch_add(1, Ordering::SeqCst);
+                Err(SourceError::Network("boom".into()))
+            },
+            None::<NoSonar>,
+            || async {
+                cloud_asked.store(true, Ordering::SeqCst);
+                None
+            },
+        )
+        .await
+        .expect_err("the transport failure is reported");
+        assert_eq!(attempts.load(Ordering::SeqCst), 2, "网络错误只重试一次");
+        assert!(
+            cloud_asked.load(Ordering::SeqCst),
+            "重试耗尽后仍要尝试云盘"
+        );
+        assert!(
+            matches!(&error, SourceError::Network(message) if message == "boom"),
+            "重试耗尽且云盘未命中时返回网络错误, got {error:?}"
         );
     }
 }

@@ -174,6 +174,7 @@ pub fn to_song_info(song: &Song) -> SongInfo {
         pic_url: song.pic_url.clone(),
         duration: song.duration,
         copyright: ncm_api::SongCopyright::Free,
+        local_path: None,
     }
 }
 

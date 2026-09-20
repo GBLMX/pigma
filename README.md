@@ -168,10 +168,11 @@ RSS 大致是**二进制体积 + 约 3 MB**（1.0 的二进制 11.1 MB），换�
 
 **待办**
 
-- [ ] command panel 重写，更多运行时配置支持
-- [ ] 云盘源作为 fallback
-- [ ] 本地音频歌词、元数据重写
-- [ ] landing page、歌手信息
+- [x] command panel 重写，更多运行时配置支持（`ctrl+p` 面板 + `:mouse` / `:cursor` / `:notify` / `:lyricgradient` / `:saveonplay` 等可运行时修改的设置）
+- [x] 云盘源作为 fallback（NCM → sonar → **云盘** → 才报错）
+- [x] 本地音频歌词、元数据重写（`lofty` 读标签；同名侧车 `.lrc` 复用既有歌词管线）
+- [x] 歌手信息（歌手详情页：简介 / 热门曲目 / 专辑）
+- [ ] landing page
 
 ## Preview
 
@@ -282,6 +283,11 @@ cargo build --release
 | `:layout default\|modern\|minimal` | 播放条布局（`modern` 下频谱只有封面列的 8 格宽，另两种布局是整行） |
 | `:pitch on\|off` | 音高读数开关（同 `V` 键） |
 | `:lyrics window\|one_line\|flow\|plain` | 歌词显示样式（`Tab` 会列出四种与各自说明） |
+| `:notify song_change\|errors on\|off` | 切歌提示 / 播放错误提示开关 |
+| `:mouse on\|off` | 鼠标捕获开关（影响滚轮与双击；当场写终端转义序列） |
+| `:cursor default\|block\|underline\|bar` | 终端光标形状（当场生效） |
+| `:lyricgradient <预设>` | 歌词扫光渐变（`Tab` 列出全部预设） |
+| `:saveonplay on\|off` | 播放时自动写入「我喜欢的音乐」 |
 
 终端背景为浅色时，`:theme` 配合配置里的 `background = "auto"` 与 `light_theme` 会自动选浅色主题。
 
@@ -316,7 +322,7 @@ Add-Content $PROFILE '. "$HOME/.config/powershell/boxpigma.ps1"'
 | `boxpigma msg list` | 列出当前播放队列（`▶` 标记当前曲目），`--json` 输出原始 `QueueSnapshot` |
 | `boxpigma msg next` / `boxpigma msg previous` | 下一首 / 上一首 |
 | `boxpigma msg pause` / `boxpigma msg play` | 暂停 / 播放（`boxpigma msg play <song-id>` 按 id 跳播队列中的歌曲） |
-| `boxpigma msg search <keyword>` | 搜索并返回歌曲数据（NCM + 已启用 sonar 源，标出 `source` 和 `id`），再 `boxpigma msg play <id>` 播放选中的那首 |
+| `boxpigma msg search <keyword>` | 搜索并返回歌曲数据（解析顺序：NCM 失败重试一次 → sonar → 云盘兜底，标出 `source` 和 `id`），再 `boxpigma msg play <id>` 播放选中的那首 |
 | `boxpigma msg toggle_play` | 播放/暂停切换 |
 | `boxpigma msg mode` | 切换播放模式 |
 | `boxpigma msg like` / `boxpigma msg dislike` | 喜欢 / 不喜欢 |

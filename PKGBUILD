@@ -1,7 +1,7 @@
 # Maintainer: GB LMX <GBLMX@users.noreply.github.com>
 pkgname=boxpigma-gblmx-bin
 _pkgname=boxpigma
-pkgver=1.0.1
+pkgver=1.1.0
 pkgrel=1
 pkgdesc="A netease cloud music client (GBLMX fork build)"
 arch=('x86_64')

@@ -1,10 +1,12 @@
 use std::{cell::RefCell, sync::Arc};
 
-use ncm_api::{LoginInfo, SongInfo};
+use ncm_api::{ArtistAlbum, ArtistDetail, LoginInfo, NcmClient, SongInfo};
 use ratatui::{
     layout::Rect,
     widgets::{ListState, TableState},
 };
+use ratatui_image::{picker::Picker, protocol::StatefulProtocol};
+use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender, error::TryRecvError};
 
 use super::{
     Page, PaginationInfo,
@@ -12,6 +14,7 @@ use super::{
     search::SearchState,
 };
 use crate::config::NavConfig;
+use crate::event::{AppEvent, Event};
 pub use crate::config::{NavItemConfig, NavSectionConfig as NavSection};
 
 pub struct NavState {
@@ -126,6 +129,8 @@ pub struct NavigationState {
     /// Horizontal scroll offset of the queue's tab bar (persisted across renders
     /// so the selected tab stays in view).
     pub queue_tab_scroll_x: u16,
+    /// The artist page's own state: who it shows and what has loaded for them.
+    pub artist: ArtistState,
     pub search: SearchState,
     pub pagination: Option<PaginationInfo>,
     pub generation: u64,
@@ -220,4 +225,246 @@ impl NavigationState {
     pub fn clear_breadcrumb(&mut self) {
         self.history.clear();
     }
+}
+
+// --- Artist page ---
+
+/// How many albums the page asks for. The list is a summary pane rather than the album's own
+/// page, and one API page of it is the whole pane.
+const ARTIST_ALBUM_LIMIT: u16 = 50;
+
+/// Edge of the portrait request, in pixels. The API resizes server-side (`?param=`), and the
+/// pane is a handful of rows tall, so a thumbnail is all it can show.
+const ARTIST_PORTRAIT_PIXELS: u32 = 240;
+
+/// What the artist page needs from the app to reach the network: the API client, the image
+/// client (the one that honours the proxy config) and the terminal's image protocol.
+#[derive(Clone)]
+pub struct ArtistIo {
+    pub client: Arc<NcmClient>,
+    pub http: reqwest::Client,
+    pub picker: Picker,
+    /// How the page asks for the frame to be drawn again.
+    ///
+    /// A load reports on the page's own channel, which only the draw pass drains, and the main
+    /// loop draws after an event and otherwise waits for one — with nothing playing, a load that
+    /// finished would sit in the channel until the reader pressed a key. `AppEvent::Repaint` is
+    /// exactly that wake-up: it changes nothing and only gets the frame drawn.
+    pub repaint: UnboundedSender<Event>,
+}
+
+/// What the artist page has to draw.
+pub enum ArtistData {
+    /// The profile request is out.
+    Loading,
+    /// Profile and hot songs are in. The album list is a second request: when it fails the
+    /// page keeps everything else and only the album pane reports the failure.
+    Ready {
+        detail: ArtistDetail,
+        albums: Result<Vec<ArtistAlbum>, String>,
+    },
+    /// The profile request itself failed. `r` reloads it and `Esc` leaves the page, so a
+    /// failure never strands the reader here.
+    Failed(String),
+}
+
+/// The artist page's own state.
+///
+/// The page keeps its own loader instead of going through `ApiService` and `ContentState`:
+/// an artist profile is not table content — it must not replace what the main page is
+/// showing, and it never joins the breadcrumb stack (the page is opened and left by name).
+pub struct ArtistState {
+    /// Artist the page is showing.
+    pub id: u64,
+    /// Name and portrait taken from the list row that opened the page. They are already
+    /// known, so the header is real before the profile request lands.
+    pub name: String,
+    pub pic_url: String,
+    pub data: ArtistData,
+    /// Cursor over the hot songs of a loaded profile.
+    pub song_selected: usize,
+    /// The portrait decoded for the terminal's image protocol. `None` until it arrives, and
+    /// it stays `None` when the download or the decoding failed — the page reads fine
+    /// without a portrait, so that case has no error of its own.
+    pub avatar: Option<StatefulProtocol>,
+    /// What the running load reported. A profile belongs to this page rather than to the app,
+    /// so it arrives on the page's own channel instead of as an app event; the app hears about
+    /// the load only through `ArtistIo::repaint`, which asks for a frame.
+    rx: Option<UnboundedReceiver<ArtistMsg>>,
+}
+
+/// What a running load reports back to the page.
+enum ArtistMsg {
+    Ready {
+        detail: ArtistDetail,
+        albums: Result<Vec<ArtistAlbum>, String>,
+    },
+    Failed(String),
+    Avatar(StatefulProtocol),
+}
+
+impl Default for ArtistState {
+    fn default() -> Self {
+        Self {
+            id: 0,
+            name: String::new(),
+            pic_url: String::new(),
+            data: ArtistData::Loading,
+            song_selected: 0,
+            avatar: None,
+            rx: None,
+        }
+    }
+}
+
+impl ArtistState {
+    /// Show one artist and load its profile. `name` and `pic_url` come from the list row
+    /// that opened the page and only have to carry the header until the profile arrives.
+    pub fn open(&mut self, id: u64, name: String, pic_url: String, io: ArtistIo) {
+        self.id = id;
+        self.name = name;
+        self.pic_url = pic_url;
+        self.load(io);
+    }
+
+    /// Load the artist again, for a failed page (`r`). Nothing to retry before the first open.
+    pub fn reload(&mut self, io: ArtistIo) {
+        if self.id != 0 {
+            self.load(io);
+        }
+    }
+
+    fn load(&mut self, io: ArtistIo) {
+        self.data = ArtistData::Loading;
+        self.song_selected = 0;
+        self.avatar = None;
+
+        let (tx, rx) = mpsc::unbounded_channel();
+        self.rx = Some(rx);
+        let id = self.id;
+
+        tokio::spawn(async move {
+            let detail = match io.client.artist_detail(id).await {
+                Ok(detail) => detail,
+                Err(e) => {
+                    let _ = tx.send(ArtistMsg::Failed(e.to_string()));
+                    // A failure has to reach the screen too, and it is the same story: with
+                    // nothing else happening, only a wake-up gets the frame drawn.
+                    let _ = io.repaint.send(AppEvent::Repaint.into());
+                    return;
+                }
+            };
+            let albums = io
+                .client
+                .artist_albums(id, 0, ARTIST_ALBUM_LIMIT)
+                .await
+                .map_err(|e| e.to_string());
+
+            // The text goes out first: the portrait is a second download, and the page is
+            // usable — and already worth reading — without it.
+            let portrait = detail.pic_url.clone();
+            let _ = tx.send(ArtistMsg::Ready { detail, albums });
+            let _ = io.repaint.send(AppEvent::Repaint.into());
+            if let Some(protocol) = load_portrait(&io, &portrait).await {
+                let _ = tx.send(ArtistMsg::Avatar(protocol));
+                let _ = io.repaint.send(AppEvent::Repaint.into());
+            }
+        });
+    }
+
+    /// Take in whatever the loader has sent since the last frame.
+    ///
+    /// The draw pass calls this — and the load itself asks for that frame with
+    /// `AppEvent::Repaint`, so a load that finishes while nothing else is happening still
+    /// reaches the screen instead of waiting for the next keypress.
+    pub fn poll(&mut self) {
+        let Some(mut rx) = self.rx.take() else {
+            return;
+        };
+        // The receiver is a local while the messages are applied, so `apply` can borrow the
+        // page mutably.
+        loop {
+            match rx.try_recv() {
+                Ok(msg) => self.apply(msg),
+                Err(TryRecvError::Empty) => break,
+                // The worker is gone: this channel can produce nothing else.
+                Err(TryRecvError::Disconnected) => return,
+            }
+        }
+        self.rx = Some(rx);
+    }
+
+    fn apply(&mut self, msg: ArtistMsg) {
+        match msg {
+            ArtistMsg::Ready { detail, albums } => {
+                // The profile is the better source for both: the row's copy of them can be
+                // stale, and the artist may have been renamed since the list was fetched.
+                self.name = detail.name.clone();
+                if !detail.pic_url.is_empty() {
+                    self.pic_url = detail.pic_url.clone();
+                }
+                self.data = ArtistData::Ready { detail, albums };
+            }
+            ArtistMsg::Failed(error) => self.data = ArtistData::Failed(error),
+            ArtistMsg::Avatar(protocol) => self.avatar = Some(protocol),
+        }
+    }
+
+    /// The hot songs of the loaded profile; empty while loading and after a failure.
+    pub fn hot_songs(&self) -> &[SongInfo] {
+        match &self.data {
+            ArtistData::Ready { detail, .. } => &detail.hot_songs,
+            ArtistData::Loading | ArtistData::Failed(_) => &[],
+        }
+    }
+
+    /// The song the cursor is on.
+    pub fn selected_song(&self) -> Option<&SongInfo> {
+        self.hot_songs().get(self.song_selected)
+    }
+
+    /// Move the cursor down the hot songs, wrapping the way the main table's does.
+    pub fn select_next(&mut self) {
+        let count = self.hot_songs().len();
+        if count > 0 {
+            self.song_selected = (self.song_selected + 1) % count;
+        }
+    }
+
+    /// Move the cursor up, wrapping.
+    pub fn select_prev(&mut self) {
+        let count = self.hot_songs().len();
+        if count > 0 {
+            self.song_selected = (self.song_selected + count - 1) % count;
+        }
+    }
+
+    pub fn select_first(&mut self) {
+        self.song_selected = 0;
+    }
+
+    pub fn select_last(&mut self) {
+        self.song_selected = self.hot_songs().len().saturating_sub(1);
+    }
+}
+
+/// Download the artist portrait and decode it for the terminal's image protocol. Every
+/// failure returns `None`: the portrait is decoration, and the page says what it has either
+/// way.
+async fn load_portrait(io: &ArtistIo, url: &str) -> Option<StatefulProtocol> {
+    if url.is_empty() {
+        return None;
+    }
+    // `?param=` is the API's own resize parameter, the one `NcmClient::download_img` uses.
+    let url = format!("{url}?param={ARTIST_PORTRAIT_PIXELS}y{ARTIST_PORTRAIT_PIXELS}");
+    let bytes = io.http.get(url).send().await.ok()?.bytes().await.ok()?;
+    let picker = io.picker.clone();
+
+    // Decoding is CPU work on a byte buffer; the resize itself happens at draw time.
+    tokio::task::spawn_blocking(move || {
+        let image = image::load_from_memory(&bytes).ok()?;
+        Some(picker.new_resize_protocol(image))
+    })
+    .await
+    .ok()?
 }

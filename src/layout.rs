@@ -166,3 +166,49 @@ pub fn content(area: Rect, _nav_position: NavPosition) -> LayoutAreas {
         playerbar,
     }
 }
+
+/// The artist page inside the shell's content area: the profile band on top, then the hot
+/// songs and the albums.
+pub struct ArtistLayout {
+    pub profile: Rect,
+    pub songs: Rect,
+    pub albums: Rect,
+}
+
+/// Height of the profile band: a portrait, the name and sizes lines, and a few lines of
+/// biography. It is fixed rather than proportional so the two lists below it stay where they
+/// were when a biography is long — the band clips its text instead of growing.
+const PROFILE_HEIGHT: u16 = 9;
+
+/// Width from which the two lists share the area instead of stacking. Below it, four columns
+/// for the songs and two for the albums is not enough to read either of them.
+const SIDE_BY_SIDE_WIDTH: u16 = 100;
+
+/// The artist page. The lists split the space under the band: side by side on a wide terminal
+/// (songs first, since they are what a reader comes for) and stacked when there is no room for
+/// two tables next to each other.
+pub fn artist(area: Rect) -> ArtistLayout {
+    let [profile, lists] = Layout::vertical([
+        Constraint::Length(PROFILE_HEIGHT),
+        Constraint::Min(2),
+    ])
+    .areas(area);
+
+    let (songs, albums) = if area.width >= SIDE_BY_SIDE_WIDTH {
+        let [songs, albums] =
+            Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)])
+                .areas(lists);
+        (songs, albums)
+    } else {
+        let [songs, albums] =
+            Layout::vertical([Constraint::Percentage(60), Constraint::Percentage(40)])
+                .areas(lists);
+        (songs, albums)
+    };
+
+    ArtistLayout {
+        profile,
+        songs,
+        albums,
+    }
+}

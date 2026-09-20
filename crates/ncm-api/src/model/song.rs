@@ -18,6 +18,14 @@ pub struct SongInfo {
     pub pic_url: String,
     pub duration: u64,
     pub copyright: SongCopyright,
+    /// Where the file lives, for songs that came from disk (`scan_local_music`).
+    ///
+    /// `album` used to be overloaded with this: the local resolver and the cloud upload both
+    /// read the path out of `album`, so the album tag had nowhere to go. Keeping the path in
+    /// its own field lets `album` hold the tag (falling back to the path when a file has none)
+    /// without the two readers having to guess.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_path: Option<String>,
 }
 
 impl PartialEq for SongInfo {
@@ -195,6 +203,7 @@ pub(crate) fn parse_song_info(v: &Value, context: SongContext) -> Result<SongInf
         .unwrap_or(SongCopyright::Free);
 
     Ok(SongInfo {
+        local_path: None,
         id: u64_val(v, "id"),
         name,
         singer,
@@ -409,5 +418,31 @@ mod tests {
         });
         let song = parse_song_info(&v, SongContext::Usl).unwrap();
         assert_eq!(song.copyright, SongCopyright::Unavailable);
+    }
+
+    /// `SongInfo` travels over IPC as JSON (queue snapshots). A track from the network must not
+    /// grow a `local_path` key just because tracks from disk carry one.
+    #[test]
+    fn a_network_song_never_serialises_local_path() {
+        let v = json!({ "id": 7, "name": "Song", "privilege": { "st": 0, "fee": 0 } });
+        let song = parse_song_info(&v, SongContext::Usl).unwrap();
+        assert_eq!(song.local_path, None);
+
+        let text = serde_json::to_string(&song).unwrap();
+        assert!(!text.contains("local_path"), "{text}");
+    }
+
+    /// A local track's path has to survive the round trip: playback and the cloud upload both
+    /// resolve the file from it.
+    #[test]
+    fn a_local_path_survives_a_round_trip() {
+        let v = json!({ "id": 9, "name": "Song", "privilege": { "st": 0, "fee": 0 } });
+        let mut song = parse_song_info(&v, SongContext::Usl).unwrap();
+        song.local_path = Some("/music/带标签的歌.flac".into());
+
+        let text = serde_json::to_string(&song).unwrap();
+        let back: SongInfo = serde_json::from_str(&text).unwrap();
+
+        assert_eq!(back.local_path.as_deref(), Some("/music/带标签的歌.flac"));
     }
 }

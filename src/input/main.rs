@@ -1,5 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEventKind};
+use ncm_api::SongInfo;
 use ratatui::layout::Rect;
+use std::sync::Arc;
 
 use super::{
     content::{
@@ -17,7 +19,7 @@ use crate::{
     config::symbols,
     event::{AppEvent, CommandEvent, NavigationEvent, PlaybackEvent},
     playback::mode_icon,
-    state::{ContentState, Page, TableMode},
+    state::{ArtistIo, ContentState, Page, TableMode},
     text_input::TextInput,
     ui::playerbar,
 };
@@ -25,7 +27,14 @@ use crate::{
 pub(super) fn handle_main_key(app: &mut App, key_event: KeyEvent) -> color_eyre::Result<()> {
     match key_event.code {
         KeyCode::Esc => {
-            app.state.events.send(NavigationEvent::ContentRestore);
+            if app.state.navigation.page == Page::Artist {
+                // The artist page is not part of the content breadcrumb stack — it is opened
+                // from a row rather than by walking the table — so leaving it is a page change,
+                // not a restore, and there is no breadcrumb for `ContentRestore` to pop.
+                app.state.events.send(NavigationEvent::Navigate(Page::Main));
+            } else {
+                app.state.events.send(NavigationEvent::ContentRestore);
+            }
         }
         KeyCode::Char('q') => app.state.events.send(AppEvent::Quit),
         KeyCode::Tab if app.state.navigation.page == Page::Playlist => {
@@ -45,45 +54,62 @@ pub(super) fn handle_main_key(app: &mut App, key_event: KeyEvent) -> color_eyre:
         KeyCode::Tab => navigate_nav_down(app),
         KeyCode::BackTab => navigate_nav_up(app),
         KeyCode::Up | KeyCode::Char('k' | 'K') => {
-            if app.state.navigation.page == Page::Playlist {
+            if app.state.navigation.page == Page::Artist {
+                app.state.navigation.artist.select_prev();
+            } else if app.state.navigation.page == Page::Playlist {
                 playlist_select_prev(app);
             } else {
                 content_select_prev(app);
             }
         }
         KeyCode::Down | KeyCode::Char('j' | 'J') => {
-            if app.state.navigation.page == Page::Playlist {
+            if app.state.navigation.page == Page::Artist {
+                app.state.navigation.artist.select_next();
+            } else if app.state.navigation.page == Page::Playlist {
                 playlist_select_next(app);
             } else {
                 content_select_next(app);
             }
         }
         KeyCode::Char('g') => {
-            if app.state.navigation.page == Page::Playlist {
+            if app.state.navigation.page == Page::Artist {
+                app.state.navigation.artist.select_first();
+            } else if app.state.navigation.page == Page::Playlist {
                 playlist_select_first(app);
             } else {
                 content_select_first(app);
             }
         }
         KeyCode::Char('G') => {
-            if app.state.navigation.page == Page::Playlist {
+            if app.state.navigation.page == Page::Artist {
+                app.state.navigation.artist.select_last();
+            } else if app.state.navigation.page == Page::Playlist {
                 playlist_select_last(app);
             } else {
                 content_select_last(app);
             }
         }
         KeyCode::Enter => {
-            if app.state.navigation.page == Page::Playlist {
+            if app.state.navigation.page == Page::Artist {
+                // Enter plays the hot song under the page's cursor.
+                artist_play_selected(app);
+            } else if app.state.navigation.page == Page::Playlist {
                 playlist_play_selected(app);
-            } else if app.state.navigation.table_mode == TableMode::Cell {
-                cell_enter_action(app);
-            } else {
-                row_enter_action(app);
+            } else if !open_artist_from_table(app) {
+                // Not an artist row: the table's own Enter, cell mode or row mode.
+                if app.state.navigation.table_mode == TableMode::Cell {
+                    cell_enter_action(app);
+                } else {
+                    row_enter_action(app);
+                }
             }
         }
         KeyCode::Left => {
             if app.state.navigation.table_mode == TableMode::Cell
-                && app.state.navigation.page != Page::Playlist
+                && matches!(
+                    app.state.navigation.page,
+                    Page::Main | Page::Lyrics
+                )
             {
                 cell_select_prev_column(app);
             } else if app.playback.current_song().is_some() {
@@ -93,7 +119,10 @@ pub(super) fn handle_main_key(app: &mut App, key_event: KeyEvent) -> color_eyre:
         }
         KeyCode::Right => {
             if app.state.navigation.table_mode == TableMode::Cell
-                && app.state.navigation.page != Page::Playlist
+                && matches!(
+                    app.state.navigation.page,
+                    Page::Main | Page::Lyrics
+                )
             {
                 cell_select_next_column(app);
             } else if app.playback.current_song().is_some() {
@@ -201,7 +230,9 @@ pub(super) fn handle_main_key(app: &mut App, key_event: KeyEvent) -> color_eyre:
             }
         }
         KeyCode::Char('r' | 'R') => {
-            if matches!(app.state.navigation.page, Page::Main | Page::Lyrics) {
+            if app.state.navigation.page == Page::Artist {
+                reload_artist(app);
+            } else if matches!(app.state.navigation.page, Page::Main | Page::Lyrics) {
                 app.reload_current_nav();
             }
         }
@@ -288,6 +319,13 @@ pub(super) fn handle_main_mouse(app: &mut App, kind: MouseEventKind, col: u16, r
                 playlist_select_prev(app);
             } else if kind == MouseEventKind::ScrollDown {
                 playlist_select_next(app);
+            }
+        }
+        Page::Artist => {
+            if kind == MouseEventKind::ScrollUp {
+                app.state.navigation.artist.select_prev();
+            } else if kind == MouseEventKind::ScrollDown {
+                app.state.navigation.artist.select_next();
             }
         }
         _ => {}
@@ -519,13 +557,92 @@ fn click_content(app: &mut App, col: u16, row: u16) {
     app.state.navigation.content_selected = index;
     app.state.navigation.table_state.select(Some(index));
     check_load_more(app, total);
-    if repeat {
+    // The second click opens the row, which for an artist row is the artist page — the same
+    // thing Enter does.
+    if repeat && !open_artist_from_table(app) {
         if app.state.navigation.table_mode == TableMode::Cell {
             cell_enter_action(app);
         } else {
             row_enter_action(app);
         }
     }
+}
+
+/// The artist row under the cursor, if the table is showing artists: the id, and the name and
+/// portrait the row already carries.
+fn selected_artist(app: &App) -> Option<(u64, String, String)> {
+    let ContentState::Singers(singers) = app.state.navigation.content.as_ref() else {
+        return None;
+    };
+    let singer = singers.get(app.state.navigation.content_selected)?;
+    // The API sends id 0 for rows it has no artist for; such a row has nothing to open.
+    (singer.id != 0).then(|| (singer.id, singer.name.clone(), singer.pic_url.clone()))
+}
+
+/// Open the artist page on the row under the cursor, and say whether the table had one.
+///
+/// The hot-artists table is the only way into the page, so this is where the table's rows stop
+/// being rows and start being artists: the row's name and portrait go along, because they are
+/// what the page can draw before its own request lands. Everything else about Enter is
+/// unchanged — an artist row opens the page, any other row (or cell) keeps its old meaning.
+fn open_artist_from_table(app: &mut App) -> bool {
+    let Some((id, name, pic_url)) = selected_artist(app) else {
+        return false;
+    };
+    let io = artist_io(app);
+    app.state.navigation.artist.open(id, name, pic_url, io);
+    app.state.events.send(NavigationEvent::Navigate(Page::Artist));
+    true
+}
+
+/// Load the artist the page is showing again (`r`). The page keeps its header, so this is the
+/// retry a failed page offers.
+fn reload_artist(app: &mut App) {
+    let io = artist_io(app);
+    app.state.navigation.artist.reload(io);
+}
+
+/// Where the artist page gets its data: the API client, the proxy-aware image client, and the
+/// terminal's image protocol for the portrait.
+fn artist_io(app: &App) -> ArtistIo {
+    ArtistIo {
+        client: app.service.client().clone(),
+        http: app.cover_http.clone(),
+        picker: app.picker.clone(),
+        repaint: app.state.events.sender(),
+    }
+}
+
+/// Play the hot song under the artist page's cursor.
+///
+/// The page's songs live in the page rather than in the content table, and
+/// `PlaybackEvent::SongPlay` resolves a song against the open table — it would find nothing
+/// here — so the queue is built from the page's own list.
+fn artist_play_selected(app: &mut App) {
+    let (key, index) = {
+        let artist = &app.state.navigation.artist;
+        let songs = artist.hot_songs();
+        if songs.is_empty() {
+            return;
+        }
+        // The same context string the artist's songs use as their breadcrumb on the main page,
+        // so playing from here lands in one queue per artist rather than a new one each time.
+        (
+            format!("歌手: {}", artist.name),
+            artist.song_selected.min(songs.len() - 1),
+        )
+    };
+
+    let songs: Vec<Arc<SongInfo>> = app
+        .state
+        .navigation
+        .artist
+        .hot_songs()
+        .iter()
+        .cloned()
+        .map(Arc::new)
+        .collect();
+    app.playback.play_songs(&key, songs, index);
 }
 
 fn current_api(app: &App) -> Option<&str> {
@@ -547,6 +664,52 @@ fn is_local_music_view(app: &App) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Enter on the hot-artists table reads the row as an artist: the id is what the page is
+    /// opened for, and the name and portrait travel with it so the page has a header before
+    /// its own request lands. Nothing else in the app's tables is an artist.
+    #[tokio::test]
+    async fn only_artist_rows_offer_an_artist_to_open() {
+        use crate::{config::Config, state::ContentState};
+        use ncm_api::SingerInfo;
+
+        // Building the app builds its HTTP clients, which need the process-wide crypto
+        // provider first — the same line `src/main.rs` runs at startup.
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let mut app = App::new(Config::default(), false).expect("app");
+        app.state.navigation.content = ContentState::Singers(vec![
+            SingerInfo {
+                id: 6452,
+                name: "周杰伦".into(),
+                pic_url: "https://p3.music.126.net/portrait.jpg".into(),
+            },
+            // The API sends id 0 for a row it has no artist for.
+            SingerInfo {
+                id: 0,
+                name: "未知歌手".into(),
+                pic_url: String::new(),
+            },
+        ])
+        .into();
+
+        app.state.navigation.content_selected = 0;
+        assert_eq!(
+            selected_artist(&app),
+            Some((
+                6452,
+                "周杰伦".to_string(),
+                "https://p3.music.126.net/portrait.jpg".to_string()
+            ))
+        );
+
+        app.state.navigation.content_selected = 1;
+        assert_eq!(selected_artist(&app), None);
+
+        // A song table's rows are not artists, however they are indexed.
+        app.state.navigation.content = ContentState::Songs(Vec::new()).into();
+        app.state.navigation.content_selected = 0;
+        assert_eq!(selected_artist(&app), None);
+    }
 
     /// A click has to map to the button that is drawn under it, for both controls row
     /// alignments, for the mode cell and for the hearts — the mapping is what the mouse

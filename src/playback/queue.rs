@@ -175,6 +175,7 @@ mod tests {
             pic_url: String::new(),
             duration: 0,
             copyright: ncm_api::SongCopyright::Unknown,
+            local_path: None,
         })
     }
 

@@ -1,6 +1,10 @@
-use std::sync::Arc;
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use image::GenericImageView;
+use ncm_api::SongInfo;
 
 use super::{App, send_event};
 use crate::{
@@ -280,6 +284,31 @@ impl App {
                         .into(),
                     );
                 });
+            } else if let Some(audio) = local_audio_path(&song) {
+                // Local tracks have no lyrics on the server — their id is just a
+                // path hash, so asking for it could only ever come back empty.
+                let audio = audio.to_path_buf();
+                let sender = self.state.events.sender();
+                tokio::spawn(async move {
+                    let lyrics = tokio::task::spawn_blocking(move || load_local_lyrics(&audio))
+                        .await
+                        .ok()
+                        .flatten();
+                    let Some(lyrics) = lyrics else {
+                        return;
+                    };
+                    let lyric_lines = parse_lyric_lines(&lyrics.lyric);
+                    let tlyric_lines = parse_lyric_lines(&lyrics.tlyric);
+                    send_event(
+                        &sender,
+                        PlaybackEvent::LyricsLoaded {
+                            song_id,
+                            lyrics: lyric_lines,
+                            translated_lyrics: tlyric_lines,
+                        }
+                        .into(),
+                    );
+                });
             } else {
                 let service = self.service.clone();
                 let sender = self.state.events.sender();
@@ -458,6 +487,74 @@ fn apply_cover(
     }
 }
 
+/// The file behind a local track, if this song is one.
+///
+/// Follows the rule local playback resolves with: the path is `local_path`,
+/// with `album` as the fallback for content cached by an older version. The
+/// `is_file` check is what keeps a network song whose album merely reads like a
+/// path from being treated as local.
+fn local_audio_path(song: &SongInfo) -> Option<&Path> {
+    if song.copyright != ncm_api::SongCopyright::Free {
+        return None;
+    }
+    let path = Path::new(song.local_path.as_deref().unwrap_or(song.album.as_str()));
+    path.is_file().then_some(path)
+}
+
+/// Lyrics for a local track, read from the `.lrc` sidecar next to the audio.
+///
+/// Deliberately the same shape the network path produces ([`ncm_api::Lyrics`]
+/// carrying raw LRC lines), so everything downstream — `parse_lyric_lines`, the
+/// `LyricsLoaded` event, the karaoke sweep — is shared rather than reimplemented.
+///
+/// Nothing is cached: reading a local file costs about what reading its cache
+/// entry would, and an edited `.lrc` then takes effect on the next play.
+fn load_local_lyrics(audio: &Path) -> Option<ncm_api::Lyrics> {
+    let sidecar = sidecar_lrc_path(audio)?;
+    let raw = std::fs::read_to_string(sidecar).ok()?;
+    // A byte-order mark would land inside the first timestamp and cost the first
+    // line of every BOM'd file.
+    let lyric: Vec<String> = raw
+        .trim_start_matches('\u{feff}')
+        .lines()
+        .map(str::to_string)
+        .collect();
+    // A sidecar that holds no timestamps (plain text, or only `[ti:]`-style
+    // metadata) parses to nothing, and no lyrics beats wrong lyrics.
+    (!parse_lyric_lines(&lyric).is_empty()).then(|| ncm_api::Lyrics {
+        lyric,
+        tlyric: Vec::new(),
+    })
+}
+
+/// The `.lrc` sitting next to `audio`, if there is one.
+///
+/// Case-insensitive: on the case-sensitive filesystems this runs on, `Song.lrc`
+/// and `SONG.LRC` are the same track's lyrics to whoever wrote them, and both
+/// spellings are common in the wild. The exact-case sibling is tried first, so
+/// only a miss pays for the directory scan.
+fn sidecar_lrc_path(audio: &Path) -> Option<PathBuf> {
+    let stem = audio.file_stem()?.to_str()?;
+    let dir = audio.parent()?;
+    let exact = dir.join(format!("{stem}.lrc"));
+    if exact.is_file() {
+        return Some(exact);
+    }
+    std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_stem()
+                .and_then(|s| s.to_str())
+                .is_some_and(|s| s.eq_ignore_ascii_case(stem))
+                && path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .is_some_and(|e| e.eq_ignore_ascii_case("lrc"))
+        })
+}
+
 /// Benchmark of the cover path on the covers actually cached on this machine.
 /// `cargo test --release --lib -- --ignored --nocapture cover_bench`
 #[cfg(test)]
@@ -512,5 +609,70 @@ mod cover_bench {
                 },
             );
         }
+    }
+}
+
+/// Local lyrics: locating the `.lrc` sidecar, and feeding what it holds through
+/// the same pipeline the network lyrics take.
+#[cfg(test)]
+mod local_lyrics_tests {
+    use std::time::Duration;
+
+    use super::*;
+
+    /// A scratch directory this test owns; `label` keeps parallel tests apart.
+    fn temp_dir(label: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "boxpigma-local-lyrics-test-{}-{label}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create scratch dir");
+        dir
+    }
+
+    /// `parse_lyric_lines` is the shared half of the feature: the sidecar has to
+    /// come out of it as timed lines, with the metadata tags and the BOM gone.
+    #[test]
+    fn a_differently_cased_sidecar_reaches_the_shared_lyrics_pipeline() {
+        let dir = temp_dir("cased");
+        let audio = dir.join("track.flac");
+        std::fs::write(&audio, b"").expect("write audio placeholder");
+        // BOM, CRLF and an `[ar:]` tag: the shapes real `.lrc` files come in.
+        std::fs::write(
+            dir.join("TRACK.LRC"),
+            "\u{feff}[ar:某歌手]\r\n[00:12.50]第二行\r\n[00:01.00]第一行\r\n",
+        )
+        .expect("write sidecar");
+
+        let lyrics = load_local_lyrics(&audio).expect("sidecar lyrics");
+        assert!(lyrics.tlyric.is_empty());
+        let lines = parse_lyric_lines(&lyrics.lyric);
+        assert_eq!(lines.len(), 2, "metadata is not lyrics: {lines:?}");
+        assert_eq!(lines[0].text, "第一行");
+        assert_eq!(lines[0].time, Duration::from_millis(1000));
+        assert_eq!(lines[1].text, "第二行");
+        assert_eq!(lines[1].time, Duration::from_millis(12500));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_missing_or_timestampless_sidecar_yields_no_lyrics() {
+        let dir = temp_dir("missing");
+        let audio = dir.join("track.mp3");
+        std::fs::write(&audio, b"").expect("write audio placeholder");
+        // Same stem, different kind of file.
+        std::fs::write(dir.join("track.txt"), "[00:01.00]文本").expect("write decoy");
+        // Another track's lyrics.
+        std::fs::write(dir.join("other.lrc"), "[00:01.00]别人").expect("write decoy");
+        assert!(load_local_lyrics(&audio).is_none());
+
+        // A file named `.lrc` that holds no timestamps must not pass itself off
+        // as lyrics.
+        std::fs::write(dir.join("track.lrc"), "纯文本，没有时间戳\n").expect("write sidecar");
+        assert!(load_local_lyrics(&audio).is_none());
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

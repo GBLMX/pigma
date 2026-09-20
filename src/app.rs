@@ -211,6 +211,7 @@ impl App {
                 table_state: TableState::default(),
                 playlist_selected: 0,
                 queue_tab_scroll_x: 0,
+                artist: crate::state::ArtistState::default(),
                 search: SearchState::default(),
                 pagination: None,
                 generation: 0,

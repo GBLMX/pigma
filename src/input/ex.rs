@@ -4,17 +4,30 @@
 //! but executes ex commands instead of searching. Commands are named after what they do
 //! rather than after a key, so `:volume +5` and the `+` key reach the same code, and the
 //! volume grammar is the one `boxpigma msg volume` already accepts.
+//!
+//! A few commands change a setting rather than doing something once (`:notify song_change on`,
+//! `:lyricgradient spectral`). Those are live because of where the config is read: the
+//! notify switches when an event fires, the lyrics ones on every frame, the save-on-play one
+//! when the next track resolves — so the field *is* the switch. The two that are terminal modes
+//! rather than values the app draws from (`:mouse`, `:cursor`) send the escape sequence that
+//! switches the mode there and then, which is exactly what a restart would send.
 
-use crossterm::event::{KeyCode, KeyEvent};
+use std::io::{self, Write};
+
+use crossterm::{
+    event::{DisableMouseCapture, EnableMouseCapture, KeyCode, KeyEvent},
+    execute,
+};
 
 use crate::{
     app::App,
     cli::parse_volume,
-    config::LyricStyle,
+    config::{Config, LyricStyle, NotifyConfig},
     event::{AppEvent, AuthEvent, NavigationEvent},
     ipc::MsgAction,
     state::Page,
     text_input::TextInput,
+    utils::{GradientPreset, terminal::CursorStyle},
 };
 
 /// What a command line asks for.
@@ -36,8 +49,21 @@ pub(crate) enum ExCommand {
     Border,
     /// Cycle the navigation bar's position (the `z` key).
     NavPos,
-    /// Toggle "save while playing" — palette-only until now.
-    SaveOnPlay,
+    /// Write to the download cache while playing; `None` toggles. The engine copied the
+    /// setting when it was built, so the switch has to reach it too.
+    SaveOnPlay(Option<bool>),
+    /// One `[notify]` switch; `None` toggles it.
+    Notify {
+        which: NotifySwitch,
+        on: Option<bool>,
+    },
+    /// Capture the mouse; `None` toggles. The terminal is told at once, the same way the
+    /// startup path tells it.
+    Mouse(Option<bool>),
+    /// Shape of the cursor in the input fields; `None` cycles through the four shapes.
+    Cursor(Option<CursorStyle>),
+    /// Preset of the lyrics highlight gradient; `None` cycles through the presets.
+    LyricGradient(Option<GradientPreset>),
     /// `None` toggles, like the `V` key.
     Pitch(Option<bool>),
     /// `None` cycles.
@@ -132,7 +158,32 @@ impl ExCommand {
             "visualizer" => Ok(Self::Visualizer(optional_on_off(args.first().copied())?)),
             "border" => Ok(Self::Border),
             "navpos" => Ok(Self::NavPos),
-            "saveonplay" => Ok(Self::SaveOnPlay),
+            "saveonplay" => Ok(Self::SaveOnPlay(optional_on_off(args.first().copied())?)),
+            "notify" => match args.as_slice() {
+                [] => Err("`notify` 需要一个开关（song_change / errors）".to_string()),
+                [which, rest @ ..] => {
+                    let which = NotifySwitch::parse(which)?;
+                    match rest {
+                        [] => Ok(Self::Notify { which, on: None }),
+                        [value] => Ok(Self::Notify {
+                            which,
+                            on: Some(parse_on_off(Some(value))?),
+                        }),
+                        _ => Err("`notify` 只接受一个开关与 on/off".to_string()),
+                    }
+                }
+            },
+            "mouse" => Ok(Self::Mouse(optional_on_off(args.first().copied())?)),
+            "cursor" => Ok(Self::Cursor(optional_from(
+                &args,
+                &CURSOR_STYLES,
+                "光标形状",
+            )?)),
+            "lyricgradient" => Ok(Self::LyricGradient(optional_from(
+                &args,
+                &GRADIENTS,
+                "歌词渐变",
+            )?)),
             "pitch" => Ok(Self::Pitch(optional_on_off(args.first().copied())?)),
             "layout" => Ok(Self::Layout(optional_argument(&args)?)),
             other => Err(format!("未知命令: {other}")),
@@ -169,6 +220,205 @@ fn parse_on_off(argument: Option<&str>) -> Result<bool, String> {
     }
 }
 
+/// The argument of a command whose values are a fixed list: `None` for the bare form, which
+/// cycles; one name; and an error that lists the alternatives, since the command line is the
+/// only place a user can find them out.
+fn optional_from<T: Copy>(
+    args: &[&str],
+    pool: &[(&'static str, T)],
+    what: &str,
+) -> Result<Option<T>, String> {
+    match args {
+        [] => Ok(None),
+        [given] => pool
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case(given))
+            .map(|(_, value)| *value)
+            .map(Some)
+            .ok_or_else(|| {
+                let known: Vec<&str> = pool.iter().map(|(name, _)| *name).collect();
+                format!("未知{what}: {given}（可用: {}）", known.join(" / "))
+            }),
+        _ => Err(format!("`{what}` 只接受一个参数")),
+    }
+}
+
+/// One switch of `[notify]`: which events raise a terminal notification.
+///
+/// It is a type rather than two commands because the two switches share everything but the
+/// field they write — `:notify song_change on` and `:notify errors on` are one arm of the
+/// match, and a third event would be one more variant plus one more table entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NotifySwitch {
+    /// Announce the song that starts playing.
+    SongChange,
+    /// Announce playback failures.
+    Errors,
+}
+
+impl NotifySwitch {
+    /// Every switch, in the order the command line offers them.
+    const ALL: [Self; 2] = [Self::SongChange, Self::Errors];
+
+    /// The config key, which is also the word on the command line.
+    fn name(self) -> &'static str {
+        match self {
+            Self::SongChange => "song_change",
+            Self::Errors => "errors",
+        }
+    }
+
+    /// What the toast calls this switch.
+    fn label(self) -> &'static str {
+        match self {
+            Self::SongChange => "切歌通知",
+            Self::Errors => "出错通知",
+        }
+    }
+
+    /// Read the word after `:notify`. The underscore is optional, so the config's own key and
+    /// the squashed spelling command names use both work.
+    fn parse(word: &str) -> Result<Self, String> {
+        let squashed = |name: &str| name.replace('_', "").to_ascii_lowercase();
+        let given = squashed(word);
+        Self::ALL
+            .into_iter()
+            .find(|switch| squashed(switch.name()) == given)
+            .ok_or_else(|| {
+                let known: Vec<&str> = Self::ALL.iter().map(|switch| switch.name()).collect();
+                format!("未知通知开关: {word}（可用: {}）", known.join(" / "))
+            })
+    }
+
+    /// What the config holds for this switch now.
+    fn get(self, notify: &NotifyConfig) -> bool {
+        match self {
+            Self::SongChange => notify.song_change,
+            Self::Errors => notify.errors,
+        }
+    }
+
+    /// Flip it.
+    fn set(self, notify: &mut NotifyConfig, on: bool) {
+        match self {
+            Self::SongChange => notify.song_change = on,
+            Self::Errors => notify.errors = on,
+        }
+    }
+}
+
+/// The cursor shapes `:cursor` switches between, under the names the config writes them as.
+///
+/// [`CursorStyle`] knows the escape sequence it becomes but neither its name nor how to parse
+/// one, so this table carries both directions; a test checks the names against serde, which is
+/// what reads them out of the config file.
+const CURSOR_STYLES: [(&str, CursorStyle); 4] = [
+    ("default", CursorStyle::Default),
+    ("block", CursorStyle::Block),
+    ("underline", CursorStyle::Underline),
+    ("bar", CursorStyle::Bar),
+];
+
+/// The lyric gradient presets `:lyricgradient` switches between, under the names the config
+/// writes them as, in the order the bare command cycles them.
+///
+/// The same reason as [`CURSOR_STYLES`]: [`GradientPreset`] parses a name but cannot say its
+/// own.
+const GRADIENTS: [(&str, GradientPreset); 6] = [
+    ("rainbow", GradientPreset::Rainbow),
+    ("warm", GradientPreset::Warm),
+    ("cubehelix", GradientPreset::Cubehelix),
+    ("turbo", GradientPreset::Turbo),
+    ("spectral", GradientPreset::Spectral),
+    ("viridis", GradientPreset::Viridis),
+];
+
+/// The name of a value from a fixed list, for the toast. Every value on offer is in the table,
+/// which is what the `expect` rests on.
+fn pool_name<T: PartialEq>(pool: &[(&'static str, T)], value: T) -> &'static str {
+    pool.iter()
+        .find(|(_, candidate)| *candidate == value)
+        .map(|(name, _)| *name)
+        .expect("every value of a command line list is in its table")
+}
+
+/// The next value of a fixed list, wrapping — what the bare form of a cycling command does.
+fn next_in<T: Copy + PartialEq>(pool: &[(&'static str, T)], current: T) -> T {
+    let index = pool
+        .iter()
+        .position(|(_, candidate)| *candidate == current)
+        .unwrap_or(0);
+    pool[(index + 1) % pool.len()].1
+}
+
+/// Turn save-on-play on or off in `config`; `None` toggles it, like the other switches.
+///
+/// The engine keeps its own copy of this one — see the `:saveonplay` arm, which pushes the new
+/// value into it — so the two halves are deliberately separate functions.
+fn set_save_on_play(config: &mut Config, on: Option<bool>) -> bool {
+    let on = on.unwrap_or(!config.cache.save_on_play);
+    config.cache.save_on_play = on;
+    on
+}
+
+/// Turn one `[notify]` switch on or off in `config`, answering with the state it now holds.
+///
+/// Reading the current value here is what makes the bare form a toggle, the way `:visualizer`
+/// is one — the caller passes `None` for it.
+fn set_notify_switch(config: &mut Config, which: NotifySwitch, on: Option<bool>) -> bool {
+    let on = on.unwrap_or(!which.get(&config.notify));
+    which.set(&mut config.notify, on);
+    on
+}
+
+/// Capture or release the mouse, in `config` and in the terminal.
+///
+/// Both halves are needed and neither is enough: the config is what the next start reads, and
+/// the escape sequence is what gives the terminal's own text selection back *now* — which is
+/// the whole point of the switch. The sequence is the one the startup path sends, so switching
+/// here and restarting reach the terminal as the same bytes.
+fn set_mouse_capture<W: Write>(
+    config: &mut Config,
+    out: &mut W,
+    on: Option<bool>,
+) -> Result<bool, String> {
+    let on = on.unwrap_or(!config.mouse);
+    config.mouse = on;
+
+    let sent = if on {
+        execute!(out, EnableMouseCapture)
+    } else {
+        execute!(out, DisableMouseCapture)
+    };
+    sent.map_err(|error| format!("切换鼠标捕获失败: {error}"))?;
+
+    Ok(on)
+}
+
+/// Ask the terminal for a cursor shape, and remember it.
+///
+/// The shape only matters while an input field has focus and needs no new frame to appear, so
+/// it is written out rather than queued into the frame the way a widget's cells are.
+fn set_cursor_style<W: Write>(
+    config: &mut Config,
+    out: &mut W,
+    shape: Option<CursorStyle>,
+) -> Result<CursorStyle, String> {
+    let shape = shape.unwrap_or_else(|| next_in(&CURSOR_STYLES, config.cursor_style));
+    config.cursor_style = shape;
+
+    execute!(out, shape.command()).map_err(|error| format!("切换光标形状失败: {error}"))?;
+
+    Ok(shape)
+}
+
+/// The lyrics gradient to use: the one asked for, or the next preset for the bare form.
+fn set_lyric_gradient(config: &mut Config, preset: Option<GradientPreset>) -> GradientPreset {
+    let preset = preset.unwrap_or_else(|| next_in(&GRADIENTS, config.lyric_gradient));
+    config.lyric_gradient = preset;
+    preset
+}
+
 /// Split a command line into the part already fixed plus the word being typed:
 /// `("theme ", "dra")` for `theme dra`, `("", "th")` while the name is still open.
 fn split_head(line: &str) -> (String, &str) {
@@ -178,8 +428,8 @@ fn split_head(line: &str) -> (String, &str) {
     }
 }
 
-/// Completions for the word being typed: command names, theme names after `:theme`, and
-/// `on`/`off` after the toggles.
+/// Completions for the word being typed: command names, theme names after `:theme`, and the
+/// fixed lists the value-taking commands draw from.
 fn candidate_names(head: &str, typed: &str, themes: &[&str]) -> Vec<String> {
     let name = head.trim();
     let pool: Vec<&str> = if name.is_empty() {
@@ -187,7 +437,13 @@ fn candidate_names(head: &str, typed: &str, themes: &[&str]) -> Vec<String> {
     } else {
         match name {
             "theme" => themes.to_vec(),
-            "visualizer" | "pitch" => vec!["off", "on"],
+            "visualizer" | "pitch" | "mouse" | "saveonplay" => vec!["off", "on"],
+            "notify" => NotifySwitch::ALL
+                .iter()
+                .map(|switch| switch.name())
+                .collect(),
+            "cursor" => CURSOR_STYLES.iter().map(|(name, _)| *name).collect(),
+            "lyricgradient" => GRADIENTS.iter().map(|(name, _)| *name).collect(),
             "layout" => vec!["default", "minimal", "modern"],
             "lyrics" => LyricStyle::ALL.iter().map(|s| s.name()).collect(),
             _ => Vec::new(),
@@ -324,11 +580,37 @@ pub(crate) fn execute(app: &mut App, command: ExCommand) -> Result<(), String> {
             ));
         }
         ExCommand::NavPos => app.cycle_nav_position(),
-        ExCommand::SaveOnPlay => {
-            let enabled = !app.config.cache.save_on_play;
-            app.config.cache.save_on_play = enabled;
+        ExCommand::SaveOnPlay(on) => {
+            let on = set_save_on_play(&mut app.config, on);
+            // The engine read this setting when it was built, so it holds its own copy: without
+            // this the toast would announce a change that only a restart makes real.
+            app.playback.set_save_on_play(on);
             app.config.save();
-            app.toast(format!("边听边存: {}", if enabled { "ON" } else { "OFF" }));
+            app.toast(format!("边听边存: {}", if on { "ON" } else { "OFF" }));
+        }
+        ExCommand::Notify { which, on } => {
+            let on = set_notify_switch(&mut app.config, which, on);
+            app.config.save();
+            app.toast(format!(
+                "{}: {}",
+                which.label(),
+                if on { "ON" } else { "OFF" }
+            ));
+        }
+        ExCommand::Mouse(on) => {
+            let on = set_mouse_capture(&mut app.config, &mut io::stdout(), on)?;
+            app.config.save();
+            app.toast(format!("鼠标捕获: {}", if on { "ON" } else { "OFF" }));
+        }
+        ExCommand::Cursor(shape) => {
+            let shape = set_cursor_style(&mut app.config, &mut io::stdout(), shape)?;
+            app.config.save();
+            app.toast(format!("光标形状: {}", pool_name(&CURSOR_STYLES, shape)));
+        }
+        ExCommand::LyricGradient(preset) => {
+            let preset = set_lyric_gradient(&mut app.config, preset);
+            app.config.save();
+            app.toast(format!("歌词渐变: {}", pool_name(&GRADIENTS, preset)));
         }
         ExCommand::Theme(None) => {
             let names = app.theme_registry.choosable_names();
@@ -565,6 +847,206 @@ mod tests {
         assert_eq!(ExCommand::parse("  q  "), Ok(ExCommand::Quit));
     }
 
+    /// The settings switches parse, each carrying what it was told; `None` is what the bare
+    /// form leaves behind, and it is what makes the command toggle or cycle.
+    #[test]
+    fn settings_parse_into_their_arguments() {
+        assert_eq!(
+            ExCommand::parse("notify song_change on"),
+            Ok(ExCommand::Notify {
+                which: NotifySwitch::SongChange,
+                on: Some(true),
+            })
+        );
+        assert_eq!(
+            ExCommand::parse("notify errors off"),
+            Ok(ExCommand::Notify {
+                which: NotifySwitch::Errors,
+                on: Some(false),
+            })
+        );
+        // the config's own key and the squashed spelling are the same switch
+        assert_eq!(
+            ExCommand::parse("notify songchange"),
+            Ok(ExCommand::Notify {
+                which: NotifySwitch::SongChange,
+                on: None,
+            })
+        );
+        assert_eq!(
+            ExCommand::parse("mouse on"),
+            Ok(ExCommand::Mouse(Some(true)))
+        );
+        assert_eq!(ExCommand::parse("mouse"), Ok(ExCommand::Mouse(None)));
+        assert_eq!(
+            ExCommand::parse("mouse 0"),
+            Ok(ExCommand::Mouse(Some(false)))
+        );
+        assert_eq!(
+            ExCommand::parse("cursor underline"),
+            Ok(ExCommand::Cursor(Some(CursorStyle::Underline)))
+        );
+        assert_eq!(ExCommand::parse("cursor"), Ok(ExCommand::Cursor(None)));
+        assert_eq!(
+            ExCommand::parse("lyricgradient turbo"),
+            Ok(ExCommand::LyricGradient(Some(GradientPreset::Turbo)))
+        );
+        assert_eq!(
+            ExCommand::parse("lyricgradient"),
+            Ok(ExCommand::LyricGradient(None))
+        );
+        assert_eq!(
+            ExCommand::parse("saveonplay off"),
+            Ok(ExCommand::SaveOnPlay(Some(false)))
+        );
+        assert_eq!(
+            ExCommand::parse("saveonplay"),
+            Ok(ExCommand::SaveOnPlay(None)),
+            "bare, it toggles"
+        );
+    }
+
+    /// The lists a command line offers have to be the lists the config accepts: these names are
+    /// read out of `config.toml` by serde, so a rename there would otherwise leave a command
+    /// that no longer writes a name the config can read back.
+    #[test]
+    fn the_fixed_lists_are_the_names_the_config_uses() {
+        #[derive(serde::Serialize, serde::Deserialize)]
+        struct Holder {
+            cursor_style: CursorStyle,
+            lyric_gradient: GradientPreset,
+        }
+
+        for (name, style) in CURSOR_STYLES {
+            let text = toml_edit::ser::to_string(&Holder {
+                cursor_style: style,
+                lyric_gradient: GradientPreset::default(),
+            })
+            .expect("serialize");
+            let back: Holder = toml_edit::de::from_str(&text).expect("deserialize");
+            assert_eq!(back.cursor_style, style, "{name}: {text}");
+            assert!(
+                text.contains(&format!("cursor_style = \"{name}\"")),
+                "{text}"
+            );
+        }
+
+        for (name, preset) in GRADIENTS {
+            let text = toml_edit::ser::to_string(&Holder {
+                cursor_style: CursorStyle::default(),
+                lyric_gradient: preset,
+            })
+            .expect("serialize");
+            let back: Holder = toml_edit::de::from_str(&text).expect("deserialize");
+            assert_eq!(back.lyric_gradient, preset, "{name}: {text}");
+            assert!(
+                text.contains(&format!("lyric_gradient = \"{name}\"")),
+                "{text}"
+            );
+        }
+    }
+
+    /// The bytes crossterm sends for the two terminal modes, spelled out rather than asked of
+    /// crossterm: what has to hold is that the *terminal* was told, so the assertion is on the
+    /// sequence a terminal reads.
+    const ENABLE_MOUSE: &[u8] = b"\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1015h\x1b[?1006h";
+    const DISABLE_MOUSE: &[u8] = b"\x1b[?1006l\x1b[?1015l\x1b[?1003l\x1b[?1002l\x1b[?1000l";
+
+    /// The mouse switch is the one that has to act on the terminal, not only on the config: it
+    /// is what gives the terminal's own text selection back while the app runs.
+    #[test]
+    fn the_mouse_switch_reaches_the_config_and_the_terminal() {
+        let mut config = Config::default();
+        assert!(config.mouse, "the default captures the mouse");
+
+        let mut out = Vec::new();
+        assert!(
+            !set_mouse_capture(&mut config, &mut out, Some(false)).expect("write"),
+            "off means off"
+        );
+        assert!(!config.mouse);
+        assert_eq!(out, DISABLE_MOUSE);
+
+        out.clear();
+        assert!(
+            set_mouse_capture(&mut config, &mut out, None).expect("write"),
+            "bare, it toggles"
+        );
+        assert!(config.mouse);
+        assert_eq!(out, ENABLE_MOUSE);
+    }
+
+    /// Same for the cursor: the config keeps the shape, and the terminal is asked for it now.
+    #[test]
+    fn the_cursor_switch_reaches_the_config_and_the_terminal() {
+        let mut config = Config::default();
+        let mut out = Vec::new();
+
+        assert_eq!(
+            set_cursor_style(&mut config, &mut out, None).expect("write"),
+            CursorStyle::Block,
+            "bare, it cycles from the default"
+        );
+        assert_eq!(config.cursor_style, CursorStyle::Block);
+        assert_eq!(out, b"\x1b[2 q");
+
+        out.clear();
+        assert_eq!(
+            set_cursor_style(&mut config, &mut out, Some(CursorStyle::Bar)).expect("write"),
+            CursorStyle::Bar
+        );
+        assert_eq!(config.cursor_style, CursorStyle::Bar);
+        assert_eq!(out, b"\x1b[6 q");
+    }
+
+    /// Every switch a consumer observes without a terminal: the config field the rest of the app
+    /// reads (the lyrics ones on each frame, the notify ones when an event fires, save-on-play
+    /// when the next track resolves).
+    #[test]
+    fn the_setting_switches_reach_the_config() {
+        let mut config = Config::default();
+
+        assert!(set_notify_switch(
+            &mut config,
+            NotifySwitch::SongChange,
+            Some(true)
+        ));
+        assert!(config.notify.song_change);
+        assert!(
+            !set_notify_switch(&mut config, NotifySwitch::SongChange, None),
+            "bare, it toggles"
+        );
+        assert!(!config.notify.song_change);
+
+        assert!(set_notify_switch(
+            &mut config,
+            NotifySwitch::Errors,
+            Some(true)
+        ));
+        assert!(
+            config.notify.errors && !config.notify.song_change,
+            "one switch does not move the other"
+        );
+
+        assert!(config.cache.save_on_play, "the default saves while playing");
+        assert!(!set_save_on_play(&mut config, Some(false)));
+        assert!(!config.cache.save_on_play);
+        assert!(set_save_on_play(&mut config, None), "bare, it toggles");
+        assert!(config.cache.save_on_play);
+
+        assert_eq!(
+            set_lyric_gradient(&mut config, Some(GradientPreset::Spectral)),
+            GradientPreset::Spectral
+        );
+        assert_eq!(config.lyric_gradient, GradientPreset::Spectral);
+        assert_eq!(
+            set_lyric_gradient(&mut config, None),
+            GradientPreset::Viridis,
+            "bare, it cycles"
+        );
+        assert_eq!(config.lyric_gradient, GradientPreset::Viridis);
+    }
+
     /// Each failure must explain itself: the toast is the only feedback there is.
     #[test]
     fn bad_lines_report_why() {
@@ -593,6 +1075,16 @@ mod tests {
             ("smslogin 13800000000", "验证码"),
             ("sms", "手机号"),
             ("logout now", "不接受参数"),
+            // the settings: an unknown value has to list the ones that exist
+            ("notify", "song_change"),
+            ("notify nope on", "未知通知开关"),
+            ("notify song_change maybe", "on/off"),
+            ("notify song_change on extra", "只接受一个开关"),
+            ("mouse maybe", "on/off"),
+            ("cursor sideways", "未知光标形状"),
+            ("cursor block bar", "只接受一个参数"),
+            ("lyricgradient neon", "未知歌词渐变"),
+            ("saveonplay maybe", "on/off"),
         ] {
             let error = ExCommand::parse(line).unwrap_err();
             assert!(error.contains(missing), "{line}: got {error}");
@@ -619,18 +1111,18 @@ mod tests {
         // `sig` could be sign or signin, so it extends to what the two share
         assert_eq!(candidate_names("", "sig", &THEMES), vec!["sign", "signin"]);
         assert_eq!(completion("sig", &THEMES), Some("sign".to_string()));
-        // `s` is the start of six commands, so there is nothing to add
+        // `s` is the start of several commands, so there is nothing to add
         assert_eq!(completion("s", &THEMES), None);
         assert_eq!(
             candidate_names("", "s", &THEMES),
             vec![
                 "sign",
-                "saveonplay",
                 "save",
                 "seek",
                 "signin",
                 "sms",
-                "smslogin"
+                "smslogin",
+                "saveonplay"
             ]
         );
         // an empty line offers every command
@@ -680,6 +1172,42 @@ mod tests {
         assert_eq!(
             candidate_names("visualizer ", "", &THEMES),
             vec!["off", "on"]
+        );
+        assert_eq!(
+            candidate_names("saveonplay ", "", &THEMES),
+            vec!["off", "on"]
+        );
+        assert_eq!(
+            completion("mouse of", &THEMES),
+            Some("mouse off ".to_string())
+        );
+        assert_eq!(
+            candidate_names("notify ", "", &THEMES),
+            vec!["song_change", "errors"]
+        );
+        // `notify song` is the switch being typed, not the value: it completes to the key
+        assert_eq!(
+            completion("notify song", &THEMES),
+            Some("notify song_change ".to_string())
+        );
+        assert_eq!(
+            candidate_names("cursor ", "", &THEMES),
+            vec!["default", "block", "underline", "bar"]
+        );
+        assert_eq!(
+            completion("cursor under", &THEMES),
+            Some("cursor underline ".to_string())
+        );
+        assert_eq!(
+            candidate_names("lyricgradient ", "", &THEMES),
+            vec![
+                "rainbow",
+                "warm",
+                "cubehelix",
+                "turbo",
+                "spectral",
+                "viridis"
+            ]
         );
         assert_eq!(
             candidate_names("layout ", "", &THEMES),

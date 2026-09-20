@@ -12,7 +12,7 @@ mod user;
 pub use album::{AlbumDetail, AlbumDetailDynamic};
 pub use discovery::{BannersInfo, HotSearchItem, SearchResult, TargetType, TopList};
 pub use playlist::{PlayListDetail, PlayListDetailDynamic, SongList};
-pub use singer::SingerInfo;
+pub use singer::{ArtistAlbum, ArtistDetail, SingerInfo};
 pub use song::{Lyrics, SongCopyright, SongInfo, SongUrl};
 pub use user::{CloudDiskResult, CloudUploadResult, LoginInfo, Msg};
 
@@ -20,7 +20,7 @@ pub(crate) use album::{parse_album_detail, parse_album_detail_dynamic};
 pub(crate) use discovery::{parse_banners, parse_hot_search, parse_toplist};
 pub(crate) use playlist::{parse_playlist_detail, parse_playlist_detail_dynamic, parse_song_list};
 pub(crate) use radio::{parse_intelligence_songs, parse_radio_programs};
-pub(crate) use singer::parse_singer_info;
+pub(crate) use singer::{parse_artist_albums, parse_artist_detail, parse_singer_info};
 pub(crate) use song::{
     parse_lyrics, parse_song_id_list, parse_song_info, parse_song_info_array, parse_song_url,
 };

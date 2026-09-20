@@ -33,6 +33,11 @@ pub enum AppEvent {
     Toast(String),
     /// Control request received over the IPC socket (`boxpigma msg`).
     Ipc(IpcEvent),
+    /// The frame on screen is stale: application state did not change, but something the app
+    /// draws did — a background task filled in a channel that nobody owns until the next draw.
+    /// Handling it does nothing; its whole job is to wake the main loop so it redraws.
+    Repaint,
+
 }
 
 #[derive(Clone, Debug)]

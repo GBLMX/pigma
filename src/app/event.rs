@@ -107,6 +107,8 @@ impl App {
                 AppEvent::Command(e) => self.handle_command_event(e),
                 AppEvent::Toast(msg) => self.toast(msg),
                 AppEvent::Ipc(e) => self.handle_ipc_event(e).await,
+                // Nothing to do: waking the loop so it redraws is the whole point.
+                AppEvent::Repaint => {}
             },
         }
         Ok(())

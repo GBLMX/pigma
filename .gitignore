@@ -1,4 +1,5 @@
 /target
 debug.log
+debug.log.*
 /aur
 cookies.json

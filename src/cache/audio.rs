@@ -172,6 +172,7 @@ impl CacheManager {
                 pic_url: entry.pic_url.clone(),
                 duration: entry.duration,
                 copyright: ncm_api::SongCopyright::Unknown,
+                local_path: None,
             });
         }
         songs

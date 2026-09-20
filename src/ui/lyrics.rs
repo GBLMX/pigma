@@ -378,6 +378,7 @@ mod tests {
                 pic_url: String::new(),
                 duration: 60_000,
                 copyright: ncm_api::SongCopyright::Free,
+                local_path: None,
             })),
             lyrics: Some(lyrics()),
             position_secs,

@@ -1,6 +1,7 @@
 //! ratatui widgets and rendering helpers used by the views (tables, player bar,
 //! navigation, lyrics, toasts, spinners, breadcrumbs, ...).
 
+mod artist;
 mod block;
 mod breadcrumb;
 mod command_panel;
@@ -303,6 +304,22 @@ pub(crate) fn draw_queue(f: &mut Frame, app: &mut App, areas: &layout::LayoutAre
         &mut app.state.queue_hits,
         areas.content,
     );
+}
+
+/// The artist page: one singer's profile, hot songs and albums, in the content area.
+pub(crate) fn draw_artist(f: &mut Frame, app: &mut App, areas: &layout::LayoutAreas) {
+    // The page's loader reports through its own channel, and this is what reads it: results
+    // are taken in before the frame that shows them is drawn.
+    app.state.navigation.artist.poll();
+
+    let bs = style(
+        &app.config,
+        &app.theme_registry,
+        &app.state.border,
+        app.state.tick,
+    );
+    let lay = layout::artist(areas.content);
+    artist::draw(f, &mut app.state.navigation.artist, &bs, &lay);
 }
 
 /// Throwaway audit: render every user-facing view for every built-in theme and report
