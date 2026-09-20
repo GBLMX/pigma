@@ -108,7 +108,10 @@ pub(crate) fn parse_artist_detail(value: &Value) -> Result<ArtistDetail, String>
 }
 
 /// Parse a paged album list, e.g. the `hotAlbums` of `/weapi/artist/albums/{id}`.
-pub(crate) fn parse_artist_albums(value: &Value, path: &[&str]) -> Result<Vec<ArtistAlbum>, String> {
+pub(crate) fn parse_artist_albums(
+    value: &Value,
+    path: &[&str],
+) -> Result<Vec<ArtistAlbum>, String> {
     let array = value_get(value, path)
         .and_then(|v| v.as_array())
         .ok_or_else(|| format!("path {:?} not found", path))?;

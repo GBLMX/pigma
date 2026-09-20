@@ -25,7 +25,8 @@ pub(crate) use song::{
     parse_lyrics, parse_song_id_list, parse_song_info, parse_song_info_array, parse_song_url,
 };
 pub(crate) use user::{
-    parse_cloud_disk_songs, parse_cloud_upload, parse_login_info, parse_msg, parse_unikey,
+    parse_cloud_disk_songs, parse_cloud_upload, parse_daily_task, parse_login_info, parse_msg,
+    parse_unikey,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]

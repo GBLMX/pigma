@@ -78,7 +78,12 @@ fn column(header: &str, field: &str, width: Option<u16>, min_width: Option<u16>)
     }
 }
 
-pub(super) fn draw(f: &mut Frame, state: &mut ArtistState, bs: &BlockStyle<'_>, lay: &ArtistLayout) {
+pub(super) fn draw(
+    f: &mut Frame,
+    state: &mut ArtistState,
+    bs: &BlockStyle<'_>,
+    lay: &ArtistLayout,
+) {
     match &state.data {
         ArtistData::Loading => draw_loading(f, state, bs, lay),
         ArtistData::Failed(error) => draw_failed(f, state, error, bs, lay),
