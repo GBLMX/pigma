@@ -17,7 +17,11 @@ use ratatui::{
     widgets::{Cell, Paragraph, Row, TableState, Wrap},
 };
 use ratatui_image::{Resize, StatefulImage};
-use time::{OffsetDateTime, UtcOffset, format_description::FormatItem, macros::format_description};
+use time::{
+    OffsetDateTime,
+    format_description::FormatItem,
+    macros::{format_description, offset},
+};
 
 use super::{
     BlockStyle, block::CornerBlock, scrollbar::calc_scroll_offset, skeleton::Skeleton, table,
@@ -324,9 +328,14 @@ fn album_rows<'a>(albums: &'a [ArtistAlbum], colors: &Theme) -> Vec<Row<'a>> {
         .collect()
 }
 
-/// An album's release date. The API sends midnight China time, so the timestamp is moved into
-/// the reader's own offset before it is cut down to a date — otherwise every album released
-/// just after midnight would be listed a day early.
+/// An album's release date. The API sends midnight China time, so the stamp is read at a fixed
+/// +08:00 before it is cut down to a date — otherwise every album released just after midnight
+/// would be listed a day early.
+///
+/// Deliberately not the reader's own offset: the date belongs to the service's calendar, not to
+/// wherever the terminal happens to be. Reading it locally made the same album show a different
+/// day depending on the machine's zone (an album published at midnight in Beijing is the previous
+/// afternoon in UTC), which is how CI — running in UTC — caught it.
 fn release_date(publish_time_ms: u64) -> String {
     if publish_time_ms == 0 {
         return MISSING.to_string();
@@ -334,10 +343,7 @@ fn release_date(publish_time_ms: u64) -> String {
     let Ok(utc) = OffsetDateTime::from_unix_timestamp((publish_time_ms / 1000) as i64) else {
         return MISSING.to_string();
     };
-    let local = UtcOffset::current_local_offset()
-        .map(|offset| utc.to_offset(offset))
-        .unwrap_or(utc);
-    local
+    utc.to_offset(offset!(+8))
         .format(&RELEASE_FMT)
         .unwrap_or_else(|_| MISSING.to_string())
 }
@@ -531,6 +537,16 @@ mod tests {
             all.contains("2022-07-15"),
             "an album release date is missing:\n{all}"
         );
+    }
+
+    /// The day an album came out is the service's day, not the reader's: `1657814400000` is
+    /// 2022-07-14T16:00Z, i.e. midnight on 2022-07-15 in China, where the stamp was minted the
+    /// same way. Read at the machine's own offset — as it was until CI, which runs in UTC, went
+    /// red — every reader outside +08:00 saw such an album listed a day early.
+    #[test]
+    fn an_album_date_is_the_services_day_not_the_readers() {
+        assert_eq!(release_date(1_657_814_400_000), "2022-07-15");
+        assert_eq!(release_date(0), MISSING);
     }
 
     /// While the profile is on its way the page still says who it is about and that it is
