@@ -140,15 +140,17 @@ pub(super) fn render_content(
     content_selected: usize,
     table_mode: TableMode,
     area: Rect,
-) {
+) -> usize {
     let colors = bs.colors;
     match content {
         ContentState::Empty => {
             let text = Line::from(Span::styled("", Style::default().fg(colors.muted)));
             f.render_widget(Paragraph::new(text), area);
+            0
         }
         ContentState::Loading => {
             f.render_widget(Skeleton::new().bg(colors.bg).surface(colors.surface), area);
+            0
         }
         ContentState::Error(e) => {
             let text = Line::from(Span::styled(
@@ -156,6 +158,7 @@ pub(super) fn render_content(
                 Style::default().fg(colors.error),
             ));
             f.render_widget(Paragraph::new(text), area);
+            0
         }
         _ => {
             let cols = columns.for_content(content.content_type(), api);
@@ -182,6 +185,8 @@ pub(super) fn render_content(
                 total,
                 sel,
             );
+            // The window start, so mouse input can map a clicked row back to a song.
+            offset
         }
     }
 }

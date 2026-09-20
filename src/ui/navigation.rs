@@ -98,6 +98,33 @@ pub(super) fn draw(
         ratatui::widgets::ListState::default().with_selected(global_selected_idx);
 
     f.render_stateful_widget(list, inner, &mut global_state);
+
+    // Publish where each visible item landed so a click can be mapped back to it. ratatui
+    // writes the post-scroll offset back into the state while rendering, so reading it
+    // here gives the offset the frame was drawn with.
+    let mut hits = std::mem::take(&mut nav.nav_hits);
+    hits.clear();
+    let offset = global_state.offset();
+    let mut row = 0usize;
+    for (section_index, section) in nav.sections.iter().enumerate() {
+        row += 1; // section title row
+        for item_index in 0..section.items.len() {
+            if row >= offset && row < offset + inner.height as usize {
+                hits.push((
+                    section_index,
+                    item_index,
+                    Rect {
+                        x: inner.x,
+                        y: inner.y + (row - offset) as u16,
+                        width: inner.width,
+                        height: 1,
+                    },
+                ));
+            }
+            row += 1;
+        }
+    }
+    nav.nav_hits = hits;
 }
 
 /// Top/bottom navigation mode: all items across sections are laid out in a single row, the
@@ -117,6 +144,8 @@ pub(super) fn draw_top(f: &mut Frame, nav: &mut NavState, bs: &BlockStyle<'_>, a
     let mut total = 0usize;
     let mut selected_start = None;
     let mut selected_width = 0usize;
+    // Item spans in laid-out order, converted to screen space once the scroll is known.
+    let mut laid_out: Vec<(usize, usize, usize, usize)> = Vec::new();
 
     for (si, section) in nav.sections.iter().enumerate() {
         for (ii, item) in section.items.iter().enumerate() {
@@ -133,6 +162,7 @@ pub(super) fn draw_top(f: &mut Frame, nav: &mut NavState, bs: &BlockStyle<'_>, a
                 .iter()
                 .map(|s| UnicodeWidthStr::width(&*s.content))
                 .sum();
+            laid_out.push((si, ii, total, width));
 
             if is_selected {
                 let capsule = Style::default()
@@ -186,6 +216,28 @@ pub(super) fn draw_top(f: &mut Frame, nav: &mut NavState, bs: &BlockStyle<'_>, a
     } else {
         nav.scroll_x = nav.scroll_x.min(max_scroll as u16);
     }
+
+    let mut hits = std::mem::take(&mut nav.nav_hits);
+    hits.clear();
+    let scroll = nav.scroll_x as usize;
+    for (section_index, item_index, start, width) in laid_out {
+        let left = start.max(scroll);
+        let right = (start + width + 2).min(scroll + viewport);
+        if left >= right {
+            continue;
+        }
+        hits.push((
+            section_index,
+            item_index,
+            Rect {
+                x: inner.x + (left - scroll) as u16,
+                y: inner.y,
+                width: (right - left) as u16,
+                height: 1,
+            },
+        ));
+    }
+    nav.nav_hits = hits;
 
     f.render_widget(Paragraph::new(line).scroll((0, nav.scroll_x)), inner);
 }

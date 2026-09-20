@@ -1,12 +1,14 @@
-use crossterm::event::{KeyCode, KeyEvent, MouseEventKind};
+use crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEventKind};
 
 use super::{
     content::{
-        cell_enter_action, content_select_first, content_select_last, content_select_next,
-        content_select_prev, playlist_play_selected, playlist_select_first, playlist_select_last,
-        playlist_select_next, playlist_select_prev, row_enter_action,
+        cell_enter_action, check_load_more, content_item_count, content_select_first,
+        content_select_last, content_select_next, content_select_prev, playlist_play_selected,
+        playlist_select_first, playlist_select_last, playlist_select_next, playlist_select_prev,
+        row_enter_action,
     },
-    navigation::{navigate_nav_down, navigate_nav_up},
+    hit,
+    navigation::{emit_nav_select, navigate_nav_down, navigate_nav_up},
     table::{cell_select_next_column, cell_select_prev_column, toggle_table_mode},
 };
 use crate::{
@@ -251,6 +253,11 @@ pub(super) fn handle_main_key(app: &mut App, key_event: KeyEvent) -> color_eyre:
 }
 
 pub(super) fn handle_main_mouse(app: &mut App, kind: MouseEventKind, col: u16, row: u16) {
+    if kind == MouseEventKind::Down(MouseButton::Left) {
+        handle_click(app, col, row);
+        return;
+    }
+
     // Volume scroll: if mouse is over playerbar area
     let area = app.state.playerbar_area;
     if row >= area.y && row < area.y + area.height && col >= area.x && col < area.x + area.width {
@@ -294,6 +301,59 @@ pub(super) fn handle_main_mouse(app: &mut App, kind: MouseEventKind, col: u16, r
             }
         }
         _ => {}
+    }
+}
+
+/// Left click: seek on the progress bar, switch to a navigation item, or select a content
+/// row — clicking the row that is already selected opens it, which is the mouse's Enter.
+fn handle_click(app: &mut App, col: u16, row: u16) {
+    if let Some(fraction) = hit::progress_fraction(app.state.gauge_area, col) {
+        app.playback.seek_to_fraction(fraction);
+        return;
+    }
+
+    if let Some((section, item)) = hit::nav_item(&app.state.navigation.nav.nav_hits, col, row)
+        && app
+            .state
+            .navigation
+            .nav
+            .sections
+            .get(section)
+            .is_some_and(|s| item < s.items.len())
+    {
+        let nav = &mut app.state.navigation.nav;
+        nav.focus_section = section;
+        nav.section_states[section].select(Some(item));
+        emit_nav_select(app);
+        return;
+    }
+
+    if app.state.navigation.page != Page::Main {
+        return;
+    }
+
+    let total = content_item_count(app);
+    let Some(index) = hit::table_row(
+        app.state.content_inner,
+        1,
+        app.state.content_offset,
+        total,
+        col,
+        row,
+    ) else {
+        return;
+    };
+
+    let repeat = app.state.navigation.content_selected == index;
+    app.state.navigation.content_selected = index;
+    app.state.navigation.table_state.select(Some(index));
+    check_load_more(app, total);
+    if repeat {
+        if app.state.navigation.table_mode == TableMode::Cell {
+            cell_enter_action(app);
+        } else {
+            row_enter_action(app);
+        }
     }
 }
 

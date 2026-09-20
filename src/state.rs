@@ -88,6 +88,13 @@ pub struct State {
     /// Layout rect of the player bar, cached by the draw pass (`ui::draw`) and
     /// consumed by mouse input to hit-test volume scrolling on the player bar.
     pub playerbar_area: Rect,
+    /// Inner rect of the content table, for click-to-select.
+    pub content_inner: Rect,
+    /// First list index shown in that table: the draw pass pre-scrolls the rows it
+    /// builds, so the widget's own offset is always zero.
+    pub content_offset: usize,
+    /// Progress bar rect, for click-to-seek.
+    pub gauge_area: Rect,
 }
 
 #[cfg(test)]

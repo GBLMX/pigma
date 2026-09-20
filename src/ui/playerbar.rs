@@ -72,7 +72,7 @@ pub(super) trait Playerbar {
         config: &PlayerbarConfig,
         area: Rect,
         is_sixel: bool,
-    ) {
+    ) -> LayoutArea {
         let colors = bs.colors;
         let block = CornerBlock::from_color(bs, bs.colors.bg).block_padding(Padding::horizontal(1));
         let inner = block.inner(area);
@@ -83,14 +83,17 @@ pub(super) trait Playerbar {
                 Paragraph::new(format!(" ⚠  {}", err)).style(Style::default().fg(colors.error)),
                 inner,
             );
-            return;
+            return LayoutArea::default();
         }
 
         let layout = self.layout(inner, config, is_sixel);
         self.render(f, player, colors, tick, config, &layout);
+        layout
     }
 }
 
+/// Draw the player bar and return the sub-areas it used, so the caller can remember
+/// where the progress bar is for mouse hit-testing.
 pub(super) fn draw(
     f: &mut Frame,
     player: &PlaybackState,
@@ -99,11 +102,11 @@ pub(super) fn draw(
     config: &PlayerbarConfig,
     area: Rect,
     is_sixel: bool,
-) {
+) -> LayoutArea {
     let layout: &dyn Playerbar = match config.layout {
         LayoutType::Default => &default_layout::DefaultLayout,
         LayoutType::Modern => &modern_layout::ModernLayout,
         LayoutType::Minimal => &minimal_layout::MinimalLayout,
     };
-    layout.draw(f, player, tick, bs, config, area, is_sixel);
+    layout.draw(f, player, tick, bs, config, area, is_sixel)
 }

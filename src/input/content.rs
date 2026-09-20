@@ -47,7 +47,7 @@ pub(super) fn content_select_last(app: &mut App) {
     app.state.navigation.table_state.select(Some(count - 1));
 }
 
-fn check_load_more(app: &mut App, count: usize) {
+pub(super) fn check_load_more(app: &mut App, count: usize) {
     if let Some(ref mut pg) = app.state.navigation.pagination {
         let sel = app.state.navigation.content_selected;
         if !pg.loading && pg.has_more && count >= 10 && sel >= count.saturating_sub(10) {

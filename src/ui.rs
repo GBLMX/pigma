@@ -80,7 +80,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             );
             app.state.playerbar_area = lay.playerbar;
             let is_sixel = app.picker.protocol_type() == ratatui_image::picker::ProtocolType::Sixel;
-            playerbar::draw(
+            let playerbar_areas = playerbar::draw(
                 f,
                 &app.playback.state,
                 app.state.tick,
@@ -89,6 +89,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
                 lay.playerbar,
                 is_sixel,
             );
+            app.state.gauge_area = playerbar_areas.gauge;
 
             match page {
                 Page::Main => {
@@ -166,7 +167,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
                     let api = nav.selected_api();
 
-                    content::render_content(
+                    let content_offset = content::render_content(
                         f,
                         &app.state.navigation.content,
                         &app.config.columns,
@@ -177,6 +178,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
                         app.state.navigation.table_mode,
                         inner,
                     );
+                    // Remembered for mouse input: which rows are on screen, and where.
+                    app.state.content_inner = inner;
+                    app.state.content_offset = content_offset;
                 }
                 Page::Lyrics => {
                     lyrics::draw(

@@ -1,7 +1,10 @@
 use std::{cell::RefCell, sync::Arc};
 
 use ncm_api::{LoginInfo, SongInfo};
-use ratatui::widgets::{ListState, TableState};
+use ratatui::{
+    layout::Rect,
+    widgets::{ListState, TableState},
+};
 
 use super::{
     Page, PaginationInfo,
@@ -18,6 +21,9 @@ pub struct NavState {
     pub subtitle: Option<String>,
     /// Horizontal scroll offset (in cells) for the top navigation mode.
     pub scroll_x: u16,
+    /// Where each currently visible item was drawn (`section`, `item`, screen area),
+    /// refreshed by the draw pass and read by mouse input to map a click back to an item.
+    pub nav_hits: Vec<(usize, usize, Rect)>,
 }
 
 impl NavState {
@@ -45,6 +51,7 @@ impl NavState {
             focus_section: 0,
             subtitle: None,
             scroll_x: 0,
+            nav_hits: Vec::new(),
         }
     }
 

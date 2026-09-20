@@ -4,6 +4,7 @@
 mod command;
 mod content;
 mod help;
+mod hit;
 mod login;
 mod main;
 mod navigation;

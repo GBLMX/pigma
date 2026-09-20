@@ -681,6 +681,29 @@ impl PlaybackEngine {
         self.controller.seek_to(Duration::from_secs_f64(new_secs));
     }
 
+    /// Seek to a fraction of the current track, as a progress-bar click does.
+    pub fn seek_to_fraction(&mut self, fraction: f64) {
+        let duration = match self.queue.current_song() {
+            Some(s) => s.duration,
+            None => return,
+        };
+        let total_secs = duration as f64 / 1000.0;
+        if total_secs <= 0.0 {
+            return;
+        }
+
+        let fraction = fraction.clamp(0.0, 1.0);
+        if !self.state.playing {
+            self.state.progress = fraction;
+            return;
+        }
+
+        self.state.progress = fraction;
+        self.state.seeking = true;
+        self.controller
+            .seek_to(Duration::from_secs_f64(fraction * total_secs));
+    }
+
     pub fn set_volume(&mut self, volume: f64) {
         self.state.volume = volume;
         self.controller.set_volume(volume as f32);

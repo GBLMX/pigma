@@ -197,6 +197,9 @@ impl App {
             toast_msg: String::new(),
             toast_time: None,
             playerbar_area: Rect::default(),
+            content_inner: Rect::default(),
+            content_offset: 0,
+            gauge_area: Rect::default(),
         };
         state.navigation.search.providers = search_providers;
         let search_results: SearchResults = Arc::new(Mutex::new(HashMap::new()));
