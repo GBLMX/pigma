@@ -2457,6 +2457,7 @@ dependencies = [
  "serde_json",
  "sonar",
  "stream-download",
+ "thiserror 2.0.20",
  "time",
  "tokio",
  "toml_edit",

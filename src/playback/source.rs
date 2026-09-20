@@ -35,6 +35,40 @@ const PREBUFFER_BYTES: u64 = 512 * 1024;
 /// wait forever — start playback anyway once the timeout is reached.
 const PREBUFFER_TIMEOUT: Duration = Duration::from_secs(8);
 
+/// Why a song could not be turned into a playable stream.
+///
+/// The class drives behaviour instead of the message text: [`SourceError::Network`]
+/// is retried once, every other class falls through to the third-party sources
+/// immediately. Messages stay user-facing, so the UI shows the same wording as
+/// before.
+#[derive(Debug, thiserror::Error)]
+pub(super) enum SourceError {
+    /// Transient transport failure while talking to a source; worth one retry.
+    #[error("网络错误: {0}")]
+    Network(String),
+    /// The source answered but cannot provide a stream for this song: no play URL
+    /// (VIP-only / copyright / region), a trial-only URL, or an unusable response.
+    #[error("{0}")]
+    Unavailable(String),
+    /// The stream could not be prepared locally (URL parsing, HTTP stream setup,
+    /// download-cache provider).
+    #[error("{0}")]
+    Stream(String),
+    /// A third-party provider could not resolve the song or hand out a play URL.
+    #[error("{0}")]
+    Provider(String),
+    /// Internal state is inconsistent (poisoned registry, lost song metadata).
+    #[error("{0}")]
+    Internal(String),
+}
+
+/// Whether a failed NCM attempt should be retried instead of falling back to the
+/// third-party sources: only a transport failure is worth a second try, and only once.
+/// Every other class (no play URL, provider failure) would fail the same way again.
+fn should_retry_ncm(error: &SourceError, attempt: u32) -> bool {
+    matches!(error, SourceError::Network(_)) && attempt < 1
+}
+
 /// Decide whether the stream progress callback should record the download-cache entry.
 ///
 /// The entry may only be written once the file is complete — an entry written mid-download
@@ -186,10 +220,10 @@ impl AudioSource {
         song: &SongInfo,
         ext: &'static str,
         msong: Option<sonar::Song>,
-    ) -> Result<AudioInput, String> {
+    ) -> Result<AudioInput, SourceError> {
         let stream = HttpStream::new(HeadersClient::new(self.stream_client.clone()), url)
             .await
-            .map_err(|e| format!("流初始化失败: {e}"))?;
+            .map_err(|e| SourceError::Stream(format!("流初始化失败: {e}")))?;
 
         let (settings, progress) = self.tracked_settings(self.save_on_play, song, ext, msong);
 
@@ -197,17 +231,17 @@ impl AudioSource {
             let provider = self
                 .cache
                 .create_provider(song, ext)
-                .map_err(|e| format!("缓存创建失败: {e}"))?;
+                .map_err(|e| SourceError::Stream(format!("缓存创建失败: {e}")))?;
             Box::new(
                 StreamDownload::from_stream(stream, provider, settings)
                     .await
-                    .map_err(|e| format!("流下载失败: {e}"))?,
+                    .map_err(|e| SourceError::Stream(format!("流下载失败: {e}")))?,
             )
         } else {
             Box::new(
                 StreamDownload::from_stream(stream, TempStorageProvider::default(), settings)
                     .await
-                    .map_err(|e| format!("流下载失败: {e}"))?,
+                    .map_err(|e| SourceError::Stream(format!("流下载失败: {e}")))?,
             )
         };
 
@@ -253,15 +287,16 @@ impl AudioSource {
         song: &SongInfo,
         msong: Option<&sonar::Song>,
         play: PlayUrlResult,
-    ) -> Result<AudioInput, String> {
-        let url = url::Url::parse(&play.url).map_err(|e| format!("sonar URL解析失败: {e}"))?;
+    ) -> Result<AudioInput, SourceError> {
+        let url = url::Url::parse(&play.url)
+            .map_err(|e| SourceError::Stream(format!("sonar URL解析失败: {e}")))?;
         let ext = Self::ext_from_url(&play.url);
         self.build_stream(url, song, ext, msong.cloned()).await
     }
 
     /// Search all configured sonar sources for the best playable match and
     /// stream it (cross-provider fallback).
-    async fn resolve_providers(&self, song: &SongInfo) -> Result<AudioInput, String> {
+    async fn resolve_providers(&self, song: &SongInfo) -> Result<AudioInput, SourceError> {
         let keyword = format!("{} {}", song.name, song.singer);
         let query = SearchQuery::new(keyword).with_duration(song.duration);
 
@@ -269,7 +304,7 @@ impl AudioSource {
             .finder
             .search_and_get_url(&query, Some(Self::to_sonar_quality(self.quality)))
             .await
-            .map_err(|e| format!("sonar 兜底失败: {e}"))?;
+            .map_err(|e| SourceError::Provider(format!("sonar 兜底失败: {e}")))?;
 
         #[cfg(all(target_os = "linux", target_env = "gnu"))]
         log::info!(
@@ -284,21 +319,21 @@ impl AudioSource {
     }
 
     /// Resolve a sonar search result directly via the provider that found it.
-    async fn resolve_by_provider(&self, song: &SongInfo) -> Result<AudioInput, String> {
+    async fn resolve_by_provider(&self, song: &SongInfo) -> Result<AudioInput, SourceError> {
         let msong = self
             .sonar_songs
             .lock()
-            .map_err(|_| "sonar 歌曲注册表损坏".to_string())?
+            .map_err(|_| SourceError::Internal("sonar 歌曲注册表损坏".to_string()))?
             .get(&song.id)
             .cloned()
             .or_else(|| self.cache.thirdparty_song(song.id))
-            .ok_or_else(|| "搜索结果音源信息丢失".to_string())?;
+            .ok_or_else(|| SourceError::Internal("搜索结果音源信息丢失".to_string()))?;
 
         let play = self
             .finder
             .get_play_url_for_song(&msong, Some(Self::to_sonar_quality(self.quality)))
             .await
-            .map_err(|e| format!("获取音源失败 ({}): {e}", msong.source))?;
+            .map_err(|e| SourceError::Provider(format!("获取音源失败 ({}): {e}", msong.source)))?;
 
         #[cfg(all(target_os = "linux", target_env = "gnu"))]
         log::info!(
@@ -313,19 +348,19 @@ impl AudioSource {
     }
 
     /// Try to resolve a song from NCM streaming.
-    async fn resolve_ncm(&self, song: &SongInfo) -> Result<AudioInput, String> {
+    async fn resolve_ncm(&self, song: &SongInfo) -> Result<AudioInput, SourceError> {
         let urls = self.service.fetch_song_urls(&[song.id], self.quality).await;
 
         let urls = match urls {
             Ok(u) => u,
             Err(NcmError::Http(e)) => {
-                return Err(format!("NETWORK:获取歌曲URL失败: {e}"));
+                return Err(SourceError::Network(format!("获取歌曲URL失败: {e}")));
             }
             Err(NcmError::Session(e)) => {
-                return Err(format!("NETWORK:会话异常: {e}"));
+                return Err(SourceError::Network(format!("会话异常: {e}")));
             }
             Err(e) => {
-                return Err(format!("获取歌曲URL失败: {e}"));
+                return Err(SourceError::Unavailable(format!("获取歌曲URL失败: {e}")));
             }
         };
 
@@ -333,9 +368,12 @@ impl AudioSource {
             .iter()
             .find(|u| !u.url.is_empty() && !u.free_trial)
             .map(|u| &u.url)
-            .ok_or_else(|| "该歌曲暂无播放源".to_string())?;
+            .ok_or_else(|| {
+                SourceError::Unavailable("该歌曲暂无播放源（可能需要 VIP 或版权受限）".to_string())
+            })?;
 
-        let url = url::Url::parse(url_str).map_err(|e| format!("URL解析失败: {e}"))?;
+        let url = url::Url::parse(url_str)
+            .map_err(|e| SourceError::Stream(format!("URL解析失败: {e}")))?;
         let ext = Self::ext_from_url(url_str);
 
         self.build_stream(url, song, ext, None).await
@@ -370,7 +408,7 @@ impl AudioSource {
         Some(SharedReader(Arc::new(Mutex::new(Box::new(file)))))
     }
 
-    pub(super) async fn resolve(&self, song: &SongInfo) -> Result<AudioInput, String> {
+    pub(super) async fn resolve(&self, song: &SongInfo) -> Result<AudioInput, SourceError> {
         // 1. Cache wins for every source.
         if let Some(input) = self.resolve_cached(song).await {
             return Ok(input);
@@ -385,7 +423,9 @@ impl AudioSource {
             if self.sonar_enabled {
                 return self.resolve_providers(song).await;
             }
-            return Err("sonar 未启用，第三方音源无法解析".into());
+            return Err(SourceError::Provider(
+                "sonar 未启用，第三方音源无法解析".into(),
+            ));
         }
 
         // 3. Free NCM songs may point at a local file path.
@@ -397,13 +437,13 @@ impl AudioSource {
         for attempt in 0..2 {
             match self.resolve_ncm(song).await {
                 Ok(input) => return Ok(input),
-                Err(e) if e.starts_with("NETWORK:") && attempt < 1 => {
+                Err(e) if should_retry_ncm(&e, attempt) => {
                     log::warn!(
-                        "NCM网络错误，重试 {}/2: {} - {}: {}",
+                        "NCM解析失败，重试 {}/2: {} - {}: {}",
                         attempt + 1,
                         song.name,
                         song.singer,
-                        &e["NETWORK:".len()..]
+                        e
                     );
                 }
                 Err(e) => {
@@ -442,7 +482,7 @@ impl AudioSource {
         if self.sonar_enabled {
             self.resolve_providers(song).await
         } else {
-            Err("NCM网络错误，2次重试失败".into())
+            Err(SourceError::Network("2次重试失败".into()))
         }
     }
 }
@@ -450,6 +490,30 @@ impl AudioSource {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The NCM retry/fallback policy: a transport failure gets exactly one retry, while
+    /// an unplayable song falls through to the third-party sources immediately (retrying
+    /// cannot turn a VIP-only track into a playable one). This used to be encoded in a
+    /// `"NETWORK:"` string prefix.
+    #[test]
+    fn only_network_failures_are_retried() {
+        assert!(
+            should_retry_ncm(&SourceError::Network("boom".into()), 0),
+            "a transport failure must be retried once"
+        );
+        assert!(
+            !should_retry_ncm(&SourceError::Network("boom".into()), 1),
+            "the retry must happen only once"
+        );
+        assert!(
+            !should_retry_ncm(&SourceError::Unavailable("暂无播放源".into()), 0),
+            "a song with no playable URL must fall back immediately"
+        );
+        assert!(
+            !should_retry_ncm(&SourceError::Stream("decode".into()), 0),
+            "a stream setup failure must fall back immediately"
+        );
+    }
 
     /// A download-cache entry is recorded on completion only, and only once per stream:
     /// recording mid-download would list a truncated file as playable, and skipping the

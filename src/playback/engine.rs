@@ -820,7 +820,10 @@ impl PlaybackEngine {
                     unsafe {
                         libc::malloc_trim(0);
                     }
-                    if event_tx.send(PlaybackEvent::Error(e).into()).is_err() {
+                    if event_tx
+                        .send(PlaybackEvent::Error(e.to_string()).into())
+                        .is_err()
+                    {
                         log::error!("Failed to send PlaybackError: receiver dropped");
                     }
                     return;

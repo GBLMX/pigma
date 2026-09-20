@@ -55,6 +55,7 @@ serde = { workspace = true, features = ["rc"] }
 serde_json = { workspace = true }
 sonar = { path = "crates/sonar" }
 stream-download = { version = "0.24.4", default-features = false, features = ["async-read", "reqwest", "temp-storage"] }
+thiserror = { workspace = true }
 time = { workspace = true, features = ["formatting", "local-offset", "macros"] }
 tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread", "signal"] }
 toml_edit = { version = "0.25.13", features = ["serde"] }
