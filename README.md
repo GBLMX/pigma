@@ -79,6 +79,7 @@ boxpigma 把网易云音乐与本地音频播放带进终端：流式播放、�
 | 分析帧（tap + 频谱 + 音高） | 129.57 µs → 30 fps 占单核 **0.389%** |
 | playerbar 整帧（含频谱） | 79.15 µs → 30 fps 占单核 **0.237%** |
 | 封面（解码 + 裁方 + 圆形蒙版 + 协议） | 488–583 µs / 首 |
+| 封面旋转（旋转 + 套蒙版 + 协议 + 编码，`[playerbar] spinning_cover`） | 966–1009 µs / 角度 → 20 秒一圈、72 个角度（3.6 次/秒）占单核 **0.35%** |
 
 内存占用（同一台机器实测，RSS，0.2 秒粒度采样 24 秒）：
 
@@ -450,7 +451,7 @@ Send-boxpigma '{"cmd":"msg","action":{"action":"volume","absolute":0.75}}'  # �
 | `[logger] log_level` | `error` / `warn` / `info` / `debug` / `trace` |
 | `[themes.<名字>]` | 继承式自定义主题：写 `base` + 要覆盖的颜色 |
 | `[[sections]]` / `[[columns]]` | 导航区与内容列表的字段、宽度与覆盖规则 |
-| `[playerbar]` | 布局（`default` / `modern` / `minimal`）、进度条样式与渐变、封面与 `image_protocol` |
+| `[playerbar]` | 布局（`default` / `modern` / `minimal`）、进度条样式与渐变、封面与 `image_protocol`、`spinning_cover`（播放时封面缓慢旋转：20 秒一圈、每圈 72 个角度，约 3.6 次/秒重编码；默认关闭，暂停即停在当前角度） |
 | `[lyrics]` | 歌词显示样式与渐变 |
 | `[terminal]` | 鼠标捕获与光标形状 |
 | `[notify]` | 桌面通知开关（切歌 / 出错） |

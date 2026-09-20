@@ -567,6 +567,15 @@ impl App {
     }
 
     fn draw(&mut self, frame: &mut Frame) {
+        // The spin rides the tick that is already here. The angle comes from wall-clock
+        // time rather than from a frame count, and the disc is re-encoded only once it
+        // reaches a new angle step (every 278 ms of a 20 s turn), so a frame that is
+        // not turning the disc adds nothing to the one the app was drawing anyway.
+        self.playback.state.cover.advance(
+            &self.picker,
+            self.config.playerbar.spinning_cover,
+            self.playback.state.playing && !self.playback.state.paused,
+        );
         ui::draw(frame, self);
     }
 
@@ -758,4 +767,114 @@ async fn wait_shutdown_signal() {
 #[cfg(not(unix))]
 async fn wait_shutdown_signal() {
     let _ = tokio::signal::ctrl_c().await;
+}
+
+/// The spin's wiring: the frame the app already draws is what turns the cover.
+///
+/// Everything else about the spin is tested where it lives (`playback::cover`): these
+/// are the two links the draw pass owns — the config flag reaching the state, and the
+/// player's state at the moment of the frame deciding whether the disc turns.
+#[cfg(test)]
+mod cover_spin {
+    use std::time::Duration;
+
+    use ratatui::{Terminal, backend::TestBackend};
+
+    use super::*;
+    use crate::{
+        config::LayoutType, playback::CoverState, state::Page, utils::terminal::ImageProtocolChoice,
+    };
+
+    /// The width the modern layout gives the cover column.
+    const COVER_WIDTH: u16 = 8;
+
+    /// What the player bar draws in the cover area: a kitty protocol carries the image
+    /// in the first cell it draws, so a re-encoded disc changes these cells.
+    fn drawn_cover(app: &mut App) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(120, 30)).expect("backend");
+        terminal.draw(|frame| app.draw(frame)).expect("draw frame");
+        let area = app.state.cover_area;
+        let buffer = terminal.backend().buffer();
+        (0..area.height)
+            .flat_map(|y| (0..area.width).map(move |x| (x, y)))
+            .map(|(x, y)| buffer[(area.x + x, area.y + y)].symbol().to_string())
+            .collect()
+    }
+
+    /// Two frames, so the returned string is the settled one: the first render of a
+    /// freshly encoded protocol is the frame that transmits the image, the ones after
+    /// it only place it.
+    fn settled(app: &mut App) -> String {
+        drawn_cover(app);
+        drawn_cover(app)
+    }
+
+    /// A playing app whose cover has finished loading, with a graphics protocol so the
+    /// spin has an image to turn rather than the halfblocks placeholder.
+    fn app_with_a_cover(spinning: bool) -> App {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let mut config = Config::default();
+        config.playerbar.spinning_cover = spinning;
+        config.playerbar.layout = LayoutType::Modern;
+        config.playerbar.image_protocol = ImageProtocolChoice::Kitty;
+        let mut app = App::new(config, false).expect("app");
+        app.state.navigation.page = Page::Main;
+        app.playback.state.current_song = Some(Arc::new(ncm_api::SongInfo {
+            id: 7,
+            name: "test".into(),
+            singer: String::new(),
+            artist_id: 0,
+            album: String::new(),
+            album_id: 0,
+            pic_url: String::new(),
+            duration: 60_000,
+            copyright: ncm_api::SongCopyright::Free,
+            local_path: None,
+            mv: 0,
+        }));
+        app.playback.state.playing = true;
+
+        let square = image::RgbaImage::from_fn(64, 64, |x, y| {
+            image::Rgba([(x * 4) as u8, (y * 4) as u8, ((x + y) * 2) as u8, 255])
+        });
+        let protocol = CoverState::encode_disc(&square, 0.0, &app.picker);
+        *app.playback.state.cover.song_id.lock().expect("song id") = Some(7);
+        app.playback.state.cover.install(7, square, protocol);
+        app
+    }
+
+    /// One step of the turn is 278 ms, so this is comfortably past the first one — and
+    /// a frame that overruns only turns the disc further.
+    const PAST_A_STEP: Duration = Duration::from_millis(350);
+
+    #[tokio::test]
+    async fn a_playing_frame_turns_the_cover_and_a_paused_one_parks_it() {
+        let mut app = app_with_a_cover(true);
+        let still = settled(&mut app);
+        assert_eq!(
+            app.state.cover_area.width, COVER_WIDTH,
+            "the modern layout gives the cover a column"
+        );
+
+        std::thread::sleep(PAST_A_STEP);
+        assert_ne!(settled(&mut app), still, "playing has to turn the disc");
+
+        app.playback.state.paused = true;
+        let parked = settled(&mut app);
+        std::thread::sleep(PAST_A_STEP);
+        assert_eq!(
+            settled(&mut app),
+            parked,
+            "a pause has to leave it where it is"
+        );
+    }
+
+    #[tokio::test]
+    async fn without_the_flag_the_cover_is_the_still_image_it_was() {
+        let mut app = app_with_a_cover(false);
+
+        let still = settled(&mut app);
+        std::thread::sleep(PAST_A_STEP);
+        assert_eq!(settled(&mut app), still, "off is off");
+    }
 }

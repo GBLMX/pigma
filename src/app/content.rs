@@ -331,9 +331,7 @@ impl App {
 
             // Clear the cover so a new song never shows the previous one's
             // cover while its own cover is loading (or missing).
-            if let Ok(mut guard) = self.playback.state.cover.protocol.lock() {
-                *guard = None;
-            }
+            self.playback.state.cover.clear();
 
             // Load cover image
             let song_id = song.id;
@@ -361,17 +359,17 @@ impl App {
                         let cache = cache.clone();
                         let picker = picker.clone();
                         match cache.load_cover_async(song_id).await {
-                            Some(data) => tokio::task::spawn_blocking(move || {
-                                build_cover_protocol(&data, picker)
-                            })
-                            .await
-                            .ok()
-                            .flatten(),
+                            Some(data) => {
+                                tokio::task::spawn_blocking(move || build_cover(&data, &picker))
+                                    .await
+                                    .ok()
+                                    .flatten()
+                            }
                             None => None,
                         }
                     };
-                    if let Some(protocol) = cached {
-                        apply_cover(&cover, song_id, protocol);
+                    if let Some((protocol, square)) = cached {
+                        cover.install(song_id, square, protocol);
                         return;
                     }
 
@@ -408,7 +406,7 @@ impl App {
                     // carries connect/read deadlines plus a 30s total deadline,
                     // so a cover whose CDN hangs ends this task instead of
                     // leaving it parked forever.
-                    let protocol = {
+                    let art = {
                         let Ok(resp) = cover_http.get(&small_url).send().await else {
                             return;
                         };
@@ -417,20 +415,21 @@ impl App {
                         };
                         let raw = bytes.to_vec();
                         let cache = cache.clone();
+                        let picker = picker.clone();
                         tokio::task::spawn_blocking(move || {
                             cache.save_cover(song_id, &raw);
-                            build_cover_protocol(&raw, picker.clone())
+                            build_cover(&raw, &picker)
                         })
                         .await
                         .ok()
                         .flatten()
                     };
 
-                    let Some(protocol) = protocol else {
+                    let Some((protocol, square)) = art else {
                         return;
                     };
 
-                    apply_cover(&cover, song_id, protocol);
+                    cover.install(song_id, square, protocol);
                 });
             }
         }
@@ -441,12 +440,13 @@ impl App {
 /*                                  Helper fn                                 */
 /* -------------------------------------------------------------------------- */
 
-/// Decode cover bytes, apply the circular mask, and build the resize protocol
-/// used by the playerbar renderer.
-fn build_cover_protocol(
+/// Decode cover bytes into the disc the playerbar draws, plus the square it was cut
+/// from: the spin re-encodes that square at each angle it turns to, which is what
+/// keeps the last angle of a turn as sharp as the first.
+fn build_cover(
     data: &[u8],
-    picker: ratatui_image::picker::Picker,
-) -> Option<ratatui_image::protocol::StatefulProtocol> {
+    picker: &ratatui_image::picker::Picker,
+) -> Option<(ratatui_image::protocol::StatefulProtocol, image::RgbaImage)> {
     let Ok(img) = image::load_from_memory(data) else {
         return None;
     };
@@ -454,37 +454,11 @@ fn build_cover_protocol(
     let size = w.min(h);
     let x = (w - size) / 2;
     let y = (h - size) / 2;
-    let mut square = img.crop_imm(x, y, size, size).to_rgba8();
+    let square = img.crop_imm(x, y, size, size).to_rgba8();
     drop(img);
 
-    let r = size as f32 / 2.0;
-    for (px, py, pixel) in square.enumerate_pixels_mut() {
-        let dx = px as f32 + 0.5 - r;
-        let dy = py as f32 + 0.5 - r;
-        if dx * dx + dy * dy > r * r {
-            *pixel = image::Rgba([0u8, 0, 0, 0]);
-        }
-    }
-
-    let dyn_img = image::DynamicImage::ImageRgba8(square);
-    Some(picker.new_resize_protocol(dyn_img))
-}
-
-/// Apply a freshly loaded cover protocol, dropping it if the song changed while
-/// it was loading (a stale loader must not overwrite a newer cover).
-fn apply_cover(
-    cover: &CoverState,
-    song_id: u64,
-    protocol: ratatui_image::protocol::StatefulProtocol,
-) {
-    let still_current = cover
-        .song_id
-        .lock()
-        .map(|g| *g == Some(song_id))
-        .unwrap_or(false);
-    if still_current && let Ok(mut guard) = cover.protocol.lock() {
-        *guard = Some(protocol);
-    }
+    let protocol = CoverState::encode_disc(&square, 0.0, picker);
+    Some((protocol, square))
 }
 
 /// The file behind a local track, if this song is one.
@@ -561,6 +535,9 @@ fn sidecar_lrc_path(audio: &Path) -> Option<PathBuf> {
 mod cover_bench {
     use std::path::PathBuf;
 
+    use ratatui::{buffer::Buffer, layout::Rect, widgets::StatefulWidget};
+    use ratatui_image::{Resize, StatefulImage};
+
     use super::*;
 
     fn cached_covers() -> Vec<PathBuf> {
@@ -603,10 +580,71 @@ mod cover_bench {
                 &format!("解码+裁方+圆形蒙版+协议 {name}"),
                 5,
                 || {
-                    let protocol =
-                        build_cover_protocol(std::hint::black_box(&data), picker.clone());
-                    std::hint::black_box(protocol);
+                    let art = build_cover(std::hint::black_box(&data), &picker);
+                    std::hint::black_box(art);
                 },
+            );
+        }
+    }
+
+    /// The spin's per-step cost: rotate the square, re-cut the mask, encode the
+    /// protocol and render it. `[playerbar] spinning_cover` pays this once per angle
+    /// step, not once per frame — the frames in between draw the protocol already in
+    /// hand, which costs nothing.
+    #[test]
+    #[ignore = "benchmark"]
+    fn spinning_a_cover_costs() {
+        let covers = cached_covers();
+        if covers.is_empty() {
+            println!("  没有缓存封面，跳过：先播一首歌让封面落盘");
+            return;
+        }
+
+        // The playerbar's cover area (the modern layout gives it 8 cells by 3 rows) and
+        // a graphics terminal's protocol: on halfblocks the spin draws the turning
+        // glyph instead and never reaches this path.
+        let area = Rect::new(0, 0, 8, 3);
+        let mut picker = ratatui_image::picker::Picker::halfblocks();
+        picker.set_protocol_type(ratatui_image::picker::ProtocolType::Kitty);
+        // One angle step every `TURN_SECS / STEPS_PER_TURN` seconds.
+        let per_second = f64::from(CoverState::STEPS_PER_TURN) / CoverState::TURN_SECS;
+
+        println!("封面旋转（真实缓存图，{} 张，kitty 协议）:", covers.len());
+        for path in &covers {
+            let Ok(data) = std::fs::read(path) else {
+                continue;
+            };
+            let Some((_, square)) = build_cover(&data, &picker) else {
+                continue;
+            };
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+
+            let mut step = 0;
+            let per_step = crate::bench_util::time(
+                &format!("旋转+重新套蒙版+协议+编码 {name}"),
+                40,
+                || {
+                    // An angle the renderer has not drawn: the cached protocol would
+                    // otherwise be handed straight back.
+                    step = (step + 1) % CoverState::STEPS_PER_TURN;
+                    let turn = step as f32 / CoverState::STEPS_PER_TURN as f32;
+                    let mut protocol =
+                        CoverState::encode_disc(std::hint::black_box(&square), turn, &picker);
+                    let mut buffer = Buffer::empty(area);
+                    StatefulImage::new().resize(Resize::Fit(None)).render(
+                        area,
+                        &mut buffer,
+                        &mut protocol,
+                    );
+                    std::hint::black_box((protocol, buffer));
+                },
+            );
+            println!(
+                "    → {per_second:.1} 个角度/秒，占单核 {:.3}%",
+                crate::bench_util::core_share(per_step, per_second)
             );
         }
     }

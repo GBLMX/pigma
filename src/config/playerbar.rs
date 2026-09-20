@@ -52,6 +52,13 @@ pub struct PlayerbarConfig {
     /// Progress bar gradient preset. An empty string or unknown name disables the gradient.
     #[serde(default, deserialize_with = "deserialize_optional")]
     pub gradient_preset: Option<GradientPreset>,
+    /// Turn the cover while a track plays, like a record on a turntable: one turn
+    /// in [`crate::playback::CoverState::TURN_SECS`] seconds (20 s), re-encoded at
+    /// [`crate::playback::CoverState::STEPS_PER_TURN`] angles a turn (5° apart, one
+    /// every 278 ms). Off by default; on a terminal without a graphics protocol the
+    /// placeholder glyph and needle turn instead.
+    #[serde(default)]
+    pub spinning_cover: bool,
     /// How covers are drawn. `auto` asks the terminal and trusts its answer; force
     /// `kitty`, `iterm2`, `sixel` or `halfblocks` where the detection cannot know
     /// better (tmux with `allow-passthrough`, a multiplexer, an ssh hop).
@@ -88,6 +95,7 @@ impl Default for PlayerbarConfig {
             unfilled_color: default_pb_unfilled_color(),
             unfilled_color_cached: default_pb_unfilled_color_cached(),
             gradient_preset: None,
+            spinning_cover: false,
             image_protocol: ImageProtocolChoice::default(),
             layout: LayoutType::default(),
             visible: PlayerbarVisible::default(),

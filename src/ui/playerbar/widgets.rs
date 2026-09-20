@@ -460,39 +460,64 @@ pub(super) fn draw_volume(f: &mut Frame, player: &PlaybackState, colors: &Theme,
 }
 
 pub(super) fn draw_cover(f: &mut Frame, player: &PlaybackState, colors: &Theme, area: Rect) {
-    if player.current_song.is_some() {
-        // Try to render real cover image if available
-        if let Ok(mut borrow) = player.cover.protocol.lock()
-            && let Some(protocol) = borrow.as_mut()
-        {
-            let image = StatefulImage::new().resize(Resize::Fit(None));
-            f.render_stateful_widget(image, area, protocol);
-            return;
-        }
+    if player.current_song.is_none() {
+        return;
+    }
 
-        // Fallback to placeholder (no border)
-        for y in 0..area.height {
-            for x in 0..area.width {
-                if let Some(cell) = f.buffer_mut().cell_mut((area.x + x, area.y + y)) {
-                    cell.set_char('░');
-                    cell.set_style(Style::default().fg(colors.surface));
-                }
+    // Try to render real cover image if available. A halfblocks terminal is the one
+    // case that does not want it while the disc spins: it draws the cover as coarse
+    // blocks, where a 5° turn shows nothing, so the placeholder glyph turns instead.
+    if !player.cover.spin_as_glyph()
+        && let Ok(mut borrow) = player.cover.protocol.lock()
+        && let Some(protocol) = borrow.as_mut()
+    {
+        let image = StatefulImage::new().resize(Resize::Fit(None));
+        f.render_stateful_widget(image, area, protocol);
+        return;
+    }
+
+    // Fallback to placeholder (no border)
+    for y in 0..area.height {
+        for x in 0..area.width {
+            if let Some(cell) = f.buffer_mut().cell_mut((area.x + x, area.y + y)) {
+                cell.set_char('░');
+                cell.set_style(Style::default().fg(colors.surface));
             }
         }
+    }
 
-        let icon = "\u{266a}";
-        let icon_x = area.x + area.width / 2;
-        let icon_y = area.y + area.height / 2;
-        if let Some(cell) = f.buffer_mut().cell_mut((icon_x, icon_y)) {
-            cell.set_char(icon.chars().next().unwrap_or('♪'));
-            cell.set_style(Style::default().fg(colors.accent));
+    let icon = player.cover.spin_glyph();
+    let icon_x = area.x + area.width / 2;
+    let icon_y = area.y + area.height / 2;
+    if let Some(cell) = f.buffer_mut().cell_mut((icon_x, icon_y)) {
+        cell.set_char(icon);
+        cell.set_style(Style::default().fg(colors.accent));
+    }
+
+    // The needle, where a turntable's arm rests: down on the disc while it turns, up
+    // while it is parked. Only this path can carry it — a graphics protocol draws the
+    // cover image *over* the character layer, so a needle drawn there would be hidden.
+    // Three cells wide at least, so it cannot land on the glyph in the middle.
+    if let Some(needle) = player.cover.tonearm()
+        && area.width >= 3
+    {
+        let corner = (area.x + area.width - 1, area.y);
+        if let Some(cell) = f.buffer_mut().cell_mut(corner) {
+            cell.set_char(needle);
+            cell.set_style(Style::default().fg(colors.text));
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        sync::Arc,
+        time::{Duration, Instant},
+    };
+
     use ratatui::{Terminal, backend::TestBackend};
+    use ratatui_image::picker::Picker;
 
     use super::*;
 
@@ -675,5 +700,70 @@ mod tests {
     fn scroll_text_handles_degenerate_input() {
         assert_eq!(scroll_text("", 0, 4), "");
         assert_eq!(scroll_text("abc", 0, 0), "");
+    }
+
+    /// With no cover protocol the player bar falls back to the `░` placeholder — and
+    /// while the spin is on, its glyph follows the disc's angle and the needle follows
+    /// the player. The needle belongs to this path alone: a graphics protocol draws the
+    /// cover image over the character layer, so a needle drawn there would be hidden.
+    #[test]
+    fn the_placeholder_turns_with_the_disc() {
+        const WIDTH: u16 = 8;
+        const HEIGHT: u16 = 3;
+        let area = Rect::new(0, 0, WIDTH, HEIGHT);
+        let theme = Theme::default();
+        let picker = Picker::halfblocks();
+        let mut player = playing();
+        player.current_song = Some(Arc::new(ncm_api::SongInfo {
+            id: 1,
+            name: "test".into(),
+            singer: String::new(),
+            artist_id: 0,
+            album: String::new(),
+            album_id: 0,
+            pic_url: String::new(),
+            duration: 60_000,
+            copyright: ncm_api::SongCopyright::Free,
+            local_path: None,
+            mv: 0,
+        }));
+
+        // The top row, where the needle sits, and the middle row, where the disc's
+        // glyph sits — the two cells that change.
+        let drawn = |player: &PlaybackState| {
+            let mut terminal = Terminal::new(TestBackend::new(WIDTH, HEIGHT)).expect("backend");
+            terminal
+                .draw(|f| draw_cover(f, player, &theme, area))
+                .expect("draw");
+            let buffer = terminal.backend().buffer();
+            [0, 1].map(|y| {
+                (0..WIDTH)
+                    .map(|x| buffer[(x, y)].symbol().to_string())
+                    .collect::<String>()
+            })
+        };
+        let start = Instant::now();
+
+        let [top, middle] = drawn(&player);
+        assert!(middle.contains('♪'), "off is a plain placeholder: {middle}");
+        assert_eq!(top, "░░░░░░░░", "and no needle: {top}");
+
+        player.cover.advance_at(start, &picker, true, true);
+        let [top, middle] = drawn(&player);
+        assert!(middle.contains('◴'), "a turn at its start: {middle}");
+        assert!(top.ends_with('╲'), "the needle rests on the disc: {top}");
+
+        player
+            .cover
+            .advance_at(start + Duration::from_secs(5), &picker, true, true);
+        let [_, middle] = drawn(&player);
+        assert!(middle.contains('◵'), "a quarter turn on: {middle}");
+
+        player
+            .cover
+            .advance_at(start + Duration::from_secs(6), &picker, true, false);
+        let [top, middle] = drawn(&player);
+        assert!(middle.contains('◵'), "a pause keeps the angle: {middle}");
+        assert!(top.ends_with('│'), "and lifts the needle: {top}");
     }
 }
