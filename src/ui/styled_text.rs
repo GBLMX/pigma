@@ -203,3 +203,62 @@ mod tests {
         assert_eq!(spans[0].style.fg, Some(theme.accent));
     }
 }
+/// `cargo test --release --lib -- --ignored --nocapture styled_text`
+///
+/// Markup is parsed **on every draw** at ~10 call sites (block titles, breadcrumbs, table
+/// headers, and once per navigation item), and the strings involved are almost all literals.
+/// This measures both what that costs today and what reusing a pre-parsed result would cost.
+#[cfg(test)]
+mod bench {
+    use super::*;
+    use crate::config::ThemeRegistry;
+
+    /// The shapes the render path actually hands in, taken from the real call sites.
+    const TITLES: [&str; 6] = [
+        " <accent> ► <b>AUTHENTICATION REQUIRED</b></accent>",
+        "<accent>热门歌手</accent>",
+        "<muted>歌手详情</muted>",
+        "<text>我喜欢的音乐</text>",
+        "本地音乐",
+        "<accent>歌单</accent>",
+    ];
+
+    fn theme() -> Theme {
+        ThemeRegistry::new(Default::default())
+            .get("catppuccin-mocha")
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    #[test]
+    #[ignore]
+    fn parsing_the_titles_on_each_draw_costs() {
+        let theme = theme();
+
+        let per_frame = crate::bench_util::time("解析 6 条标题标记（现状）", 20000, || {
+            for title in TITLES {
+                std::hint::black_box(parse_styled(title, &theme));
+            }
+        });
+        println!(
+            "  → 相当于每帧几十次调用时，约 {:.2}% 单核 @31 Hz",
+            crate::bench_util::core_share(per_frame, 31.0)
+        );
+
+        // The ceiling for any caching scheme: hand out an already-parsed copy instead of
+        // parsing again. (A `static` cache cannot hold this: `LazyLock::new` needs a const
+        // closure, and `parse_styled` is a runtime call — a real cache would need `OnceLock`
+        // keyed by the theme generation.)
+        let parsed: Vec<Vec<Span>> = TITLES.iter().map(|t| parse_styled(t, &theme)).collect();
+        let per_frame_reused = crate::bench_util::time("复用已解析结果（缓存上限）", 20000, || {
+            for spans in &parsed {
+                std::hint::black_box(spans.clone());
+            }
+        });
+        println!(
+            "  → 同样调用频率下约 {:.2}% 单核 @31 Hz（比值 {:.1}×）",
+            crate::bench_util::core_share(per_frame_reused, 31.0),
+            per_frame / per_frame_reused
+        );
+    }
+}
