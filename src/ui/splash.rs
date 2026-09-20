@@ -13,11 +13,15 @@ use crate::{
     state::{LogLevel, SplashState},
 };
 
+/// The splash wordmark: `BOXPIGMA` in the FIGlet font **Calvin S**, rendered once and pasted
+/// here — the same glyphs a designed font produces, with no font machinery at runtime.
+///
+/// Its height is what the splash reads (`layout::splash` takes it as an argument), so swapping
+/// the art is all it takes to change the splash.
 pub(super) const LOGO: &[&str] = &[
-    "█▀▀▀▄ ▄▀▀▀▄ █   █ █▀▀▀▄ ▀█▀ ▄▀▀▀▀ █▄ ▄█ ▄▀▀▀▄",
-    "█▀▀▀█ █   █ ▀▄ ▄▀ █▄▄▄▀  █  █     █ ▀ █ █   █",
-    "█   █ █   █ ▄▀ ▀▄ █      █  █ ▀▀█ █   █ █▄▄▄█",
-    "█▄▄▄▀ ▀▄▄▄▀ █   █ █     ▄█▄ ▀▄▄▄▀ █   █ █   █",
+    "╔╗ ╔═╗═╗ ╦╔═╗╦╔═╗╔╦╗╔═╗",
+    "╠╩╗║ ║╔╩╦╝╠═╝║║ ╦║║║╠═╣",
+    "╚═╝╚═╝╩ ╚═╩  ╩╚═╝╩ ╩╩ ╩",
 ];
 
 pub(super) fn draw(
