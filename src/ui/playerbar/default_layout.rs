@@ -39,6 +39,7 @@ impl Playerbar for DefaultLayout {
         LayoutArea {
             song_info: cols[0],
             controls: mid[0],
+            controls_centered: true,
             gauge: mid[2],
             // The row between the controls and the gauge is the layout's spare line.
             visualizer: mid[1],
@@ -59,7 +60,7 @@ impl Playerbar for DefaultLayout {
         layout: &LayoutArea,
     ) {
         widgets::draw_song_info(f, player, colors, layout.song_info);
-        widgets::draw_controls(f, player, colors, layout.controls, true);
+        widgets::draw_controls(f, player, colors, layout.controls, layout.controls_centered);
         widgets::draw_gauge_with_label(f, player, colors, config, layout.gauge);
 
         if config.visible.mode_icon {

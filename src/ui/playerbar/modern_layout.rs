@@ -91,6 +91,7 @@ impl Playerbar for ModernLayout {
             spinner: middle_cols[1],
             song_detail: bottom_cols[0],
             controls: bottom_cols[1],
+            controls_centered: false,
             volume: vol_mode_cols[0],
             mode_icon: vol_mode_cols[1],
             visualizer: spectrum_row,
@@ -130,7 +131,7 @@ impl Playerbar for ModernLayout {
         }
 
         widgets::draw_song_detail(f, player, colors, layout.song_detail);
-        widgets::draw_controls(f, player, colors, layout.controls, false);
+        widgets::draw_controls(f, player, colors, layout.controls, layout.controls_centered);
         if config.visible.volume && layout.volume.width > 0 {
             widgets::draw_volume(f, player, colors, layout.volume);
         }

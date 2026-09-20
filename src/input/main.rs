@@ -149,22 +149,8 @@ pub(super) fn handle_main_key(app: &mut App, key_event: KeyEvent) -> color_eyre:
         KeyCode::Char('b' | 'B') => {
             app.state.events.send(CommandEvent::ToggleBordered);
         }
-        KeyCode::Char(' ') => {
-            let was_paused = app.playback.state.paused;
-            app.playback.toggle_pause();
-            if let Some(song) = app.playback.current_song() {
-                if was_paused {
-                    app.toast(format!("\u{f03e4}  {}", song.name));
-                } else {
-                    app.toast(format!("\u{f040a}  {}", song.name));
-                }
-            }
-        }
-        KeyCode::Char('m') => {
-            let mode = app.playback.cycle_mode();
-            let (icon, label) = mode_icon(&mode);
-            app.toast(format!("{icon} 循环: {label}"));
-        }
+        KeyCode::Char(' ') => toggle_play_pause(app),
+        KeyCode::Char('m') => cycle_play_mode(app),
         KeyCode::Char('S') => {
             if let Some(song) = app.playback.current_song() {
                 app.state
@@ -314,6 +300,42 @@ pub(super) fn handle_main_mouse(app: &mut App, kind: MouseEventKind, col: u16, r
     }
 }
 
+/// Start or pause playback, the way `Space` and the play button both mean it.
+fn toggle_play_pause(app: &mut App) {
+    let was_paused = app.playback.state.paused;
+    app.playback.toggle_pause();
+    if let Some(song) = app.playback.current_song() {
+        if was_paused {
+            app.toast(format!("\u{f03e4}  {}", song.name));
+        } else {
+            app.toast(format!("\u{f040a}  {}", song.name));
+        }
+    }
+}
+
+/// Move to the next play mode, the way `m` and the mode icon both mean it.
+fn cycle_play_mode(app: &mut App) {
+    let mode = app.playback.cycle_mode();
+    let (icon, label) = mode_icon(&mode);
+    app.toast(format!("{icon} 循环: {label}"));
+}
+
+/// Like or unlike the current song, the way the heart in the player bar means it.
+fn toggle_like(app: &mut App) {
+    let Some(song) = app.playback.current_song() else {
+        return;
+    };
+    let like = !app.playback.state.liked;
+    app.state
+        .events
+        .send(PlaybackEvent::LikeSong(song.id, like));
+    if like {
+        app.toast(format!("♥  {}", song.name));
+    } else {
+        app.toast(format!("♡  {}", song.name));
+    }
+}
+
 /// Left click: seek on the progress bar, toggle what the player bar shows, switch to a
 /// navigation item, and select rows — clicking the row that is already selected opens it,
 /// which is the mouse's Enter.
@@ -350,8 +372,9 @@ fn handle_click(app: &mut App, col: u16, row: u16) {
     }
 }
 
-/// The player bar's own click targets: the spectrum row, the volume icon and the cover.
-/// Returns whether the click was one of them.
+/// The player bar's own click targets: the readouts, the transport buttons, the mode
+/// icon, the like button, the volume icon and the cover. Returns whether the click was one
+/// of them.
 fn click_playerbar(app: &mut App, col: u16, row: u16) -> bool {
     if app.state.spectrum_row_area.width > 0 || app.state.pitch_area.width > 0 {
         // Clicking a readout hides it; `:visualizer on` / `:pitch on` bring it back. The
@@ -375,6 +398,35 @@ fn click_playerbar(app: &mut App, col: u16, row: u16) -> bool {
             app.toast("频谱已隐藏（:visualizer on 恢复）".to_string());
             return true;
         }
+    }
+
+    if let Some((button, _)) = app
+        .state
+        .transport
+        .into_iter()
+        .find(|(_, rect)| hit::contains(*rect, col, row))
+    {
+        match button {
+            playerbar::ControlButton::Prev => app.playback.prev(),
+            playerbar::ControlButton::PlayPause => toggle_play_pause(app),
+            playerbar::ControlButton::Next => app.playback.next(),
+        }
+        return true;
+    }
+
+    if hit::contains(app.state.mode_area, col, row) {
+        cycle_play_mode(app);
+        return true;
+    }
+
+    if app
+        .state
+        .like_areas
+        .iter()
+        .any(|rect| hit::contains(*rect, col, row))
+    {
+        toggle_like(app);
+        return true;
     }
 
     if hit::contains(app.state.volume_area, col, row) {

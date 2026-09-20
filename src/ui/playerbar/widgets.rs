@@ -15,9 +15,36 @@ use crate::{
     utils::{format_duration_into, time::format_duration},
 };
 
+/// The like button's icon: filled once the song is liked.
+pub(crate) fn like_icon(player: &PlaybackState) -> &'static str {
+    if player.liked { "\u{f004}" } else { "\u{f08a}" }
+}
+
+/// Cell the like button occupies inside a one-line song row: it starts the row.
+pub(crate) fn like_rect(player: &PlaybackState, area: Rect) -> Rect {
+    let width = (like_icon(player).chars().count() as u16).min(area.width);
+    Rect {
+        x: area.x,
+        y: area.y,
+        width,
+        height: area.height.min(1),
+    }
+}
+
+/// Cell of the like button inside the two-line song info block, which puts the liked row
+/// second.
+pub(crate) fn song_info_like_rect(player: &PlaybackState, area: Rect) -> Rect {
+    let second_line = Rect {
+        y: area.y.saturating_add(1),
+        height: u16::from(area.height > 1),
+        ..area
+    };
+    like_rect(player, second_line)
+}
+
 pub(super) fn draw_song_info(f: &mut Frame, player: &PlaybackState, colors: &Theme, area: Rect) {
     if let Some(song) = &player.current_song {
-        let like_icon = if player.liked { "\u{f004}" } else { "\u{f08a}" };
+        let heart = like_icon(player);
         let like_color = if player.liked {
             colors.accent
         } else {
@@ -34,7 +61,7 @@ pub(super) fn draw_song_info(f: &mut Frame, player: &PlaybackState, colors: &The
                 ),
             ]),
             Line::from(vec![
-                Span::styled(like_icon, Style::default().fg(like_color)),
+                Span::styled(heart, Style::default().fg(like_color)),
                 Span::raw(" "),
                 Span::styled(
                     &song.singer,
@@ -51,37 +78,95 @@ pub(super) fn draw_song_info(f: &mut Frame, player: &PlaybackState, colors: &The
     }
 }
 
+/// The transport buttons, in the order they are drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum ControlButton {
+    #[default]
+    Prev,
+    PlayPause,
+    Next,
+}
+
+/// Gap between two transport buttons, in cells.
+const CONTROL_GAP: u16 = 3;
+
+/// Icon of one transport button.
+pub(crate) fn control_glyph(player: &PlaybackState, button: ControlButton) -> &'static str {
+    match button {
+        ControlButton::Prev => "\u{f049}",
+        ControlButton::PlayPause => {
+            if player.paused || !player.playing {
+                "\u{f040a}"
+            } else {
+                "\u{f03e4}"
+            }
+        }
+        ControlButton::Next => "\u{f050}",
+    }
+}
+
+/// Where the transport buttons land inside their row.
+///
+/// Laid out from the icons' one-cell width, so the click layer reuses the drawer's numbers
+/// instead of guessing at the row's thirds: the row is centred in some layouts and left
+/// aligned in others.
+pub(crate) fn control_rects(area: Rect, centered: bool) -> [(ControlButton, Rect); 3] {
+    const BUTTONS: [ControlButton; 3] = [
+        ControlButton::Prev,
+        ControlButton::PlayPause,
+        ControlButton::Next,
+    ];
+    // Every control icon is a single cell wide; the test below keeps it that way.
+    const WIDTH: u16 = 1;
+
+    let total = WIDTH * BUTTONS.len() as u16 + CONTROL_GAP * (BUTTONS.len() as u16 - 1);
+    let mut x = if centered && area.width > total {
+        area.x + (area.width - total) / 2
+    } else {
+        area.x
+    };
+
+    BUTTONS.map(|button| {
+        let width = WIDTH.min(area.right().saturating_sub(x));
+        let rect = Rect {
+            x,
+            y: area.y,
+            width,
+            height: area.height.min(1),
+        };
+        x = x
+            .saturating_add(width)
+            .saturating_add(CONTROL_GAP)
+            .min(area.right());
+        (button, rect)
+    })
+}
+
 pub(super) fn draw_controls(
     f: &mut Frame,
     player: &PlaybackState,
     colors: &Theme,
     area: Rect,
-    is_default: bool,
+    centered: bool,
 ) {
-    let play_icon = if player.paused || !player.playing {
-        "\u{f040a}"
-    } else {
-        "\u{f03e4}"
-    };
-    let alignment = if is_default {
-        Alignment::Center
-    } else {
-        Alignment::Left
-    };
-    let controls = Line::from(vec![
-        Span::styled("\u{f049}", Style::default().fg(colors.muted)),
-        Span::raw("   "),
-        Span::styled(
-            play_icon,
-            Style::default()
+    for (button, rect) in control_rects(area, centered) {
+        if rect.width == 0 || rect.height == 0 {
+            continue;
+        }
+        let style = match button {
+            ControlButton::PlayPause => Style::default()
                 .fg(colors.accent)
                 .add_modifier(Modifier::BOLD),
-        ),
-        Span::raw("   "),
-        Span::styled("\u{f050}", Style::default().fg(colors.muted)),
-    ])
-    .alignment(alignment);
-    f.render_widget(Paragraph::new(controls), area);
+            ControlButton::Prev | ControlButton::Next => Style::default().fg(colors.muted),
+        };
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                control_glyph(player, button),
+                style,
+            ))),
+            rect,
+        );
+    }
 }
 
 pub(super) fn draw_mode_icon(f: &mut Frame, player: &PlaybackState, colors: &Theme, area: Rect) {
@@ -90,10 +175,22 @@ pub(super) fn draw_mode_icon(f: &mut Frame, player: &PlaybackState, colors: &The
         Paragraph::new(Line::from(Span::styled(
             icon,
             Style::default().fg(colors.accent),
-        )))
-        .alignment(Alignment::Right),
-        area,
+        ))),
+        mode_icon_rect(player, area),
     );
+}
+
+/// Cell the mode icon occupies: the layouts hand it a right-aligned cell, so it is the last
+/// one. The click layer uses exactly this rect.
+pub(crate) fn mode_icon_rect(player: &PlaybackState, area: Rect) -> Rect {
+    let (icon, _) = mode_icon(&player.mode);
+    let width = (icon.chars().count() as u16).min(area.width);
+    Rect {
+        x: area.right().saturating_sub(width).max(area.x),
+        y: area.y,
+        width,
+        height: area.height.min(1),
+    }
 }
 
 pub(super) fn draw_spinner(f: &mut Frame, tick: u64, colors: &Theme, area: Rect) {
@@ -220,14 +317,14 @@ fn render_gauge(
 
 pub(super) fn draw_song_detail(f: &mut Frame, player: &PlaybackState, colors: &Theme, area: Rect) {
     if let Some(song) = &player.current_song {
-        let like_icon = if player.liked { "\u{f004}" } else { "\u{f08a}" };
+        let heart = like_icon(player);
         let like_color = if player.liked {
             colors.accent
         } else {
             colors.muted
         };
         let detail = Line::from(vec![
-            Span::styled(like_icon, Style::default().fg(like_color)),
+            Span::styled(heart, Style::default().fg(like_color)),
             Span::raw(" "),
             Span::styled(
                 &song.singer,
@@ -395,7 +492,161 @@ pub(super) fn draw_cover(f: &mut Frame, player: &PlaybackState, colors: &Theme, 
 
 #[cfg(test)]
 mod tests {
-    use super::scroll_text;
+    use ratatui::{Terminal, backend::TestBackend};
+
+    use super::*;
+
+    fn playing() -> PlaybackState {
+        PlaybackState {
+            playing: true,
+            ..PlaybackState::default()
+        }
+    }
+
+    /// `control_rects` lays the row out from a fixed one-cell icon width, so every icon has
+    /// to be one cell — including both play/pause glyphs.
+    #[test]
+    fn control_icons_are_one_cell_wide() {
+        for paused in [true, false] {
+            let player = PlaybackState {
+                paused,
+                playing: !paused,
+                ..PlaybackState::default()
+            };
+            for button in [
+                ControlButton::Prev,
+                ControlButton::PlayPause,
+                ControlButton::Next,
+            ] {
+                let glyph = control_glyph(&player, button);
+                assert_eq!(Span::raw(glyph).width(), 1, "{button:?} draws {glyph:?}");
+            }
+        }
+    }
+
+    /// Clicking a button has to mean clicking its icon. Rendering the row and hunting for
+    /// the glyphs is the only way to catch the alignment drifting away from the rects the
+    /// click layer uses — a centred row and a left-aligned one put them in different cells.
+    #[test]
+    fn transport_icons_land_on_their_hit_rects() {
+        const WIDTH: u16 = 40;
+        let theme = Theme::default();
+        let player = playing();
+
+        for centered in [true, false] {
+            let area = Rect::new(0, 0, WIDTH, 1);
+            let mut terminal = Terminal::new(TestBackend::new(WIDTH, 1)).expect("backend");
+            terminal
+                .draw(|f| draw_controls(f, &player, &theme, area, centered))
+                .expect("draw");
+            let buffer = terminal.backend().buffer();
+
+            for (button, rect) in control_rects(area, centered) {
+                let glyph = control_glyph(&player, button);
+                let drawn: Vec<u16> = (0..WIDTH)
+                    .filter(|x| buffer[(*x, 0)].symbol() == glyph)
+                    .collect();
+                assert_eq!(
+                    drawn,
+                    vec![rect.x],
+                    "{button:?} lands at {drawn:?} but is clickable at {rect:?} (centered={centered})"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn mode_icon_lands_on_its_hit_rect() {
+        const WIDTH: u16 = 12;
+        let theme = Theme::default();
+        let player = playing();
+        let area = Rect::new(0, 0, WIDTH, 1);
+        let rect = mode_icon_rect(&player, area);
+
+        let mut terminal = Terminal::new(TestBackend::new(WIDTH, 1)).expect("backend");
+        terminal
+            .draw(|f| draw_mode_icon(f, &player, &theme, area))
+            .expect("draw");
+
+        let (icon, _) = mode_icon(&player.mode);
+        let buffer = terminal.backend().buffer();
+        let drawn: Vec<u16> = (0..WIDTH)
+            .filter(|x| buffer[(*x, 0)].symbol() == icon)
+            .collect();
+        assert_eq!(
+            drawn,
+            vec![rect.x],
+            "drawn at {drawn:?}, clickable at {rect:?}"
+        );
+        assert_eq!(rect.right(), area.right(), "the mode cell is the last one");
+    }
+
+    /// The player bar draws its heart in two rows, so both cells have to be clickable —
+    /// and each one on the row the heart is actually on.
+    #[test]
+    fn likes_are_clickable_wherever_the_heart_is_drawn() {
+        let player = playing();
+        assert_eq!(
+            like_rect(&player, Rect::new(7, 3, 20, 1)),
+            Rect::new(7, 3, 1, 1)
+        );
+        assert_eq!(
+            song_info_like_rect(&player, Rect::new(2, 5, 30, 2)),
+            Rect::new(2, 6, 1, 1),
+            "the song info block puts the liked row second"
+        );
+        assert_eq!(
+            song_info_like_rect(&player, Rect::new(2, 5, 30, 1)).height,
+            0,
+            "a single-row block has no second line to click"
+        );
+
+        let liked = PlaybackState {
+            liked: true,
+            ..playing()
+        };
+        assert_ne!(
+            like_icon(&liked),
+            like_icon(&player),
+            "the icon shows the like state"
+        );
+    }
+
+    #[test]
+    fn transport_rects_stay_inside_the_row() {
+        let area = Rect::new(5, 2, 40, 1);
+        let centered = control_rects(area, true);
+        assert_eq!(
+            centered.map(|(button, _)| button),
+            [
+                ControlButton::Prev,
+                ControlButton::PlayPause,
+                ControlButton::Next
+            ]
+        );
+
+        let total = 3 + CONTROL_GAP * 2;
+        assert_eq!(centered[0].1.x, area.x + (area.width - total) / 2);
+        for pair in centered.windows(2) {
+            assert_eq!(pair[1].1.x, pair[0].1.right() + CONTROL_GAP);
+        }
+        assert_eq!(control_rects(area, false)[0].1.x, area.x);
+
+        for width in [0u16, 1, 8, 9, 10] {
+            let narrow = Rect::new(0, 0, width, 1);
+            for (_, rect) in control_rects(narrow, false) {
+                assert!(
+                    rect.right() <= narrow.right(),
+                    "{rect:?} escapes {narrow:?}"
+                );
+            }
+        }
+        assert!(
+            control_rects(Rect::new(0, 0, 0, 0), false)
+                .iter()
+                .all(|(_, rect)| rect.height == 0)
+        );
+    }
 
     /// The marquee window slides by whole cells, wraps around, and fills the width it was
     /// given — the pitch readout relies on all three to stay readable in a narrow cell.

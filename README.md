@@ -11,7 +11,7 @@
 
 pigma 的核心目标是把网易云音乐和本地音频播放的体验带进命令行环境：终端里的流式播放、歌词、歌单与队列管理，全部围绕键盘操作组织，基于 [Ratatui](https://ratatui.rs) 实现。
 
-本仓库是 [akirco/pigma](https://github.com/akirco/pigma) 的 fork，**持续维护中**：上游的进展在这里跟进，本仓库自己也带了一批改动 —— 鼠标交互（点击 seek／切区／起播）、频谱与音高读数、`:` 命令行与补全、按终端能力自动适配配色与字形。二进制与 AUR 包都从**本仓库**发布（[releases](https://github.com/GBLMX/pigma/releases)、`pigma-gblmx-bin`）。
+本仓库是 [akirco/pigma](https://github.com/akirco/pigma) 的 fork，**持续维护中**：上游的进展在这里跟进，本仓库自己也带了一批改动 —— 鼠标交互（点击 seek／切区／播放控制／模式／喜欢／静音）、频谱与音高读数、`:` 命令行与补全、按终端能力自动适配配色与字形。二进制与 AUR 包都从**本仓库**发布（[releases](https://github.com/GBLMX/pigma/releases)、`pigma-gblmx-bin`）。
 
 <details>
 <summary><b>📖 点击展开/折叠目录 (Table of Contents)</b></summary>
@@ -66,7 +66,7 @@ pigma 的核心目标是把网易云音乐和本地音频播放的体验带进�
 - **配置**：`config_version` 版本号，旧文件加载时自动升级并把原文件备份为 `config.toml.bak-v0`
 - **播放**：解析失败按类型分类（网络失败重试一次、无版权/无地址直接走兜底源），不再靠错误字符串前缀判断
 - **外观**：符号预设（`nerd`／`unicode`／`ascii`，不装 Nerd Font 也能用）· 按终端能力降级真彩色 · 依据终端背景自动选明/暗主题
-- **新增**：频谱可视化 · 音高读数（自实现 YIN，无新增依赖）· 鼠标交互（点击 seek／切区／起播／静音）· vim 风格 `:` 命令行与 Tab 补全
+- **新增**：频谱可视化 · 音高读数（自实现 YIN，无新增依赖）· 鼠标交互（点击 seek／切区／播放控制／模式／喜欢／静音）· vim 风格 `:` 命令行与 Tab 补全
 - **打包**：AUR `pigma-gblmx-bin`（独立包名，发布时带真实校验和）
 
 **注意：**

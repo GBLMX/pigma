@@ -95,6 +95,16 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             app.state.cover_area = playerbar_areas.cover;
             app.state.spectrum_row_area = playerbar_areas.visualizer;
             app.state.pitch_area = playerbar_areas.pitch;
+            app.state.transport = playerbar::control_rects(
+                playerbar_areas.controls,
+                playerbar_areas.controls_centered,
+            );
+            app.state.mode_area =
+                playerbar::mode_icon_rect(&app.playback.state, playerbar_areas.mode_icon);
+            app.state.like_areas = [
+                playerbar::like_rect(&app.playback.state, playerbar_areas.song_detail),
+                playerbar::song_info_like_rect(&app.playback.state, playerbar_areas.song_info),
+            ];
 
             match page {
                 Page::Main => {

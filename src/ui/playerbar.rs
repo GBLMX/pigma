@@ -3,6 +3,10 @@ mod minimal_layout;
 mod modern_layout;
 mod widgets;
 
+pub(crate) use widgets::{
+    ControlButton, control_rects, like_rect, mode_icon_rect, song_info_like_rect,
+};
+
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
@@ -25,6 +29,9 @@ pub(super) struct LayoutArea {
     pub song_detail: Rect,
     pub cover: Rect,
     pub controls: Rect,
+    /// Whether the controls row is centred in its area, which is what decides where the
+    /// three transport buttons are drawn *and* where they are clickable.
+    pub controls_centered: bool,
     pub gauge: Rect,
     pub spinner: Rect,
     pub mode_icon: Rect,

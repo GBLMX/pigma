@@ -13,6 +13,8 @@ pub mod splash;
 
 use std::time::Instant;
 
+use crate::ui::playerbar::ControlButton;
+
 pub use command::*;
 pub use content::*;
 pub use help::*;
@@ -110,6 +112,12 @@ pub struct State {
     pub spectrum_row_area: Rect,
     /// Pitch readout cell, when the layout gave it one of its own.
     pub pitch_area: Rect,
+    /// Transport buttons (previous / play-pause / next), for click-to-control.
+    pub(crate) transport: [(ControlButton, Rect); 3],
+    /// Mode icon cell, for click-to-cycle.
+    pub mode_area: Rect,
+    /// Cells of the like button, one per place the player bar draws a heart.
+    pub like_areas: [Rect; 2],
     /// Volume to restore when the volume icon is clicked again.
     pub volume_before_mute: Option<f64>,
 }
