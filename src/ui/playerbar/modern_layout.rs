@@ -113,6 +113,10 @@ impl Playerbar for ModernLayout {
         if config.visible.cover && layout.cover.width > 0 {
             widgets::draw_cover(f, player, colors, layout.cover);
         }
+        // The bottom row of the cover column is the spectrum's, when it has one.
+        if config.visible.visualizer && layout.visualizer.width > 0 {
+            widgets::draw_visualizer(f, player, colors, layout.visualizer);
+        }
 
         widgets::draw_current_time(f, player, colors, layout.progress_time_left);
         widgets::draw_gauge_bar(f, player, colors, config, layout.progress_bar);

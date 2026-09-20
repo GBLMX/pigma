@@ -113,3 +113,71 @@ pub(super) fn draw(
     };
     layout.draw(f, player, tick, bs, config, area, is_sixel)
 }
+
+#[cfg(test)]
+mod tests {
+    use ratatui::{Terminal, backend::TestBackend, layout::Rect};
+
+    use super::*;
+    use crate::{
+        config::{BorderConfig, LayoutType, PlayerbarConfig, Theme, symbols},
+        playback::{BANDS, PlaybackState},
+        ui::BlockStyle,
+    };
+
+    /// A layout that reserves a row for the spectrum but never draws into it looks exactly
+    /// like the feature being switched off — which is how the modern layout shipped once.
+    /// Render every layout for real and look for bar glyphs somewhere on the screen.
+    #[test]
+    fn every_layout_that_reserves_a_row_draws_the_bars() {
+        const WIDTH: u16 = 80;
+        const HEIGHT: u16 = 5;
+
+        let theme = Theme::default();
+        let border = BorderConfig::default();
+        let bs = BlockStyle {
+            colors: &theme,
+            border: &border,
+            tick: 0,
+        };
+
+        let mut player = PlaybackState::default();
+        player.visualizer = vec![1.0; BANDS];
+
+        let mut config = PlayerbarConfig::default();
+        config.visible.visualizer = true;
+        config.visible.cover = true;
+
+        let bars: Vec<String> = symbols()
+            .visualizer_bars
+            .chars()
+            .map(|glyph| glyph.to_string())
+            .collect();
+
+        for layout in [LayoutType::Default, LayoutType::Modern, LayoutType::Minimal] {
+            config.layout = layout.clone();
+            let area = Rect::new(0, 0, WIDTH, HEIGHT);
+
+            let mut reserved = Rect::default();
+            let mut terminal = Terminal::new(TestBackend::new(WIDTH, HEIGHT)).expect("backend");
+            terminal
+                .draw(|f| {
+                    reserved = draw(f, &player, 0, &bs, &config, area, false).visualizer;
+                })
+                .expect("draw");
+
+            assert!(
+                reserved.width > 0 && reserved.height > 0,
+                "{layout:?} reserved no row, so there is nothing for this test to check"
+            );
+
+            let buffer = terminal.backend().buffer();
+            let drawn = (0..HEIGHT)
+                .any(|y| (0..WIDTH).any(|x| bars.iter().any(|bar| buffer[(x, y)].symbol() == bar)));
+            assert!(
+                drawn,
+                "{layout:?} reserved row {reserved:?} but drew no bars anywhere"
+            );
+        }
+    }
+}
