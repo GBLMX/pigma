@@ -2,7 +2,7 @@
 name = "pigma"
 version = "0.2.14"
 edition = "2024"
-description = "A netease cloud music client"
+description = "A netease cloud music client (GBLMX fork)"
 repository = "https://github.com/GBLMX/pigma"
 license = "Apache-2.0"
 # authors = ["akirco <earlfx@163.com>"]

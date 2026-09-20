@@ -11,6 +11,8 @@
 
 A NetEase Cloud Music (网易云音乐) or local audio playback TUI client built with [Ratatui](https://ratatui.rs).
 
+> 本仓库是 [akirco/pigma](https://github.com/akirco/pigma) 的 fork：`main` 上有本仓库自己的修复与功能（点击 seek／频谱与音高读数／`:` 命令行与补全／按终端能力自动适配配色与字形），二进制与 AUR 包都从**本仓库**发布 —— [releases](https://github.com/GBLMX/pigma/releases) 与 `pigma-gblmx-bin`。
+
 <details>
 <summary><b>📖 点击展开/折叠目录 (Table of Contents)</b></summary>
 
