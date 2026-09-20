@@ -33,6 +33,12 @@ pub enum NcmError {
     #[error("parse: {message}\nresponse: {response}")]
     Parse { message: String, response: String },
 
+    /// A business failure whose text is already a finished, user-facing sentence (the login
+    /// errors are: the server's own wording or this crate's mapping). Display renders it bare, so
+    /// a one-line UI slot shows the message itself instead of a wrapped, truncated dump.
+    #[error("{0}")]
+    Message(String),
+
     #[error("crypto: {0}")]
     Crypto(String),
 
@@ -50,6 +56,11 @@ impl NcmError {
     }
 
     /// Build a parse error from a parse error message and the raw response that triggered it
+    /// A failure whose message is meant to be shown to the user as-is.
+    pub fn message(message: impl Into<String>) -> Self {
+        Self::Message(message.into())
+    }
+
     pub fn parse(message: impl Into<String>, response: &Value) -> Self {
         Self::Parse {
             message: message.into(),

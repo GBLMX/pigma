@@ -22,6 +22,12 @@ static HELP_ITEMS: LazyLock<Vec<HelpRow>> = LazyLock::new(|| {
     ];
     items.extend(page_row(Page::Login));
     items.extend([
+        row("Tab / ⇧Tab", "登录页：切换输入框"),
+        row("← / →", "登录页：切换登录方式"),
+        row("Enter", "登录页：生成二维码 / 提交 / 发送验证码"),
+        row("Esc", "登录页：返回主页"),
+    ]);
+    items.extend([
         row("w", "清空播放队列"),
         row("?", "帮助"),
         row("Esc", "返回"),

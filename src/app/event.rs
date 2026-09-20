@@ -129,6 +129,9 @@ impl App {
             AuthEvent::Error(e) => self.handle_login_error(e),
             AuthEvent::QRCreated { url, key } => self.handle_qr_created(url, key),
             AuthEvent::QRStatus(text) => self.handle_qr_status(text),
+            AuthEvent::Submit(method) => self.handle_login_submit(method),
+            AuthEvent::SmsCodeSent(phone) => self.handle_sms_code_sent(phone),
+            AuthEvent::ActionResult(result) => self.handle_action_result(result),
         }
     }
 

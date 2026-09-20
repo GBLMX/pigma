@@ -25,7 +25,7 @@ use crate::{
     config::{Config, LyricStyle, NotifyConfig},
     event::{AppEvent, AuthEvent, NavigationEvent},
     ipc::MsgAction,
-    state::Page,
+    state::{LoginMethod, Page},
     text_input::TextInput,
     utils::{GradientPreset, terminal::CursorStyle},
 };
@@ -560,10 +560,13 @@ pub(crate) fn execute(app: &mut App, command: ExCommand) -> Result<(), String> {
             app.state.events.send(AppEvent::Quit);
         }
         ExCommand::Help => app.state.help.toggle(),
-        ExCommand::Login => app
-            .state
-            .events
-            .send(NavigationEvent::Navigate(Page::Login)),
+        ExCommand::Login => {
+            // The page's own entry: no prefill, and the tab back on the QR code.
+            app.state.login.open(LoginMethod::Qr);
+            app.state
+                .events
+                .send(NavigationEvent::Navigate(Page::Login));
+        }
         ExCommand::Save => {
             app.config.save();
             app.toast("已保存配置".to_string());
@@ -699,53 +702,28 @@ pub(crate) fn execute(app: &mut App, command: ExCommand) -> Result<(), String> {
             });
         }
         ExCommand::Sign => {
-            let service = app.service.clone();
-            let sender = app.state.events.sender();
-            tokio::spawn(async move {
-                let message = match service.daily_sign().await {
-                    Ok(msg) => msg.msg,
-                    Err(error) => format!("签到失败: {error}"),
-                };
-                let _ = sender.send(AppEvent::Toast(message).into());
-            });
+            app.state.login.open(LoginMethod::Sign);
+            app.state
+                .events
+                .send(NavigationEvent::Navigate(Page::Login));
         }
         ExCommand::Signin { account, password } => {
-            let service = app.service.clone();
-            let sender = app.state.events.sender();
-            app.toast("正在登录…".to_string());
-            tokio::spawn(async move {
-                let event = match service.login_password(&account, &password).await {
-                    Ok(info) => AuthEvent::Success(info),
-                    Err(error) => AuthEvent::Error(format!("登录失败: {error}")),
-                };
-                let _ = sender.send(event.into());
-            });
+            app.state.login.open_password(&account, &password);
+            app.state
+                .events
+                .send(NavigationEvent::Navigate(Page::Login));
         }
         ExCommand::Sms(phone) => {
-            let service = app.service.clone();
-            let sender = app.state.events.sender();
-            app.toast("正在发送验证码…".to_string());
-            tokio::spawn(async move {
-                let message = match service.send_sms_code(&phone).await {
-                    Ok(()) => {
-                        format!("验证码已发送到 {phone}（用 `:smslogin {phone} <验证码>` 登录）")
-                    }
-                    Err(error) => format!("验证码发送失败: {error}"),
-                };
-                let _ = sender.send(AppEvent::Toast(message).into());
-            });
+            app.state.login.open_sms(&phone);
+            app.state
+                .events
+                .send(NavigationEvent::Navigate(Page::Login));
         }
         ExCommand::SmsLogin { phone, code } => {
-            let service = app.service.clone();
-            let sender = app.state.events.sender();
-            app.toast("正在登录…".to_string());
-            tokio::spawn(async move {
-                let event = match service.login_sms(&phone, &code).await {
-                    Ok(info) => AuthEvent::Success(info),
-                    Err(error) => AuthEvent::Error(format!("登录失败: {error}")),
-                };
-                let _ = sender.send(event.into());
-            });
+            app.state.login.open_sms_login(&phone, &code);
+            app.state
+                .events
+                .send(NavigationEvent::Navigate(Page::Login));
         }
     }
     Ok(())

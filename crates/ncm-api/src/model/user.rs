@@ -41,6 +41,9 @@ pub(crate) fn parse_daily_task(value: &Value) -> Result<Msg, crate::error::NcmEr
         },
         -2 if server_msg.is_empty() => "今天已签到".to_string(),
         -2 => server_msg,
+        // 301 is the everyday "not signed in" answer and carries no text of its own, which used to
+        // reach the UI as "API code=301: unknown error".
+        301 => return Err(crate::error::NcmError::message("需要登录后才能签到")),
         _ => return Err(crate::error::NcmError::api(value.clone())),
     };
     Ok(Msg { code, msg })
@@ -75,13 +78,23 @@ mod daily_task_tests {
     }
 
     #[test]
-    fn a_business_failure_is_an_error_that_names_the_cause() {
-        let err =
-            parse_daily_task(&json!({ "code": 301, "msg": "需要登录" })).expect_err("301 应当报错");
-        let text = err.to_string();
-        assert!(text.contains("301"), "错误里应带服务端 code，实得 {text:?}");
+    fn being_signed_out_says_so_plainly() {
+        // The live API answers 301 with `{"code":301}` and no message, and this text lands in a
+        // one-line slot, so it must be a sentence rather than a code dump.
+        let text = parse_daily_task(&json!({ "code": 301 }))
+            .expect_err("301 应当报错")
+            .to_string();
+        assert_eq!(text, "需要登录后才能签到");
+    }
+
+    #[test]
+    fn an_exotic_failure_keeps_the_code_and_the_server_text() {
+        let text = parse_daily_task(&json!({ "code": 999, "msg": "服务端原话" }))
+            .expect_err("999 应当报错")
+            .to_string();
+        assert!(text.contains("999"), "错误里应带 code，实得 {text:?}");
         assert!(
-            text.contains("需要登录"),
+            text.contains("服务端原话"),
             "错误里应带服务端 msg，实得 {text:?}"
         );
     }
@@ -325,6 +338,23 @@ mod login_error_tests {
         assert!(
             text.contains("服务端原话"),
             "服务端的 message 字段不能被丢弃，实得 {text:?}"
+        );
+    }
+
+    #[test]
+    fn the_line_the_page_shows_is_clean() {
+        // The page has one row for this. It used to render the Parse wrapper, so the user saw
+        // `登录失败: 登录失败: parse: …` followed by the raw response, truncated.
+        let message = error_text(json!({ "code": 501 }));
+        let shown = crate::error::NcmError::message(message).to_string();
+        assert_eq!(shown, "账号或密码错误");
+        assert!(
+            !shown.contains("response:"),
+            "不能把原始响应塞给用户：{shown:?}"
+        );
+        assert!(
+            !shown.contains("parse:"),
+            "不能把内部包装名塞给用户：{shown:?}"
         );
     }
 

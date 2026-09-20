@@ -72,9 +72,9 @@ const fn setting(
 /// carrying a `group` are the settings, listed in the order their section first appears here.
 pub const COMMANDS: &[Command] = &[
     simple("help", "快捷键面板", Some("?")),
-    simple("login", "登录页（二维码）", Some("L")),
+    simple("login", "登录页（二维码 / 账号 / 短信 / 签到）", Some("L")),
     simple("logout", "退出登录", None),
-    simple("sign", "网易云每日签到", None),
+    simple("sign", "在登录页里每日签到", None),
     simple("visualizer", "频谱开关", Some("v")),
     simple("pitch", "音高读数开关", Some("V")),
     simple("layout", "播放条布局", None),
@@ -122,7 +122,7 @@ pub const COMMANDS: &[Command] = &[
     },
     Command {
         name: "signin",
-        summary: "账号密码登录",
+        summary: "在登录页里用账号密码登录",
         key: None,
         ex: "signin",
         needs_argument: true,
@@ -131,7 +131,7 @@ pub const COMMANDS: &[Command] = &[
     },
     Command {
         name: "sms",
-        summary: "发送短信验证码",
+        summary: "在登录页里发送短信验证码",
         key: None,
         ex: "sms",
         needs_argument: true,
@@ -140,7 +140,7 @@ pub const COMMANDS: &[Command] = &[
     },
     Command {
         name: "smslogin",
-        summary: "短信验证码登录",
+        summary: "在登录页里用短信验证码登录",
         key: None,
         ex: "smslogin",
         needs_argument: true,

@@ -188,11 +188,8 @@ const SIDE_BY_SIDE_WIDTH: u16 = 100;
 /// (songs first, since they are what a reader comes for) and stacked when there is no room for
 /// two tables next to each other.
 pub fn artist(area: Rect) -> ArtistLayout {
-    let [profile, lists] = Layout::vertical([
-        Constraint::Length(PROFILE_HEIGHT),
-        Constraint::Min(2),
-    ])
-    .areas(area);
+    let [profile, lists] =
+        Layout::vertical([Constraint::Length(PROFILE_HEIGHT), Constraint::Min(2)]).areas(area);
 
     let (songs, albums) = if area.width >= SIDE_BY_SIDE_WIDTH {
         let [songs, albums] =
@@ -201,8 +198,7 @@ pub fn artist(area: Rect) -> ArtistLayout {
         (songs, albums)
     } else {
         let [songs, albums] =
-            Layout::vertical([Constraint::Percentage(60), Constraint::Percentage(40)])
-                .areas(lists);
+            Layout::vertical([Constraint::Percentage(60), Constraint::Percentage(40)]).areas(lists);
         (songs, albums)
     };
 

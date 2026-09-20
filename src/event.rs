@@ -13,7 +13,7 @@ use tokio::sync::mpsc;
 use crate::{
     ipc::IpcEvent,
     playback::LyricLine,
-    state::{ContentState, Page, PaginationInfo, SplashLogEntry},
+    state::{ContentState, LoginMethod, Page, PaginationInfo, SplashLogEntry},
 };
 
 #[derive(Clone, Debug)]
@@ -37,7 +37,6 @@ pub enum AppEvent {
     /// draws did — a background task filled in a channel that nobody owns until the next draw.
     /// Handling it does nothing; its whole job is to wake the main loop so it redraws.
     Repaint,
-
 }
 
 #[derive(Clone, Debug)]
@@ -61,6 +60,16 @@ pub enum AuthEvent {
         key: String,
     },
     QRStatus(String),
+    /// A submit from the login page's form, carrying the method the page was showing. The
+    /// handler reads the values out of `LoginState` rather than out of the event, so what goes
+    /// to the server is what is on screen at the moment `Enter` is pressed.
+    Submit(LoginMethod),
+    /// The SMS code went out to that number: the second step has to use the same one, so the
+    /// page keeps it and moves the caret to the code box.
+    SmsCodeSent(String),
+    /// The result of something the page itself did, which belongs in the page's own line and
+    /// not in a toast: `Ok` is drawn in accent, `Err` in the error colour.
+    ActionResult(Result<String, String>),
 }
 
 #[derive(Clone, Debug)]

@@ -4,8 +4,8 @@ use tokio::time::{Duration, sleep};
 
 use super::{App, send_event};
 use crate::{
-    event::{AuthEvent, NavigationEvent, PlaybackEvent},
-    state::Page,
+    event::{AppEvent, AuthEvent, NavigationEvent, PlaybackEvent},
+    state::{LoginField, LoginMethod, Page},
 };
 
 impl App {
@@ -13,6 +13,7 @@ impl App {
         let login = &mut self.state.login;
         login.loading = true;
         login.error = None;
+        login.notice = None;
 
         let service = self.service.clone();
         let sender = self.state.events.sender();
@@ -48,21 +49,27 @@ impl App {
     pub(super) fn handle_login_success(&mut self, info: ncm_api::LoginInfo) {
         self.toast(format!("登录成功: {}", info.nickname));
         let uid = info.uid;
-        let was_logged_in = self.state.navigation.user.is_some();
         self.state.login.loading = false;
+        self.state.login.error = None;
+        self.state.login.notice = None;
         self.state.navigation.user = Some(info);
         self.service.client().flush_cookies();
         if matches!(self.state.navigation.page, Page::Login | Page::Splash) {
             self.navigate_to_main();
-        } else if !was_logged_in && self.state.navigation.page == Page::Main {
-            // A login event can arrive after startup has already entered the
-            // main page. Reload the selected tab once its UID is available.
+        } else {
+            // A login can land while the user is anywhere: the password and SMS forms are on
+            // the login page, but the QR task keeps polling in the background. Every page draws
+            // differently once there is a user, and the tab that is open fetched its content
+            // without one — re-selecting it is what reloads that content under the new session.
             if let Some(api) = self.state.navigation.nav.selected_api() {
                 send_event(
                     &self.state.events.sender(),
                     NavigationEvent::NavSelect(api.to_string()).into(),
                 );
             }
+            // The frame is stale in a way no other event covers (the topbar and the player bar
+            // draw the session), so ask for one.
+            send_event(&self.state.events.sender(), AppEvent::Repaint.into());
         }
 
         // After login, fetch the "我喜欢的音乐" list from the cloud so the local set and the playerbar icon stay in sync.
@@ -86,8 +93,152 @@ impl App {
         self.toast(format!("登录失败: {}", e));
         self.state.login.loading = false;
         self.state.login.error = Some(e);
+        self.state.login.notice = None;
         if self.state.navigation.page == Page::Splash {
             self.navigate_to_main();
+        }
+    }
+
+    /// `Enter` on one of the page's forms. The values are read here, once, so a request is
+    /// built from the form as it was submitted rather than from whatever it becomes while the
+    /// request is in flight.
+    pub(super) fn handle_login_submit(&mut self, method: LoginMethod) {
+        match method {
+            LoginMethod::Qr => self.handle_login(),
+            LoginMethod::Password => self.login_password(),
+            LoginMethod::Sms => {
+                if self.state.login.focus == LoginField::Phone {
+                    self.send_sms_code();
+                } else {
+                    self.login_sms();
+                }
+            }
+            LoginMethod::Sign => self.daily_sign(),
+        }
+    }
+
+    /// `Enter` on the password form.
+    fn login_password(&mut self) {
+        let account = self.state.login.value(LoginField::Account);
+        let password = self.state.login.value(LoginField::Password);
+        if account.trim().is_empty() || password.is_empty() {
+            self.state.login.error = Some("请输入账号与密码".to_string());
+            self.state.login.notice = None;
+            return;
+        }
+
+        let login = &mut self.state.login;
+        login.loading = true;
+        login.error = None;
+        login.notice = None;
+
+        let service = self.service.clone();
+        let sender = self.state.events.sender();
+        tokio::spawn(async move {
+            let event = match service.login_password(&account, &password).await {
+                Ok(info) => AuthEvent::Success(info),
+                Err(error) => AuthEvent::Error(error.to_string()),
+            };
+            send_event(&sender, event.into());
+        });
+    }
+
+    /// `Enter` on the phone box: ask the server to text a code to it. Nothing else sends one —
+    /// opening the page, or a command that prefills the number, must not.
+    fn send_sms_code(&mut self) {
+        let phone = self.state.login.value(LoginField::Phone);
+        if phone.trim().is_empty() {
+            self.state.login.error = Some("请输入手机号".to_string());
+            self.state.login.notice = None;
+            return;
+        }
+
+        let login = &mut self.state.login;
+        login.loading = true;
+        login.error = None;
+        login.notice = None;
+
+        let service = self.service.clone();
+        let sender = self.state.events.sender();
+        tokio::spawn(async move {
+            let event = match service.send_sms_code(&phone).await {
+                Ok(()) => AuthEvent::SmsCodeSent(phone),
+                Err(error) => AuthEvent::ActionResult(Err(format!("验证码发送失败: {error}"))),
+            };
+            send_event(&sender, event.into());
+        });
+    }
+
+    /// `Enter` on the code box: log in with the number that is still in the form.
+    fn login_sms(&mut self) {
+        let phone = self.state.login.value(LoginField::Phone);
+        let code = self.state.login.value(LoginField::Code);
+        if phone.trim().is_empty() || code.trim().is_empty() {
+            self.state.login.error = Some("请输入手机号与验证码".to_string());
+            self.state.login.notice = None;
+            return;
+        }
+
+        let login = &mut self.state.login;
+        login.loading = true;
+        login.error = None;
+        login.notice = None;
+
+        let service = self.service.clone();
+        let sender = self.state.events.sender();
+        tokio::spawn(async move {
+            let event = match service.login_sms(&phone, &code).await {
+                Ok(info) => AuthEvent::Success(info),
+                Err(error) => AuthEvent::Error(error.to_string()),
+            };
+            send_event(&sender, event.into());
+        });
+    }
+
+    /// `Enter` on the check-in tab. The service turns the response into a sentence the page can
+    /// show as it is; nothing here re-reads or rewrites it.
+    fn daily_sign(&mut self) {
+        let login = &mut self.state.login;
+        login.loading = true;
+        login.error = None;
+        login.notice = None;
+
+        let service = self.service.clone();
+        let sender = self.state.events.sender();
+        tokio::spawn(async move {
+            let result = match service.daily_sign().await {
+                Ok(msg) => Ok(msg.msg),
+                Err(error) => Err(format!("签到失败: {error}")),
+            };
+            send_event(&sender, AuthEvent::ActionResult(result).into());
+        });
+    }
+
+    /// The code went out: keep the number the server accepted — the second step has to use the
+    /// same one — and hand the caret to the box that is waiting for it.
+    pub(super) fn handle_sms_code_sent(&mut self, phone: String) {
+        let login = &mut self.state.login;
+        login.loading = false;
+        login.error = None;
+        login.notice = Some(format!("验证码已发送到 {phone}"));
+        login.fill(LoginField::Phone, &phone);
+        login.focus = LoginField::Code;
+    }
+
+    /// A page action answered: the line goes in the page, in accent when it worked and in the
+    /// error colour when it did not.
+    pub(super) fn handle_action_result(&mut self, result: Result<String, String>) {
+        let login = &mut self.state.login;
+        login.loading = false;
+        match result {
+            Ok(message) => {
+                login.notice = Some(message);
+                login.error = None;
+            }
+            Err(error) => {
+                login.error = Some(error);
+                login.notice = None;
+            }
         }
     }
 

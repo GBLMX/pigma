@@ -39,7 +39,7 @@ impl NcmClient {
             let result = self.request_eapi_value("/api/w/login", params).await?;
             serde_json::from_str(&result)?
         };
-        parse_login_info(&value).map_err(|e| NcmError::parse(e, &value))
+        parse_login_info(&value).map_err(NcmError::message)
     }
 
     /// Phone verification code login
@@ -65,7 +65,7 @@ impl NcmClient {
             .request_weapi("/api/w/login/cellphone", &params)
             .await?;
         let value: Value = serde_json::from_str(&result)?;
-        parse_login_info(&value).map_err(|e| NcmError::parse(e, &value))
+        parse_login_info(&value).map_err(NcmError::message)
     }
 
     /// Send an SMS verification code
@@ -110,7 +110,7 @@ impl NcmClient {
     pub async fn login_status(&self) -> Result<LoginInfo, NcmError> {
         let result = self.request_weapi("/api/nuser/account/get", &[]).await?;
         let value: Value = serde_json::from_str(&result)?;
-        parse_login_info(&value).map_err(|e| NcmError::parse(e, &value))
+        parse_login_info(&value).map_err(NcmError::message)
     }
 
     /// Log out
