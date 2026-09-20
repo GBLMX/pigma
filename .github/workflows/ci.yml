@@ -86,6 +86,10 @@ jobs:
           sudo apt-get install -y pkg-config libasound2-dev
       - name: Run clippy action
         uses: clechasseur/rs-clippy-check@v5
+        with:
+          # Cover the workspace members (`crates/ncm-api`, `crates/sonar`) as well:
+          # a package-only clippy run never looked at them.
+          args: --workspace --all-targets
       - name: Cache Cargo dependencies
         uses: Swatinem/rust-cache@v2
   build-aarch64:
@@ -125,7 +129,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -134,10 +138,17 @@ jobs:
           fetch-depth: 0
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+      - name: Install Linux audio dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libasound2-dev
       - name: cargo generate-lockfile
         if: hashFiles('Cargo.lock') == ''
         run: cargo generate-lockfile
       - name: cargo test --locked
-        run: cargo test --locked --all-features
+        # `--workspace` also runs the tests of the `crates/*` members, which a
+        # package-only invocation silently skipped.
+        run: cargo test --locked --workspace --all-features
       - name: Cache Cargo dependencies
         uses: Swatinem/rust-cache@v2
