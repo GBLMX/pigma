@@ -3,7 +3,7 @@
 
 use ratatui::layout::{Constraint, Flex, Layout, Rect};
 
-use crate::{config::NavPosition, state::Page};
+use crate::config::NavPosition;
 
 pub struct SplashLayout {
     pub logo: Rect,
@@ -61,89 +61,12 @@ pub struct LayoutAreas {
     pub playerbar: Rect,
 }
 
-pub fn build_layout(area: Rect, page: Page, nav_position: NavPosition) -> LayoutAreas {
-    match page {
-        Page::Main => match nav_position {
-            NavPosition::Top => {
-                let [topbar, nav, middle, playerbar] = Layout::vertical([
-                    Constraint::Length(3),
-                    Constraint::Length(3),
-                    Constraint::Min(10),
-                    Constraint::Length(5),
-                ])
-                .areas(area);
-
-                LayoutAreas {
-                    topbar,
-                    sidebar: Rect::default(),
-                    breadcrumb: Rect::default(),
-                    nav,
-                    content: middle,
-                    playerbar,
-                }
-            }
-            NavPosition::Bottom => {
-                let [topbar, middle, nav, playerbar] = Layout::vertical([
-                    Constraint::Length(3),
-                    Constraint::Min(10),
-                    Constraint::Length(3),
-                    Constraint::Length(5),
-                ])
-                .areas(area);
-
-                LayoutAreas {
-                    topbar,
-                    sidebar: Rect::default(),
-                    breadcrumb: Rect::default(),
-                    nav,
-                    content: middle,
-                    playerbar,
-                }
-            }
-            NavPosition::Left | NavPosition::Right => {
-                let [topbar, middle, playerbar] = Layout::vertical([
-                    Constraint::Length(3),
-                    Constraint::Min(10),
-                    Constraint::Length(5),
-                ])
-                .areas(area);
-
-                // Hide the sidebar when the terminal is narrower than 60 columns; content fills the whole area
-                let (sidebar, right) = if area.width < 60 {
-                    (Rect::default(), middle)
-                } else {
-                    match nav_position {
-                        NavPosition::Left => {
-                            let [sidebar, right] =
-                                Layout::horizontal([Constraint::Length(26), Constraint::Min(40)])
-                                    .areas(middle);
-                            (sidebar, right)
-                        }
-                        NavPosition::Right => {
-                            let [right, sidebar] =
-                                Layout::horizontal([Constraint::Min(40), Constraint::Length(26)])
-                                    .areas(middle);
-                            (sidebar, right)
-                        }
-                        _ => unreachable!(),
-                    }
-                };
-
-                let [breadcrumb, content] =
-                    Layout::vertical([Constraint::Length(3), Constraint::Min(1)]).areas(right);
-
-                LayoutAreas {
-                    topbar,
-                    sidebar,
-                    breadcrumb,
-                    nav: Rect::default(),
-                    content,
-                    playerbar,
-                }
-            }
-        },
-        Page::Lyrics | Page::Playlist => {
-            let [topbar, middle, playerbar] = Layout::vertical([
+/// The main page: topbar, navigation, content and player bar.
+pub fn main(area: Rect, nav_position: NavPosition) -> LayoutAreas {
+    match nav_position {
+        NavPosition::Top => {
+            let [topbar, nav, middle, playerbar] = Layout::vertical([
+                Constraint::Length(3),
                 Constraint::Length(3),
                 Constraint::Min(10),
                 Constraint::Length(5),
@@ -154,18 +77,90 @@ pub fn build_layout(area: Rect, page: Page, nav_position: NavPosition) -> Layout
                 topbar,
                 sidebar: Rect::default(),
                 breadcrumb: Rect::default(),
-                nav: Rect::default(),
+                nav,
                 content: middle,
                 playerbar,
             }
         }
-        _ => LayoutAreas {
-            topbar: Rect::default(),
-            sidebar: Rect::default(),
-            breadcrumb: Rect::default(),
-            nav: Rect::default(),
-            content: area,
-            playerbar: Rect::default(),
-        },
+        NavPosition::Bottom => {
+            let [topbar, middle, nav, playerbar] = Layout::vertical([
+                Constraint::Length(3),
+                Constraint::Min(10),
+                Constraint::Length(3),
+                Constraint::Length(5),
+            ])
+            .areas(area);
+
+            LayoutAreas {
+                topbar,
+                sidebar: Rect::default(),
+                breadcrumb: Rect::default(),
+                nav,
+                content: middle,
+                playerbar,
+            }
+        }
+        NavPosition::Left | NavPosition::Right => {
+            let [topbar, middle, playerbar] = Layout::vertical([
+                Constraint::Length(3),
+                Constraint::Min(10),
+                Constraint::Length(5),
+            ])
+            .areas(area);
+
+            // Hide the sidebar when the terminal is narrower than 60 columns; content fills the whole area
+            let (sidebar, right) = if area.width < 60 {
+                (Rect::default(), middle)
+            } else {
+                match nav_position {
+                    NavPosition::Left => {
+                        let [sidebar, right] =
+                            Layout::horizontal([Constraint::Length(26), Constraint::Min(40)])
+                                .areas(middle);
+                        (sidebar, right)
+                    }
+                    NavPosition::Right => {
+                        let [right, sidebar] =
+                            Layout::horizontal([Constraint::Min(40), Constraint::Length(26)])
+                                .areas(middle);
+                        (sidebar, right)
+                    }
+                    _ => unreachable!(),
+                }
+            };
+
+            let [breadcrumb, content] =
+                Layout::vertical([Constraint::Length(3), Constraint::Min(1)]).areas(right);
+
+            LayoutAreas {
+                topbar,
+                sidebar,
+                breadcrumb,
+                nav: Rect::default(),
+                content,
+                playerbar,
+            }
+        }
+    }
+}
+
+/// A page that is one content area between the topbar and the player bar: the lyrics and the
+/// queue. It has no navigation area, so the navigation position is taken and ignored — every
+/// shell page's layout has the same shape for the table.
+pub fn content(area: Rect, _nav_position: NavPosition) -> LayoutAreas {
+    let [topbar, middle, playerbar] = Layout::vertical([
+        Constraint::Length(3),
+        Constraint::Min(10),
+        Constraint::Length(5),
+    ])
+    .areas(area);
+
+    LayoutAreas {
+        topbar,
+        sidebar: Rect::default(),
+        breadcrumb: Rect::default(),
+        nav: Rect::default(),
+        content: middle,
+        playerbar,
     }
 }

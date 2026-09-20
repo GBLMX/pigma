@@ -1,3 +1,5 @@
+use std::sync::LazyLock;
+
 use ratatui::{
     Frame,
     layout::{Constraint, Rect},
@@ -7,41 +9,65 @@ use ratatui::{
 };
 
 use super::{BlockStyle, block::CornerBlock};
-use crate::app::App;
+use crate::{app::App, state::Page};
 
-const HELP_ITEMS: &[(&str, &str)] = &[
-    ("Ctrl+C/q", "退出程序"),
-    (":", "命令模式（Tab 补全）"),
-    ("Ctrl+P", "命令面板"),
-    ("L", "登录网易云"),
-    ("w", "清空播放队列"),
-    ("?", "帮助"),
-    ("Esc", "返回"),
-    ("Tab / ⇧Tab", "切换导航区块 / 搜索引擎"),
-    ("↑ / ↓ 或 k / j", "上 / 下选择"),
-    ("g / G", "跳转顶部 / 底部"),
-    ("Enter", "播放选中 / 进入"),
-    ("Space", "播放 / 暂停"),
-    ("n / p", "下一首 / 上一首"),
-    ("← / →", "上一列 / 快退，下一列 / 快进"),
-    ("+ / -", "音量增大 / 减小"),
-    ("z", "切换导航栏位置"),
-    ("m", "循环模式"),
-    ("l", "歌词页 / 主界面"),
-    ("f", "播放队列 / 主界面"),
-    ("/", "搜索 / 过滤"),
-    ("s", "喜欢选中歌曲"),
-    ("S", "喜欢当前播放歌曲"),
-    ("a", "添加到队列下一首播放"),
-    ("d", "不感兴趣（每日推荐）/ 取消喜欢选中"),
-    ("D", "取消喜欢当前播放歌曲"),
-    ("c", "行 / 单元格模式"),
-    ("b", "切换边框模式"),
-    ("u", "上传缓存歌曲"),
-    ("r", "手动刷新列表内容"),
-    ("v", "频谱开关"),
-    ("V", "音高读数开关"),
-];
+/// The key map the popup draws, built once: the fixed rows, with each page's row taken from
+/// the page table and spliced in where that key is documented. A new page's row still has to
+/// be placed here — `every_page_key_is_documented` is what says so when it is not.
+static HELP_ITEMS: LazyLock<Vec<HelpRow>> = LazyLock::new(|| {
+    let mut items = vec![
+        row("Ctrl+C/q", "退出程序"),
+        row(":", "命令模式（Tab 补全）"),
+        row("Ctrl+P", "命令面板"),
+    ];
+    items.extend(page_row(Page::Login));
+    items.extend([
+        row("w", "清空播放队列"),
+        row("?", "帮助"),
+        row("Esc", "返回"),
+        row("Tab / ⇧Tab", "切换导航区块 / 搜索引擎"),
+        row("↑ / ↓ 或 k / j", "上 / 下选择"),
+        row("g / G", "跳转顶部 / 底部"),
+        row("Enter", "播放选中 / 进入"),
+        row("Space", "播放 / 暂停"),
+        row("n / p", "下一首 / 上一首"),
+        row("← / →", "上一列 / 快退，下一列 / 快进"),
+        row("+ / -", "音量增大 / 减小"),
+        row("z", "切换导航栏位置"),
+        row("m", "循环模式"),
+    ]);
+    items.extend(page_row(Page::Lyrics));
+    items.extend(page_row(Page::Playlist));
+    items.extend([
+        row("/", "搜索 / 过滤"),
+        row("s", "喜欢选中歌曲"),
+        row("S", "喜欢当前播放歌曲"),
+        row("a", "添加到队列下一首播放"),
+        row("d", "不感兴趣（每日推荐）/ 取消喜欢选中"),
+        row("D", "取消喜欢当前播放歌曲"),
+        row("c", "行 / 单元格模式"),
+        row("b", "切换边框模式"),
+        row("u", "上传缓存歌曲"),
+        row("r", "手动刷新列表内容"),
+        row("v", "频谱开关"),
+        row("V", "音高读数开关"),
+    ]);
+    items
+});
+
+/// One row of the key map: the key, and what it does.
+type HelpRow = (String, &'static str);
+
+/// A row for a fixed key, one that is not a page's.
+fn row(key: &'static str, desc: &'static str) -> HelpRow {
+    (key.to_string(), desc)
+}
+
+/// The row a page contributes, straight from its table entry: the key it names, and the page.
+fn page_row(page: Page) -> Option<HelpRow> {
+    let spec = page.spec();
+    Some((spec.key?.to_string(), spec.name))
+}
 
 const POPUP_WIDTH: u16 = 64;
 const POPUP_HEIGHT: u16 = 24;
@@ -103,4 +129,28 @@ pub(super) fn draw(f: &mut Frame, app: &App, area: Rect) -> usize {
         f.render_widget(Paragraph::new(line).style(style), line_area);
     }
     max_scroll
+}
+
+#[cfg(test)]
+mod tests {
+    use super::HELP_ITEMS;
+    use crate::state::Page;
+
+    /// Every page that owns a key is documented here. The rows come from the table, but the
+    /// row of a new page still has to be spliced into the list where it is documented — this
+    /// is what says so when it is not.
+    #[test]
+    fn every_page_key_is_documented() {
+        for page in Page::ALL {
+            let spec = page.spec();
+            let Some(key) = spec.key else {
+                continue;
+            };
+            assert!(
+                HELP_ITEMS.contains(&(key.to_string(), spec.name)),
+                "{} ({key}) is missing from the key map",
+                spec.name
+            );
+        }
+    }
 }

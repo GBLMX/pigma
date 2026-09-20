@@ -24,13 +24,13 @@ mod topbar;
 
 use std::{sync::Arc, time::Duration};
 
-use ratatui::{Frame, style::Style, widgets::Block};
+use ratatui::{Frame, layout::Rect, style::Style, widgets::Block};
 
 use crate::{
     app::App,
-    config::NavPosition,
+    config::{BorderConfig, Config, NavPosition, ThemeRegistry},
     layout,
-    state::Page,
+    state::PageRender,
     ui::{
         block::{BlockStyle, CornerBlock},
         title::render_title,
@@ -51,7 +51,12 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
     let area = f.area();
 
-    let colors = App::resolve_theme(&app.config, &app.theme_registry);
+    let bs = style(
+        &app.config,
+        &app.theme_registry,
+        &app.state.border,
+        app.state.tick,
+    );
 
     // Paint the theme's background over the whole frame before anything else.
     //
@@ -60,27 +65,17 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     // screen: half a theme, which reads as no theme at all (and is what the loading list after
     // a song switch looked like). Themes are the app's visual identity, background included.
     f.render_widget(
-        Block::default().style(Style::default().bg(colors.bg)),
+        Block::default().style(Style::default().bg(bs.colors.bg)),
         f.area(),
     );
 
-    let bs = BlockStyle {
-        colors,
-        border: &app.state.border,
-        tick: app.state.tick,
-    };
-
-    match app.state.navigation.page {
-        Page::Splash => {
-            let lay = layout::splash(area);
-            splash::draw(f, &app.state.splash, &bs, &lay);
-        }
-        Page::Login => {
-            let lay = layout::login(area);
-            login::draw(f, &mut app.state.login, &bs, &lay);
-        }
-        page => {
-            let lay = layout::build_layout(area, page, app.config.navigation_position);
+    match app.state.navigation.page.spec().render {
+        PageRender::Standalone(draw_page) => draw_page(f, app, area),
+        PageRender::Shell {
+            layout: page_layout,
+            content: page_content,
+        } => {
+            let lay = page_layout(area, app.config.navigation_position);
 
             topbar::draw(
                 f,
@@ -117,122 +112,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
                 playerbar::song_info_like_rect(&app.playback.state, playerbar_areas.song_info),
             ];
 
-            match page {
-                Page::Main => {
-                    match app.config.navigation_position {
-                        NavPosition::Left | NavPosition::Right => {
-                            if lay.sidebar.width > 0 {
-                                navigation::draw(
-                                    f,
-                                    &mut app.state.navigation.nav,
-                                    &bs,
-                                    &app.config.titles.sidebar,
-                                    lay.sidebar,
-                                );
-                            }
-
-                            breadcrumb::render_breadcrumb(
-                                f,
-                                &app.state.navigation.nav,
-                                &bs,
-                                lay.breadcrumb,
-                            );
-                        }
-                        NavPosition::Top | NavPosition::Bottom => {
-                            navigation::draw_top(f, &mut app.state.navigation.nav, &bs, lay.nav);
-                        }
-                    }
-
-                    let nav = &app.state.navigation.nav;
-                    let current_item = nav.selected_item();
-
-                    let title = {
-                        let nst = &app.state.navigation;
-                        let focus = nst.nav.focus_section;
-                        let selected = nst.nav.selected_index();
-                        let generation = nst.generation;
-                        let count = nst.content.len();
-                        let cached = nst.title_cache.borrow();
-                        if let Some((ref title, f, s, g, c)) = *cached
-                            && f == focus
-                            && s == selected
-                            && g == generation
-                            && c == count
-                        {
-                            Arc::clone(title)
-                        } else {
-                            drop(cached);
-                            let name = current_item
-                                .map(|item| item.name.as_str())
-                                .unwrap_or("SONGS");
-                            let total = nst
-                                .pagination
-                                .as_ref()
-                                .map(|p| p.total as usize)
-                                .unwrap_or(count);
-                            // When content is paged (total known), show `count/total` like the
-                            // music cloud drive; non-paged content shows only the loaded count.
-                            // Each nav item can also override this via `title_template`.
-                            let show_total = nst.pagination.as_ref().is_some_and(|p| p.total > 0);
-                            let template = current_item
-                                .and_then(|item| item.title_template.as_deref())
-                                .unwrap_or(if show_total {
-                                    "\u{25BA} {name} ({count}/{total}) \u{25C4}"
-                                } else {
-                                    "\u{25BA} {name} ({count}) \u{25C4}"
-                                });
-                            let title = Arc::new(render_title(template, name, count, total));
-                            *nst.title_cache.borrow_mut() =
-                                Some((Arc::clone(&title), focus, selected, generation, count));
-                            title
-                        }
-                    };
-                    let block = CornerBlock::from_color(&bs, bs.colors.bg).title(&title, bs.colors);
-                    let inner = block.inner(lay.content);
-                    f.render_widget(block, lay.content);
-
-                    let api = nav.selected_api();
-
-                    let content_offset = content::render_content(
-                        f,
-                        &app.state.navigation.content,
-                        &app.config.columns,
-                        api,
-                        &bs,
-                        &mut app.state.navigation.table_state,
-                        app.state.navigation.content_selected,
-                        app.state.navigation.table_mode,
-                        inner,
-                    );
-                    // Remembered for mouse input: which rows are on screen, and where.
-                    app.state.content_inner = inner;
-                    app.state.content_offset = content_offset;
-                }
-                Page::Lyrics => {
-                    lyrics::draw(
-                        f,
-                        &app.playback.state,
-                        &bs,
-                        app.config.lyric_gradient,
-                        app.config.lyric_style,
-                        &app.config.titles.lyrics,
-                        lay.content,
-                    );
-                }
-                Page::Playlist => {
-                    queue::draw_queue_table(
-                        f,
-                        &app.playback,
-                        app.state.navigation.playlist_selected,
-                        &bs,
-                        &app.config.titles.playlist,
-                        &mut app.state.navigation.queue_tab_scroll_x,
-                        &mut app.state.queue_hits,
-                        lay.content,
-                    );
-                }
-                _ => {}
-            }
+            page_content(f, app, &lay);
         }
     }
 
@@ -248,7 +128,181 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         app.state.help.scroll = app.state.help.scroll.min(max_scroll);
     }
 
-    toast::draw_toast(f, app, colors);
+    toast::draw_toast(f, app, app.current_theme());
+}
+
+/// The styling a view draws with: the resolved theme, the border mode and the tick.
+///
+/// Taken field by field instead of as `&App`: a view that draws into the app borrows it
+/// mutably, and one borrow of the whole app would rule that out.
+fn style<'a>(
+    config: &Config,
+    themes: &'a ThemeRegistry,
+    border: &'a BorderConfig,
+    tick: u64,
+) -> BlockStyle<'a> {
+    BlockStyle {
+        colors: App::resolve_theme(config, themes),
+        border,
+        tick,
+    }
+}
+
+/// The splash page: it owns the whole frame.
+pub(crate) fn draw_splash(f: &mut Frame, app: &mut App, area: Rect) {
+    let bs = style(
+        &app.config,
+        &app.theme_registry,
+        &app.state.border,
+        app.state.tick,
+    );
+    let lay = layout::splash(area);
+    splash::draw(f, &app.state.splash, &bs, &lay);
+}
+
+/// The login page: it owns the whole frame.
+pub(crate) fn draw_login(f: &mut Frame, app: &mut App, area: Rect) {
+    let bs = style(
+        &app.config,
+        &app.theme_registry,
+        &app.state.border,
+        app.state.tick,
+    );
+    let lay = layout::login(area);
+    login::draw(f, &mut app.state.login, &bs, &lay);
+}
+
+/// The main page's own area: the navigation column (or row), the breadcrumb and the
+/// content table.
+pub(crate) fn draw_main(f: &mut Frame, app: &mut App, areas: &layout::LayoutAreas) {
+    let bs = style(
+        &app.config,
+        &app.theme_registry,
+        &app.state.border,
+        app.state.tick,
+    );
+    match app.config.navigation_position {
+        NavPosition::Left | NavPosition::Right => {
+            if areas.sidebar.width > 0 {
+                navigation::draw(
+                    f,
+                    &mut app.state.navigation.nav,
+                    &bs,
+                    &app.config.titles.sidebar,
+                    areas.sidebar,
+                );
+            }
+
+            breadcrumb::render_breadcrumb(f, &app.state.navigation.nav, &bs, areas.breadcrumb);
+        }
+        NavPosition::Top | NavPosition::Bottom => {
+            navigation::draw_top(f, &mut app.state.navigation.nav, &bs, areas.nav);
+        }
+    }
+
+    let nav = &app.state.navigation.nav;
+    let current_item = nav.selected_item();
+
+    let title = {
+        let nst = &app.state.navigation;
+        let focus = nst.nav.focus_section;
+        let selected = nst.nav.selected_index();
+        let generation = nst.generation;
+        let count = nst.content.len();
+        let cached = nst.title_cache.borrow();
+        if let Some((ref title, f, s, g, c)) = *cached
+            && f == focus
+            && s == selected
+            && g == generation
+            && c == count
+        {
+            Arc::clone(title)
+        } else {
+            drop(cached);
+            let name = current_item
+                .map(|item| item.name.as_str())
+                .unwrap_or("SONGS");
+            let total = nst
+                .pagination
+                .as_ref()
+                .map(|p| p.total as usize)
+                .unwrap_or(count);
+            // When content is paged (total known), show `count/total` like the
+            // music cloud drive; non-paged content shows only the loaded count.
+            // Each nav item can also override this via `title_template`.
+            let show_total = nst.pagination.as_ref().is_some_and(|p| p.total > 0);
+            let template = current_item
+                .and_then(|item| item.title_template.as_deref())
+                .unwrap_or(if show_total {
+                    "\u{25BA} {name} ({count}/{total}) \u{25C4}"
+                } else {
+                    "\u{25BA} {name} ({count}) \u{25C4}"
+                });
+            let title = Arc::new(render_title(template, name, count, total));
+            *nst.title_cache.borrow_mut() =
+                Some((Arc::clone(&title), focus, selected, generation, count));
+            title
+        }
+    };
+    let block = CornerBlock::from_color(&bs, bs.colors.bg).title(&title, bs.colors);
+    let inner = block.inner(areas.content);
+    f.render_widget(block, areas.content);
+
+    let api = nav.selected_api();
+
+    let content_offset = content::render_content(
+        f,
+        &app.state.navigation.content,
+        &app.config.columns,
+        api,
+        &bs,
+        &mut app.state.navigation.table_state,
+        app.state.navigation.content_selected,
+        app.state.navigation.table_mode,
+        inner,
+    );
+    // Remembered for mouse input: which rows are on screen, and where.
+    app.state.content_inner = inner;
+    app.state.content_offset = content_offset;
+}
+
+/// The lyrics page: the scrolling lyrics, in the content area.
+pub(crate) fn draw_lyrics(f: &mut Frame, app: &mut App, areas: &layout::LayoutAreas) {
+    let bs = style(
+        &app.config,
+        &app.theme_registry,
+        &app.state.border,
+        app.state.tick,
+    );
+    lyrics::draw(
+        f,
+        &app.playback.state,
+        &bs,
+        app.config.lyric_gradient,
+        app.config.lyric_style,
+        &app.config.titles.lyrics,
+        areas.content,
+    );
+}
+
+/// The queue page: the queue tabs and their table, in the content area.
+pub(crate) fn draw_queue(f: &mut Frame, app: &mut App, areas: &layout::LayoutAreas) {
+    let bs = style(
+        &app.config,
+        &app.theme_registry,
+        &app.state.border,
+        app.state.tick,
+    );
+    queue::draw_queue_table(
+        f,
+        &app.playback,
+        app.state.navigation.playlist_selected,
+        &bs,
+        &app.config.titles.playlist,
+        &mut app.state.navigation.queue_tab_scroll_x,
+        &mut app.state.queue_hits,
+        areas.content,
+    );
 }
 
 /// Throwaway audit: render every user-facing view for every built-in theme and report

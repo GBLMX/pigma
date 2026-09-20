@@ -6,6 +6,7 @@ pub mod content;
 pub mod help;
 pub mod login;
 pub mod navigation;
+pub mod page;
 pub mod prompt;
 pub mod queue_page;
 pub mod search;
@@ -20,6 +21,7 @@ pub use content::*;
 pub use help::*;
 pub use login::*;
 pub use navigation::*;
+pub use page::*;
 pub use prompt::*;
 pub use queue_page::*;
 pub use search::*;
@@ -29,16 +31,6 @@ pub use splash::*;
 use crate::{config::BorderConfig, event::EventHandler};
 use ratatui::layout::Rect;
 use serde::{Deserialize, Serialize};
-
-/// Top-level screens the TUI can be on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Page {
-    Splash,
-    Main,
-    Lyrics,
-    Playlist,
-    Login,
-}
 
 /// Pagination state for a lazily-loaded content view (e.g. a playlist or
 /// search results page). Drives "load more" and the loading indicator.

@@ -101,16 +101,7 @@ pub(super) fn handle_main_key(app: &mut App, key_event: KeyEvent) -> color_eyre:
                 app.playback.seek_relative(interval);
             }
         }
-        KeyCode::Char('l') => {
-            let next = match app.state.navigation.page {
-                Page::Main => Page::Lyrics,
-                Page::Lyrics => Page::Main,
-                Page::Playlist => Page::Main,
-                Page::Login => Page::Main,
-                Page::Splash => Page::Splash,
-            };
-            app.state.events.send(NavigationEvent::Navigate(next));
-        }
+        KeyCode::Char('l') => open_page_key(app, 'l'),
         KeyCode::Char('p' | 'P') => {
             app.playback.prev();
         }
@@ -121,18 +112,12 @@ pub(super) fn handle_main_key(app: &mut App, key_event: KeyEvent) -> color_eyre:
             toggle_table_mode(app);
         }
         KeyCode::Char('f' | 'F') => {
-            let next = match app.state.navigation.page {
-                Page::Main => {
-                    app.state.navigation.playlist_selected =
-                        app.playback.queue_current_index().unwrap_or(0);
-                    Page::Playlist
-                }
-                Page::Playlist => Page::Main,
-                Page::Lyrics => Page::Main,
-                Page::Login => Page::Main,
-                Page::Splash => Page::Splash,
-            };
-            app.state.events.send(NavigationEvent::Navigate(next));
+            // The queue opens on the song that is playing.
+            if app.state.navigation.page == Page::Main {
+                app.state.navigation.playlist_selected =
+                    app.playback.queue_current_index().unwrap_or(0);
+            }
+            open_page_key(app, 'f');
         }
         KeyCode::Char('/') => {
             if app.state.navigation.page == Page::Playlist {
@@ -247,6 +232,14 @@ pub(super) fn handle_main_key(app: &mut App, key_event: KeyEvent) -> color_eyre:
         _ => {}
     }
     Ok(())
+}
+
+/// A page key — `l` for the lyrics, `f` for the queue: it opens the page whose table entry
+/// names it, and that page's own key comes back to the main page. See [`Page::on_key`].
+fn open_page_key(app: &mut App, key: char) {
+    if let Some(next) = app.state.navigation.page.on_key(key) {
+        app.state.events.send(NavigationEvent::Navigate(next));
+    }
 }
 
 pub(super) fn handle_main_mouse(app: &mut App, kind: MouseEventKind, col: u16, row: u16) {
