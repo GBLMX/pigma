@@ -11,7 +11,7 @@
 
 pigma 的核心目标是把网易云音乐和本地音频播放的体验带进命令行环境：终端里的流式播放、歌词、歌单与队列管理，全部围绕键盘操作组织，基于 [Ratatui](https://ratatui.rs) 实现。
 
-本仓库是 [akirco/pigma](https://github.com/akirco/pigma) 的 fork，**持续维护中**：上游的进展在这里跟进，本仓库自己也带了一批改动 —— 鼠标交互（点击 seek／切区／播放控制／模式／喜欢／静音）、频谱与音高读数、`:` 命令行与补全（含邮箱/短信登录）、鼠标可关(`mouse = false` 换回终端选中复制)、切歌/出错桌面通知(OSC 9)、歌词多种显示样式(`:lyrics window|one_line|flow|plain`)、听歌打卡、自定义主题（`[themes.<名>]` 继承内置主题，只写要改的颜色）、按终端能力自动适配配色与字形、按终端的图像与输入能力走原生协议(kitty 图形协议封面、同步刷新、kitty 键盘协议与括号粘贴；封面协议可用 `[playerbar] image_protocol` 强制)。二进制与 AUR 包都从**本仓库**发布（[releases](https://github.com/GBLMX/pigma/releases)、`pigma-gblmx-bin`）。
+本仓库是 [akirco/pigma](https://github.com/akirco/pigma) 的 fork，**持续维护中**：上游的进展在这里跟进，本仓库自己也带了一批改动（清单见下）。二进制与 AUR 包都从**本仓库**发布（[releases](https://github.com/GBLMX/pigma/releases)、`pigma-gblmx-bin`）。
 
 <details>
 <summary><b>📖 点击展开/折叠目录 (Table of Contents)</b></summary>
@@ -41,6 +41,8 @@ pigma 的核心目标是把网易云音乐和本地音频播放的体验带进�
     - [Content cache](#content-cache)
     - [Splash screen](#splash-screen)
     - [Lyric gradient](#lyric-gradient)
+    - [歌词显示样式](#歌词显示样式)
+    - [终端与通知](#终端与通知)
     - [Navigation items](#navigation-items)
       - [Section titles support rich-text markup](#section-titles-support-rich-text-markup)
     - [Theme](#theme)
@@ -65,8 +67,9 @@ pigma 的核心目标是把网易云音乐和本地音频播放的体验带进�
 - **修复**：下载缓存条目只在流完成后记录 · 默认日志级别改为 INFO · 清空的 `sections`/`columns` 序列化不再 panic · eapi 非 2xx 只告警 · IPC socket 权限收窄到属主 · `.gitignore` 忽略调试残留
 - **配置**：`config_version` 版本号，旧文件加载时自动升级并把原文件备份为 `config.toml.bak-v0`
 - **播放**：解析失败按类型分类（网络失败重试一次、无版权/无地址直接走兜底源），不再靠错误字符串前缀判断
-- **外观**：符号预设（`nerd`／`unicode`／`ascii`，不装 Nerd Font 也能用）· 按终端能力降级真彩色 · 依据终端背景自动选明/暗主题
-- **新增**：频谱可视化 · 音高读数（自实现 YIN，无新增依赖）· 鼠标交互（点击 seek／切区／播放控制／模式／喜欢／静音）· vim 风格 `:` 命令行与 Tab 补全（密码/短信登录、退出登录、签到）· 听歌打卡（播满约 30 秒即上报，与官方客户端口径一致；短于 30 秒的歌以播完为准）
+- **外观**：符号预设（`nerd`／`unicode`／`ascii`，不装 Nerd Font 也能用）· 按终端能力降级真彩色 · 依据终端背景自动选明/暗主题 · **背景也由主题绘制**（此前只给文字上色，浅色主题在深色终端上会变成零星灰字）· 内置 20 套主题 + `[themes.<名>]` 继承式自定义 · 高亮行的前景色按对比度自动选取，浅色主题下也读得出来
+- **新增**：频谱可视化 · 音高读数（自实现 YIN，无新增依赖）· 鼠标交互（点击 seek／切区／播放控制／模式／喜欢／静音）· vim 风格 `:` 命令行与 Tab 补全（密码/短信登录、退出登录、签到）· 听歌打卡（播满约 30 秒即上报，与官方客户端口径一致；短于 30 秒的歌以播完为准）· **歌词四种显示样式**（`:lyrics window|one_line|flow|plain`）· 歌词严格按解码位置对轴 · 终端开关：`mouse`／`cursor_style`／`[notify]` 桌面通知 · 随仓库提供的性能基准
+- **终端协议**：kitty 图形协议封面（可用 `[playerbar] image_protocol` 强制）· 同步刷新（整帧一次性呈现，也是 kitty 放图的规范要求）· kitty 键盘协议（`Esc` 不再被读成 `Alt+<key>`）· 括号粘贴 · 封面协议以**终端的回答**为准，tmux 内自动回退
 - **打包**：AUR `pigma-gblmx-bin`（独立包名，发布时带真实校验和）
 
 **注意：**
@@ -104,6 +107,10 @@ pigma 的核心目标是把网易云音乐和本地音频播放的体验带进�
 - [x] 优化主题配色
 - [x] styled_text标记语法嵌套
 - [x] 重构进入程序流程
+- [x] 歌词四种显示样式（窗口 / 一次一行 / 颜色流动 / 纯列表）
+- [x] 桌面通知（切歌 / 出错，OSC 9）与鼠标、光标形状开关
+- [x] 主题背景完整绘制，高亮行对比度自动保证
+- [x] 随仓库的性能基准（`cargo test --release --lib -- --ignored`）
 - [x] 命令行控制（status/msg）+ JSON IPC（waybar 等）
 - [x] 守护进程模式（`pigma -d`）
 - [x] 重写splash
@@ -230,6 +237,7 @@ cargo build --release
 | `:sign` | 网易云每日签到（云贝） |
 | `:layout default\|modern\|minimal` | 播放条布局（`modern` 下频谱只有封面列的 8 格宽，另两种布局是整行） |
 | `:pitch on\|off` | 音高读数开关（同 `V` 键） |
+| `:lyrics window\|one_line\|flow\|plain` | 歌词显示样式（`Tab` 会列出四种与各自说明） |
 
 终端背景为浅色时，`:theme` 配合配置里的 `background = "auto"` 与 `light_theme` 会自动选浅色主题。
 
@@ -622,6 +630,37 @@ lyric_gradient = "warm"  # warm | cubehelix | rainbow | spectral | viridis | tur
 
 未知值回退到 `warm`。
 
+### 歌词显示样式
+
+```toml
+lyric_style = "window"   # window | one_line | flow | plain
+```
+
+| 样式 | 效果 |
+|---|---|
+| `window`（默认） | 滚动窗口：当前行上下若干行，当前行带卡拉OK填充 |
+| `one_line` | **一次一行**：只显示当前行、居中，同样带卡拉OK填充（也接受 `single`） |
+| `flow` | **颜色流动**：渐变沿文字铺开并随帧推进（约 8 秒一轮），上下行用同色系渐隐，整页一起流动 |
+| `plain` | 纯滚动列表，无高亮 |
+
+运行中可用 `:lyrics <样式>` 切换（`Tab` 补全，改完会写回配置）。
+
+### 终端与通知
+
+```toml
+# 是否捕获鼠标。捕获后可点击播放栏控件、列表行、标签页；关掉则把终端自身的
+# "拖选 + 复制"还给鼠标（多数终端里按住 Shift 拖选可临时绕过，不必改这里）
+mouse = true
+
+# 输入框光标形状: "default"(跟随终端设置) / "block" / "underline" / "bar"
+cursor_style = "default"
+
+# 桌面通知（默认关闭）。走 OSC 9，kitty / WezTerm / foot / iTerm2 / Windows Terminal 支持，
+# 不支持通知的终端会直接忽略该序列
+[notify]
+song_change = false   # 切歌时通知：歌名 — 歌手
+errors = false        # 播放出错时通知
+
 ### Navigation items
 
 Each nav item can have:
@@ -698,30 +737,32 @@ title_template = "{name} ({count})" # 同样支持title的标记语法
 
 ### Theme
 
-pigma no longer ships built-in themes. You must define one or more `[[themes]]`
-entries in your config, and select the active one via `default_theme` (matched by
-`name`). If `themes` is empty, the UI falls back to a built-in default palette.
+内置 20 套主题：`default`、`terminal`、`dracula`、`nord`、`gruvbox`、`gruvbox-light`、
+`catppuccin`、`catppuccin-latte`、`tokyo-night`、`one-dark`、`one-light`、`github-light`、
+`monokai`、`rose-pine`、`kanagawa`、`solarized`、`solarized-light`、`cyberpunk-hot`、
+`cyberpunk-fury`、`cyberpunk-volt`。用 `default_theme` 选择，运行中按 `b` 或
+`:theme <名字>` 切换（`Tab` 会列出全部，含自己加的主题）。
+
+也可以自己写：`[themes.<名字>]` **只写要改的颜色**，其余从 `base` 继承
+（`base` 是任一内置主题，或另一个自定义主题）：
 
 ```toml
-default_theme = "rose-pine"
+[themes.my_theme]
+base   = "tokyo-night"   # 起点；不写则用 default
+accent = "#ff8800"       # 只写想改的颜色
+border = 236             # 索引 0-255，也可以直接写整数
 
-[[themes]]
-name = "rose-pine"
-bg = "#191724"
-surface = "#26233A"
-text = "#E0DEF4"
-accent = "#EB6F92"
-highlight = "#31748F"
-muted = "#6E6A86"
-error = "#EB6F92"
-warning = "#F6C177"
+default_theme = "my_theme"
 ```
 
-Supported theme color fields: `bg`, `surface`, `text`, `accent`, `highlight`,
-`muted`, `error`, `warning`.
+颜色三种写法都认：hex（`#rrggbb`）、颜色名（`red`）、索引（`0-255`）。
+某个颜色写错只影响那一个颜色（沿用 `base` 的值），不会让整份配置加载失败；
+`base` 不存在会提示并跳过该主题。
 
-You can define multiple themes and switch between them at runtime (style toggle,
-default key `b`).
+可选字段：`bg`、`surface`、`text`、`accent`、`muted`、`border`、`error`、`warning`。
+
+背景也由主题绘制（不是留给终端），所以浅色主题在深色终端里同样成立；
+终端背景为浅色时可配合 `background = "auto"` 与 `light_theme` 自动切到浅色主题。
 
 ## Development
 
