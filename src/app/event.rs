@@ -138,6 +138,7 @@ impl App {
                 self.played_in_track = Duration::ZERO;
                 self.last_position = Duration::ZERO;
                 self.handle_playback_started();
+                self.notify_song_change();
             }
             PlaybackEvent::Progress { position, total } => {
                 self.playback.on_playback_progress(position, total);
@@ -160,6 +161,9 @@ impl App {
                 }
             }
             PlaybackEvent::Error(e) => {
+                if self.config.notify.errors {
+                    let _ = crate::utils::terminal::notify(&mut std::io::stdout(), &e);
+                }
                 self.playback.on_playback_error(e);
             }
             PlaybackEvent::LyricsLoaded {
@@ -355,6 +359,22 @@ impl App {
                 }
             }
         }
+    }
+
+    /// Tell the terminal what started playing. Off unless the config asks for it, and the
+    /// sequence is out-of-band: it changes no cells, so it cannot disturb the frame being
+    /// drawn around it.
+    fn notify_song_change(&self) {
+        if !self.config.notify.song_change {
+            return;
+        }
+        let Some(song) = &self.playback.state.current_song else {
+            return;
+        };
+        let _ = crate::utils::terminal::notify(
+            &mut std::io::stdout(),
+            &format!("{} — {}", song.name, song.singer),
+        );
     }
 
     fn execute_command(&mut self, action: CommandAction) {

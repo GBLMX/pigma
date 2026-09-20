@@ -22,7 +22,47 @@ pub enum ImageProtocol {
     Sixel,
 }
 
-/// Config-facing choice for [`crate::config::PlayerbarConfig::image_protocol`].
+/// Shape of the terminal's cursor while an input field has focus.
+///
+/// Kitty's `tui.json` and opencode's are the model: the app asks for a shape, and the
+/// terminal's own default stays available as a choice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CursorStyle {
+    /// Whatever the user configured in the terminal.
+    #[default]
+    Default,
+    Block,
+    Underline,
+    Bar,
+}
+
+impl CursorStyle {
+    /// The escape sequence this style is written as.
+    pub fn command(self) -> crossterm::cursor::SetCursorStyle {
+        use crossterm::cursor::SetCursorStyle;
+        match self {
+            Self::Default => SetCursorStyle::DefaultUserShape,
+            Self::Block => SetCursorStyle::SteadyBlock,
+            Self::Underline => SetCursorStyle::SteadyUnderScore,
+            Self::Bar => SetCursorStyle::SteadyBar,
+        }
+    }
+}
+
+/// Ask the terminal to raise a desktop notification.
+///
+/// `OSC 9` is the form every terminal with notifications implements — kitty (where `OSC 99`
+/// is the richer one, this is the compatible one), WezTerm, foot, iTerm2, Windows Terminal —
+/// and one that has no notifications simply drops the sequence, so nothing needs probing.
+///
+/// Control characters are stripped first: a song title is remote data, and a stray `BEL` or
+/// `ESC` in it would otherwise end the sequence early or start another one.
+pub fn notify<W: Write>(out: &mut W, text: &str) -> io::Result<()> {
+    let clean: String = text.chars().filter(|c| !c.is_control()).take(240).collect();
+    write!(out, "\x1b]9;{clean}\x07")?;
+    out.flush()
+}
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ImageProtocolChoice {
@@ -791,5 +831,50 @@ mod terminal_mode_tests {
             String::from_utf8(out).expect("utf8"),
             "\u{1b}[?2026h\u{1b}[?2026l"
         );
+    }
+}
+
+#[cfg(test)]
+mod notification_tests {
+    use super::*;
+
+    /// `OSC 9` is the form the terminals implement, and the payload is remote data: a `BEL`
+    /// or `ESC` in a song title would otherwise end the sequence early or start another one.
+    #[test]
+    fn a_notification_is_one_clean_osc_9() {
+        let mut out = Vec::new();
+        notify(&mut out, "歌名 — 歌手").expect("notify");
+        assert_eq!(
+            String::from_utf8(out).expect("utf8"),
+            "\u{1b}]9;歌名 — 歌手\u{7}"
+        );
+    }
+
+    #[test]
+    fn control_characters_cannot_escape_the_notification() {
+        let mut out = Vec::new();
+        notify(&mut out, "a\u{7}b\u{1b}]9;evil").expect("notify");
+        let text = String::from_utf8(out).expect("utf8");
+        assert_eq!(text, "\u{1b}]9;ab]9;evil\u{7}");
+        assert_eq!(text.matches('\u{7}').count(), 1, "exactly one terminator");
+    }
+
+    /// The config's choices have to land on distinct terminal shapes.
+    #[test]
+    fn cursor_styles_are_distinct() {
+        let shapes: Vec<String> = [
+            CursorStyle::Default,
+            CursorStyle::Block,
+            CursorStyle::Underline,
+            CursorStyle::Bar,
+        ]
+        .iter()
+        .map(|style| format!("{:?}", style.command()))
+        .collect();
+
+        let mut unique = shapes.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(unique.len(), shapes.len(), "{shapes:?}");
     }
 }

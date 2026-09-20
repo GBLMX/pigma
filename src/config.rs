@@ -6,6 +6,7 @@ mod cache;
 mod column;
 mod lyrics;
 mod navigation;
+mod notify;
 mod playerbar;
 mod symbols;
 pub mod theme;
@@ -18,6 +19,7 @@ pub use cache::*;
 pub use column::*;
 pub use lyrics::*;
 pub use navigation::*;
+pub use notify::*;
 pub use playerbar::*;
 use serde::{Deserialize, Serialize};
 pub use symbols::*;
@@ -28,6 +30,11 @@ use crate::{
     logger::Logger,
     utils::{self, GradientPreset, terminal::BackgroundMode},
 };
+
+/// `#[serde(default)]` for a field whose natural default is "on".
+fn default_true() -> bool {
+    true
+}
 
 /// Schema version of `config.toml` written by this build.
 ///
@@ -80,6 +87,18 @@ pub struct Config {
     /// How the lyrics page draws: `window`, `one_line`, `flow` or `plain`.
     #[serde(default)]
     pub lyric_style: LyricStyle,
+    /// Capture the mouse: clicks on the player bar, the tabs and the lists. Turning it off
+    /// keeps the terminal's own selection and scrolling (holding `Shift` does the same in
+    /// most terminals, without the config).
+    #[serde(default = "default_true")]
+    pub mouse: bool,
+    /// Shape of the cursor in the input fields: `default` (whatever the terminal is set to),
+    /// `block`, `underline` or `bar`.
+    #[serde(default)]
+    pub cursor_style: crate::utils::terminal::CursorStyle,
+    /// Desktop notifications, off by default.
+    #[serde(default)]
+    pub notify: NotifyConfig,
     /// Proxy address (leave empty to disable the proxy).
     #[serde(default = "default_proxy")]
     pub proxy: String,
@@ -216,6 +235,9 @@ impl Default for Config {
             seek_interval_secs: 15,
             lyric_gradient: GradientPreset::default(),
             lyric_style: LyricStyle::default(),
+            mouse: true,
+            cursor_style: crate::utils::terminal::CursorStyle::default(),
+            notify: NotifyConfig::default(),
             proxy: default_proxy(),
             proxy_target: default_proxy_target(),
             search_limit: default_search_limit(),
@@ -377,6 +399,18 @@ impl Config {
 
 #[cfg(test)]
 mod tests {
+    /// Mouse capture is what makes the player bar clickable and also what stops the terminal
+    /// from selecting text, so the default is on and the way out has to actually parse.
+    #[test]
+    fn mouse_defaults_to_on_and_can_be_turned_off() {
+        let parsed: Config = toml_edit::de::from_str("mouse = false\n").expect("parse");
+        assert!(!parsed.mouse);
+        assert!(
+            Config::default().mouse,
+            "capture is on unless asked otherwise"
+        );
+    }
+
     use super::*;
 
     #[test]

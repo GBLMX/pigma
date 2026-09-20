@@ -29,6 +29,20 @@ cli_status_template = "{name}  {artist}  {current}/{duration}  {status}  vol {vo
 # `pigma status` 默认输出格式: "plain" 或 "json"
 cli_status_format = "plain"
 
+# 是否捕获鼠标。捕获后可以点击播放栏控件、列表行、标签页；关掉则把终端自身的
+# "拖选 + 复制"还给鼠标（大多数终端里按住 Shift 拖选可临时绕过，不必改这里）
+mouse = true
+
+# 输入框里的光标形状: "default"(跟随终端) / "block" / "underline" / "bar"
+cursor_style = "default"
+
+# 桌面通知（默认关闭）。用 OSC 9 触发，kitty / WezTerm / foot / iTerm2 / Windows Terminal 支持
+[notify]
+# 切歌时通知当前曲目（歌名 — 歌手）
+song_change = false
+# 播放出错时通知
+errors = false
+
 # 歌词渐变效果: "rainbow", "fire", "ocean", "forest", "sunset", "neon", "pastel", "monochrome"
 lyric_gradient = "rainbow"
 

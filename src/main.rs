@@ -24,6 +24,8 @@ impl Drop for TerminalGuard {
         // Leave the kitty keyboard protocol before anything else prints: a terminal
         // left in it would feed the shell `CSI u` encodings instead of plain keys.
         let _ = pigma::utils::terminal::disable_terminal_modes(&mut output);
+        // Hand the cursor shape back to whatever the user configured.
+        let _ = execute!(output, cursor::SetCursorStyle::DefaultUserShape);
         let _ = execute!(output, DisableMouseCapture, ResetColor, cursor::Show);
         // On the panic path the ratatui panic hook has already called restore(),
         // so only call it on clean exits to avoid restoring the terminal twice.
@@ -64,7 +66,12 @@ async fn main() -> color_eyre::Result<()> {
     color_eyre::install()?;
     let terminal = ratatui::init();
     let _terminal_guard = TerminalGuard;
-    execute!(stdout(), EnableMouseCapture)?;
+    // Mouse capture is what makes the player bar clickable, and also what stops the terminal
+    // from selecting text; `mouse = false` gives the selection back.
+    if app.config.mouse {
+        execute!(stdout(), EnableMouseCapture)?;
+    }
+    execute!(stdout(), app.config.cursor_style.command())?;
     // Kitty keyboard protocol + bracketed paste; both are no-ops where unsupported.
     pigma::utils::terminal::enable_terminal_modes(&mut stdout())?;
     app.run(terminal).await
