@@ -193,6 +193,12 @@ impl EventHandler {
     /// crossterm terminal events is spawned; pass `false` for headless daemon
     /// mode (no terminal available).
     pub fn new(with_terminal: bool) -> Self {
+        // Unbounded on purpose. The consumer is the main loop, which takes one event per
+        // frame (a draw measured at ~230 µs) and can therefore drain thousands per second,
+        // while every producer is bounded by real work: input, HTTP calls that carry their own
+        // timeouts, and the analysis stream at ~30 Hz. A bounded channel would add a
+        // back-pressure path nothing needs; when the receiver is gone (the app is quitting)
+        // a send simply fails, which every sender here already ignores.
         let (sender, receiver) = mpsc::unbounded_channel();
         if with_terminal {
             let actor = EventTask::new(sender.clone());
