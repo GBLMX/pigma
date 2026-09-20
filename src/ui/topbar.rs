@@ -8,11 +8,19 @@ use ratatui::{
 };
 use unicode_width::UnicodeWidthStr;
 
+use ratatui_image::{Resize, StatefulImage};
+
 use super::{BlockStyle, block::CornerBlock};
 use crate::{
     config::Theme,
-    state::{PromptState, SearchState},
+    state::{PromptState, SearchState, avatar},
 };
+
+/// Columns the portrait takes at the right end of the bar, and the column of space between it
+/// and the user's line. A terminal cell is twice as tall as it is wide, so six columns over
+/// the bar's three rows are a square picture — which is what a round face needs.
+const PORTRAIT_WIDTH: u16 = 6;
+const PORTRAIT_GAP: u16 = 1;
 
 pub(super) fn draw(
     f: &mut Frame,
@@ -86,8 +94,50 @@ pub(super) fn draw(
 
     // right_line.push(Span::styled("v0.1.0", Style::default().fg(colors.muted)));
 
+    // The user's line keeps its own width: the portrait only takes columns the line was not
+    // using, so a bar too narrow for both draws the line alone — and a bar whose portrait has
+    // not landed (or failed) draws exactly what it drew before there was one. The portrait
+    // needs the bar's own rows rather than the block's inner ones: a face has three rows, and
+    // the bordered block leaves one.
+    let mut line_area = chunks[2];
+    let mut portrait_area = None;
+    if user.is_some()
+        && line_area.width >= right_line.width() as u16 + PORTRAIT_GAP + PORTRAIT_WIDTH
+    {
+        let [line, _, portrait] = Layout::horizontal([
+            Constraint::Min(1),
+            Constraint::Length(PORTRAIT_GAP),
+            Constraint::Length(PORTRAIT_WIDTH),
+        ])
+        .areas(line_area);
+        line_area = line;
+        portrait_area = Some(Rect {
+            y: area.y,
+            height: area.height,
+            ..portrait
+        });
+    }
+
     let right_line = right_line.alignment(Alignment::Right);
-    f.render_widget(Paragraph::new(right_line), chunks[2]);
+    f.render_widget(Paragraph::new(right_line), line_area);
+
+    if let Some(portrait) = portrait_area {
+        render_portrait(f, portrait);
+    }
+}
+
+/// Draw the portrait in the columns the bar reserved for it. Nothing is drawn when there is
+/// none: those columns stay as empty as the rest of the bar.
+fn render_portrait(f: &mut Frame, area: Rect) {
+    let mut portrait = avatar::portrait();
+    let Some(protocol) = portrait.as_mut() else {
+        return;
+    };
+    f.render_stateful_widget(
+        StatefulImage::new().resize(Resize::Fit(None)),
+        area,
+        protocol,
+    );
 }
 
 fn render_prompt(f: &mut Frame, prompt: &PromptState, colors: &Theme, area: Rect) {
@@ -286,5 +336,177 @@ mod input_colour {
                 assert!(cells > 0, "{name}, {typed:?}: the field rendered nothing");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod portrait {
+    use ratatui::{Terminal, backend::TestBackend, buffer::Buffer};
+
+    use super::*;
+    use crate::{
+        config::{BorderConfig, Theme},
+        state::avatar::fixtures,
+    };
+
+    /// The bar is three rows tall, so that is what a frame of it is.
+    const HEIGHT: u16 = 3;
+
+    fn user(nickname: &str) -> LoginInfo {
+        LoginInfo {
+            code: 200,
+            uid: 7,
+            nickname: nickname.to_string(),
+            avatar_url: "https://p1.music.126.net/avatar.jpg".to_string(),
+            vip_type: 0,
+            msg: String::new(),
+        }
+    }
+
+    /// One frame of the topbar, drawn the way the shell draws it.
+    fn frame(width: u16, user: Option<&LoginInfo>) -> Buffer {
+        let colors = Theme::default();
+        let border = BorderConfig::default();
+        let bs = BlockStyle {
+            colors: &colors,
+            border: &border,
+            tick: 0,
+        };
+        let mut terminal = Terminal::new(TestBackend::new(width, HEIGHT)).expect("backend");
+        terminal
+            .draw(|f| {
+                draw(
+                    f,
+                    user,
+                    &SearchState::default(),
+                    &PromptState::default(),
+                    &bs,
+                    f.area(),
+                )
+            })
+            .expect("draw");
+        terminal.backend().buffer().clone()
+    }
+
+    /// The bar as a reader sees it.
+    fn text(buffer: &Buffer) -> String {
+        (0..HEIGHT)
+            .map(|y| {
+                (0..buffer.area.width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// The words in the bar, without the blanks between them: a wide glyph covers two cells
+    /// and the second one is a blank.
+    fn words(buffer: &Buffer) -> String {
+        text(buffer).replace(' ', "")
+    }
+
+    /// Every cell the image painted. Halfblocks draws a picture as `▀`/`▄` cells, and no text
+    /// this bar draws uses either glyph — so they are where the portrait is and nowhere else.
+    fn painted(buffer: &Buffer) -> Vec<(u16, u16)> {
+        let mut cells = Vec::new();
+        for y in 0..HEIGHT {
+            for x in 0..buffer.area.width {
+                if matches!(buffer[(x, y)].symbol(), "▀" | "▄") {
+                    cells.push((x, y));
+                }
+            }
+        }
+        cells
+    }
+
+    /// The portrait is drawn only where it has columns of its own. With one, the bar's right
+    /// end carries the picture and the user's line keeps every word it had; without one — no
+    /// user, nothing landed, or not enough room — the bar draws what it drew before there was
+    /// a portrait at all.
+    #[tokio::test]
+    async fn the_portrait_takes_its_own_columns_or_nothing_at_all() {
+        // The slot is one for the whole process, so this test takes its turn at it.
+        let _turn = fixtures::turn().await;
+        let picker = ratatui_image::picker::Picker::halfblocks();
+        let user = user("听歌的人");
+        const WIDE: u16 = 100;
+        // The bordered block leaves one column at each end of the bar, and the portrait has
+        // the last columns before the right border.
+        let columns = (WIDE - 1 - PORTRAIT_WIDTH)..(WIDE - 1);
+
+        // A login whose portrait has not landed yet: no picture anywhere on the bar.
+        avatar::clear();
+        let plain = frame(WIDE, Some(&user));
+        assert!(
+            painted(&plain).is_empty(),
+            "no portrait has landed yet:\n{}",
+            text(&plain)
+        );
+        assert!(
+            words(&plain).contains("听歌的人"),
+            "plain bar:\n{}",
+            text(&plain)
+        );
+
+        // The download landed: the picture is on the columns the bar reserved for it, and the
+        // line moved left by them — it was not drawn under them.
+        assert!(avatar::install(
+            avatar::session(),
+            fixtures::portrait(&picker)
+        ));
+        let drawn = frame(WIDE, Some(&user));
+        let marks = painted(&drawn);
+        assert!(
+            !marks.is_empty(),
+            "the portrait was not drawn:\n{}",
+            text(&drawn)
+        );
+        for (x, _) in &marks {
+            assert!(
+                columns.contains(x),
+                "the picture reached column {x}, outside {columns:?}:\n{}",
+                text(&drawn)
+            );
+        }
+        assert!(
+            words(&drawn).contains("听歌的人"),
+            "the line lost its words to the portrait:\n{}",
+            text(&drawn)
+        );
+        for x in columns.clone() {
+            for y in 0..HEIGHT {
+                let symbol = drawn[(x, y)].symbol();
+                assert!(
+                    !"听歌的人".contains(symbol),
+                    "the line was drawn under the portrait at ({x},{y}):\n{}",
+                    text(&drawn)
+                );
+            }
+        }
+
+        // A bar with no room for both keeps the line, which is the whole reason the portrait
+        // is measured before it is drawn.
+        let narrow = frame(60, Some(&user));
+        assert!(
+            painted(&narrow).is_empty(),
+            "a bar too narrow for both must draw the line alone:\n{}",
+            text(&narrow)
+        );
+        assert!(words(&narrow).contains("听歌的人"));
+
+        // A portrait has nobody to belong to when nobody is signed in.
+        let anonymous = frame(WIDE, None);
+        assert!(painted(&anonymous).is_empty(), "nobody is signed in");
+        assert!(words(&anonymous).contains("未登录"));
+
+        // And logging out forgets it, so the next frame has nothing to draw either.
+        avatar::clear();
+        let after = frame(WIDE, Some(&user));
+        assert!(
+            painted(&after).is_empty(),
+            "the portrait outlived the session:\n{}",
+            text(&after)
+        );
     }
 }

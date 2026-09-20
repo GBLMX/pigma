@@ -5,7 +5,7 @@ use tokio::time::{Duration, sleep};
 use super::{App, send_event};
 use crate::{
     event::{AppEvent, AuthEvent, NavigationEvent, PlaybackEvent},
-    state::{LoginField, LoginMethod, Page},
+    state::{LoginField, LoginMethod, Page, avatar},
 };
 
 impl App {
@@ -34,6 +34,9 @@ impl App {
     /// them, and go back to the login page.
     pub(super) fn handle_logout_done(&mut self) {
         self.state.navigation.user = None;
+        // The face belonged to the session that just ended; a load still on its way is
+        // dropped when it lands rather than put back on the bar.
+        avatar::clear();
         self.state.login.loading = false;
         self.state.login.error = None;
         if let Ok(mut liked) = self.liked_ids.lock() {
@@ -49,10 +52,15 @@ impl App {
     pub(super) fn handle_login_success(&mut self, info: ncm_api::LoginInfo) {
         self.toast(format!("登录成功: {}", info.nickname));
         let uid = info.uid;
+        // The portrait is one more thing that arrives when it arrives, and it belongs to the
+        // session that is starting here, so the URL is read before the login moves into the
+        // state.
+        let avatar_url = info.avatar_url.clone();
         self.state.login.loading = false;
         self.state.login.error = None;
         self.state.login.notice = None;
         self.state.navigation.user = Some(info);
+        self.load_avatar(avatar_url);
         self.service.client().flush_cookies();
         if matches!(self.state.navigation.page, Page::Login | Page::Splash) {
             self.navigate_to_main();
@@ -85,6 +93,24 @@ impl App {
                     send_event(&sender, PlaybackEvent::LikedUpdated.into());
                 }
                 Err(e) => log::warn!("Failed to load liked song ids: {e}"),
+            }
+        });
+    }
+
+    /// Start loading the signed-in user's own portrait for the topbar, off the event loop like
+    /// every other load. A URL that 403s, a timeout, bytes that are not an image: the portrait
+    /// stays absent and the bar keeps the shape it has — there is no message to show for a
+    /// decoration and nothing to fall back to.
+    fn load_avatar(&mut self, url: String) {
+        let session = avatar::session();
+        let http = self.cover_http.clone();
+        let picker = self.picker.clone();
+        let sender = self.state.events.sender();
+        tokio::spawn(async move {
+            if avatar::fetch_and_install(&http, &url, &picker, session).await {
+                // The frame on screen was drawn without a portrait; only a wake-up gets it
+                // drawn again.
+                send_event(&sender, AppEvent::Repaint.into());
             }
         });
     }

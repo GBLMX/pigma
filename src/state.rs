@@ -1,6 +1,7 @@
 //! Shared application state: the active `Page`, the navigation/search/login/help
 //! sub-state, and `PaginationInfo` for lazy-loaded content.
 
+pub mod avatar;
 pub mod command;
 pub mod content;
 pub mod help;
