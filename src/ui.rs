@@ -431,7 +431,6 @@ pub(crate) fn draw_artist(f: &mut Frame, app: &mut App, areas: &layout::LayoutAr
     );
 }
 
-
 /// Regenerate the README's screenshots.
 ///
 /// The pages are drawn by the app itself, offscreen, into the same `TestBackend` the tests use —
@@ -520,8 +519,8 @@ mod shots {
             let mut run: Option<(Option<String>, Option<String>, Modifier)> = None;
             let mut text = String::new();
             let flush = |run: &mut Option<(Option<String>, Option<String>, Modifier)>,
-                             text: &mut String,
-                             out: &mut String| {
+                         text: &mut String,
+                         out: &mut String| {
                 if let Some((fg, bg, modifier)) = run.take() {
                     let mut style = String::new();
                     if let Some(fg) = fg {
@@ -610,10 +609,17 @@ mod shots {
             text.push('\n');
         }
         let dir = out_dir();
-        fs::write(dir.join(format!("{name}.html")), html(&buffer, theme.bg, theme.text))
-            .expect("html");
+        fs::write(
+            dir.join(format!("{name}.html")),
+            html(&buffer, theme.bg, theme.text),
+        )
+        .expect("html");
         fs::write(dir.join(format!("{name}.txt")), text).expect("text");
-        println!("  {} -> {}", name, dir.join(format!("{name}.html")).display());
+        println!(
+            "  {} -> {}",
+            name,
+            dir.join(format!("{name}.html")).display()
+        );
     }
 
     /// A handful of songs, so the tables are not empty.
@@ -643,7 +649,9 @@ mod shots {
         let _ = rustls::crypto::ring::default_provider().install_default();
 
         shoot("main", |app| {
-            app.state.navigation.set_content(ContentState::Songs(songs(18)));
+            app.state
+                .navigation
+                .set_content(ContentState::Songs(songs(18)));
         });
         shoot("artist", |app| {
             app.state.navigation.page = Page::Artist;
@@ -655,10 +663,7 @@ mod shots {
                 pic_url: String::new(),
                 album_size: 42,
                 music_size: 511,
-                hot_songs: songs(12)
-                    .into_iter()
-                    .map(|song| (*song).clone())
-                    .collect(),
+                hot_songs: songs(12).into_iter().map(|song| (*song).clone()).collect(),
             };
             app.state.navigation.artist.id = 6452;
             app.state.navigation.artist.name = "周杰伦".into();
@@ -701,7 +706,9 @@ mod shots {
                 .set_queue_songs(songs(24).into_iter().collect());
         });
         shoot("panel", |app| {
-            app.state.navigation.set_content(ContentState::Songs(songs(18)));
+            app.state
+                .navigation
+                .set_content(ContentState::Songs(songs(18)));
             app.state.command_panel.open = true;
         });
     }

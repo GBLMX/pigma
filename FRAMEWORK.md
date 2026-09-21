@@ -21,6 +21,9 @@
 | 页面结构 | 绘制分发、页面按键、键位表三处各自维护 | 一张表：`PageSpec { name, key, render }` + `Page::spec()/opened_by()/on_key()` | 新增一个页面从改 **9 个文件降到 2 个**；`ui.rs` 生产代码里的页面匹配臂 5 → 0、`layout.rs` 3 → 0；等价性用旧/新代码各渲染 14 个场景比对缓冲区哈希验证 | `src/state/page.rs`、`src/ui.rs`、`src/layout.rs` |
 | 铺底色 | `Block::default().style(bg)`（用一个无边界的 `Block` 只为刷背景） | `Fill::new(" ")` | `Fill` 的渲染就是 `set_symbol + set_style`，像素等价；换完之后编译器指出 `Block` 在该文件已无其它用途 | `src/ui.rs` |
 | 启动画面字形 | 手绘 3 行 ASCII 字（B 的下面两行相同、X 的交叉挤在一行里，都读不清） | FIGlet 字体 **`Calvin S`** 的渲染结果，3 行 × 23 列，作为常量内嵌 | 用自写的 `.flf` 解析器（含 kerning 布局）比较 13 款字体后选定；运行时**不带字体依赖** | `src/ui/splash.rs` |
+| 采样率转换 | 全部交给音频后端（系统混音器自己重采样） | 设备与文件采样率不一致时用 `rubato` 的同步 FFT 重采样（比例固定，正是播放一首歌的情形） | 44.1k→48k 的流实测产出 ≈48000 帧并报告设备采样率（测试）；**采样率一致时不构造任何适配器**，样本原样到达 sink = 位完美路径；适配器构建失败或设备不给该格式时把源原样交回 | `src/playback/chain.rs`、`src/playback/player.rs` |
+| 音色与电平 | 无任何处理 | `biquad` 参量峰值 EQ（每声道一份滤波状态）+ `ebur128` 瞬时响度归一化（100 ms 一块，每块只走 1/10 的平滑量） | 100 Hz 正弦过 +6 dB 频段幅度 ≈2×、过 −6 dB ≈0.5×；−46 dBFS 的曲子被提升 >2×、响亮曲子被压低到 <0.8×（测试）；低于 −70 LUFS 的窗口视为静音不矫正；seek/换曲时重置滤波器与响度计 | 同上 |
+| 输出模式 | 只有共享模式：系统混音器会在链与设备之间重采样并施加自己的音量 | Windows 上可选 WASAPI **独占**（`[audio] exclusive`）：按设备同意的格式直写缓冲，被拒时给出可操作原因并回退共享 | 本机设备**连自身的 mix 格式（48k / 2ch / 32f / mask 3）都拒绝独占** —— 代码路径、错误翻译与回退因此在真机验证（回退后播放位置推进到 00:29/04:01）；探测必须跑在自有线程（否则 `RPC_E_CHANGED_MODE 0x80010106`）；独占的真实怪癖在通道掩码上，用 `is_supported_exclusive_with_quirks` 逐 mask 试 | `src/playback/exclusive.rs`、`src/playback/player.rs` |
 | 主题 | 主题名取自 `HashMap`，`:theme` 循环顺序每次启动都不同 | 名字排序固定；新增 `random`（启动时落定一次、`:theme random` 重掷并写回） | 排序后 `:theme` 顺序稳定；`random` 只在**设置主题时**解析，绝不在每帧的 `resolve_theme` 里掷（否则每帧换色） | `src/config/theme.rs` |
 
 **结构性调整**（不属于依赖层面，但同样是"把决定只写一次"）：
@@ -41,10 +44,13 @@
 | tokio `taskdump` 做进程内卡死诊断 | 接线正确（信号确实到达、快照确实被采集到），但把快照**渲染**成回溯那一步在本机不返回，且采集时的 `poll` 会卡住工作线程、外层 `timeout` 来不及生效 —— 一次信号就能让监听永久失效。改用外部抓栈（见 README 的「排障」） |
 | `tracing` 的 `EnvFilter` | 需要 `regex-automata` 等一串依赖；配置只给一个全局级别，用内置的 `LevelFilter` 即可 |
 | `reqwest-retry` / `backon` | 未在本机 vendor，未核实；现有手写重试只有 8 处且各有明确语义（NCM 重试一次、bilivideo 退避重签等），先量化问题再谈 |
+| `candle` / `burn` 做 AI 音频超分 | 模型体积与推理延迟跟"一个终端里的音乐客户端"的定位不符；独占/重采样/EQ/响度已经把这轮能拿的可听收益拿到 |
+| 一批未经验证的音频 crate（`oximedia-audio`、`oxideav-flac`、`oxiaudio-dsp`、`libflo-audio`、`oxideav-sysaudio`、`audio_engine_core`、`fast-audio-resampler`、`lanczos-resampler`、`resample`、`coupler`、`rsynth`） | crates.io 下载量实测 **49 – 7,299**（最低的 `audio_engine_core` 49、`oxideav-sysaudio` 97），无一经过生态验证；同功能都有成熟选择（`rubato` 11.4M、`ebur128` 949k、`biquad` 387k） |
+| 三个查无实物的名字（`InfiniteDSP`、`tpt-dsp`、`math_audio_iir_fir`） | crates.io 与 GitHub 均查无对应可用项目；`nih-plug` 确有 2,973★ 但**不在 crates.io**，只能 git 依赖 —— 插件宿主不是当前要做的事 |
 | `insta` 快照测试 / `criterion` 基准 | `criterion` 被项目自己的注释拒绝过（"Criterion would be a dependency tree for a handful of numbers"，见 `lib.rs` 的 `bench_util`），本仓库自带的 `#[ignore]` 基准已够；`insta` **尚未采纳** —— 把 60 余条 `TestBackend` 渲染测试快照化是候选，但目前没有量到的问题驱动它 |
 
 **继续自己写的（成熟库确实不提供 / 换了会改契约）**：终端协议兜底判定（kitty/ghostty/sixel/tmux）、
-封面圆形 alpha 遮罩、OSC 11 背景亮度、16/256 色量化、本地 DSP（FFT/YIN）、卡拉 OK 逐字符着色、
+封面圆形 alpha 遮罩、OSC 11 背景亮度、16/256 色量化、本地 DSP（FFT/YIN —— **分析侧**仍自写；输出侧的重采样 / EQ / 响度改用上面三个库，两者目的不同：一个只看不改，一个改），卡拉 OK 逐字符着色、
 NCM 协议加密与签名、`:` 小语法解析、缓存淘汰与索引策略、配置版本迁移。
 
 ## 三、代价与收益
