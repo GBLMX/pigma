@@ -385,10 +385,13 @@ pub(crate) fn draw(
     f.render_widget(Paragraph::new(hint), hint_area);
 }
 
-/// The page's keys. Returns whether the key was one of them.
-pub(crate) fn handle_key(app: &mut App, key: crossterm::event::KeyCode) -> bool {
+/// The page's own key layer, consulted before the global key map — see [`crate::state::page::PageKeys`].
+///
+/// Returns whether the key was one of the page's.
+pub(crate) fn keys(app: &mut App, key_event: crossterm::event::KeyEvent) -> bool {
     use crossterm::event::KeyCode;
 
+    let key = key_event.code;
     let selected = app.state.settings.selected.min(SETTINGS.len() - 1);
     let setting = &SETTINGS[selected];
 

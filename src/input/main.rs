@@ -17,7 +17,7 @@ use super::{
 use crate::{
     app::App,
     config::symbols,
-    event::{AppEvent, CommandEvent, NavigationEvent, PlaybackEvent},
+    event::{NavigationEvent, PlaybackEvent},
     playback::mode_icon,
     state::{ArtistIo, ContentState, Page, TableMode},
     text_input::TextInput,
@@ -26,15 +26,35 @@ use crate::{
 
 pub(super) fn handle_main_key(app: &mut App, key_event: KeyEvent) -> color_eyre::Result<()> {
     // `Ctrl` + an arrow moves a pane edge, the way dragging one does; nothing else uses it.
-    // The settings page's rows are what ↑↓/←→/空格 mean while it is up, before the global key map
-    // can read them as navigation.
-    if app.state.navigation.page == Page::Settings
-        && crate::ui::settings::handle_key(app, key_event.code)
+    // The page's own keys come first, the way a layered keymap works: what `↑`/`↓`/`←`/`→` mean
+    // depends on the page that is up, and each page writes its own layer (see `PageSpec::keys`).
+    if let Some(keys) = app.state.navigation.page.spec().keys
+        && keys(app, key_event)
     {
         return Ok(());
     }
 
     if super::panes::handle_key(app, key_event) {
+        return Ok(());
+    }
+
+    // Then the command table's keys: the table *is* the key map (see `config::keymap`), so a key
+    // the user rebound runs its command here, before the hand-written arms below — those are for
+    // the keys no command owns (navigation, playback, the row keys).
+    //
+    // Built per key press rather than cached: a `[keys]` edit has to take effect the moment it is
+    // saved, and a dozen bindings are nothing next to a key press.
+    if let KeyCode::Char(key) = key_event.code
+        && !key_event
+            .modifiers
+            .intersects(crossterm::event::KeyModifiers::CONTROL | crossterm::event::KeyModifiers::ALT)
+        && let Some(name) = crate::config::keymap::Keymap::from_config(&app.config).command(key)
+    {
+        if let Ok(command) = super::ex::ExCommand::parse(name)
+            && let Err(error) = super::ex::execute(app, command)
+        {
+            app.toast(format!("{name}: {error}"));
+        }
         return Ok(());
     }
 
@@ -53,7 +73,6 @@ pub(super) fn handle_main_key(app: &mut App, key_event: KeyEvent) -> color_eyre:
                 app.state.events.send(NavigationEvent::ContentRestore);
             }
         }
-        KeyCode::Char('q') => app.state.events.send(AppEvent::Quit),
         KeyCode::Tab if app.state.navigation.page == Page::Playlist => {
             if let Some(key) = app.playback.switch_queue(true) {
                 app.state.navigation.playlist_selected =
@@ -175,9 +194,6 @@ pub(super) fn handle_main_key(app: &mut App, key_event: KeyEvent) -> color_eyre:
                 app.state.events.send(NavigationEvent::SearchActivated);
             }
         }
-        KeyCode::Char('b' | 'B') => {
-            app.state.events.send(CommandEvent::ToggleBordered);
-        }
         KeyCode::Char(' ') => toggle_play_pause(app),
         KeyCode::Char('m') => cycle_play_mode(app),
         KeyCode::Char('S') => {
@@ -262,27 +278,10 @@ pub(super) fn handle_main_key(app: &mut App, key_event: KeyEvent) -> color_eyre:
         KeyCode::Char('-' | '_') => {
             app.adjust_volume(-0.05);
         }
-        KeyCode::Char('z' | 'Z') => {
-            app.cycle_nav_position();
-        }
-        // `v`/`V` toggle the two audio readouts, exactly like `:visualizer` / `:pitch`.
-        KeyCode::Char('v') => {
-            let on = !app.config.playerbar.visible.visualizer;
-            app.set_visualizer(on);
-        }
-        KeyCode::Char('V') => {
-            let on = !app.config.playerbar.visible.pitch;
-            app.set_pitch(on);
-        }
         // `y` shows or hides the translations, exactly like `:translation`.
         KeyCode::Char('y' | 'Y') => {
             let on = !app.config.lyric_translation;
             app.set_lyric_translation(on);
-        }
-        // `t` turns the record, exactly like `:spin`.
-        KeyCode::Char('t' | 'T') => {
-            let on = !app.config.playerbar.spinning_cover;
-            app.set_spinning_cover(on);
         }
         _ => {}
     }
@@ -709,6 +708,96 @@ fn is_local_music_view(app: &App) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// One key press, as the app receives it.
+    fn press(app: &mut App, key: char) {
+        handle_main_key(
+            app,
+            crossterm::event::KeyEvent::new(
+                KeyCode::Char(key),
+                crossterm::event::KeyModifiers::NONE,
+            ),
+        )
+        .expect("key");
+    }
+
+    /// A headless app: it owns no terminal, so — since `Config::persist` — nothing a key press
+    /// does here can reach the user's own `config.toml`.
+    fn app() -> App {
+        // Both are what `src/main.rs` does at startup and what the other tests do before building
+        // one: the crypto provider for the HTTP clients the app brings up.
+        let _ = rustls::crypto::ring::default_provider().install_default();
+
+        App::new(crate::config::Config::default(), false).expect("app")
+    }
+
+    /// The keyboard is the command table, end to end: a key runs the command its row names, a
+    /// rebind moves that command, and an empty binding leaves it to the `:` line.
+    ///
+    /// This is the chain a unit test cannot see — the key map is built from the table, the command
+    /// is parsed out of the name and executed, and the config the command writes is what the
+    /// assertion reads.
+    #[tokio::test]
+    async fn a_key_runs_its_command_and_a_rebind_moves_it() {
+        let mut app = app();
+        assert!(!app.config.playerbar.visible.visualizer, "a fresh config");
+
+        press(&mut app, 'v');
+        assert!(app.config.playerbar.visible.visualizer, "`v` ran `:visualizer`");
+
+        app.config
+            .keys
+            .insert("visualizer".to_string(), "w".to_string());
+        press(&mut app, 'v');
+        assert!(
+            app.config.playerbar.visible.visualizer,
+            "`v` was moved off `:visualizer`, so it runs nothing"
+        );
+        press(&mut app, 'w');
+        assert!(!app.config.playerbar.visible.visualizer, "`w` runs it now");
+
+        app.config
+            .keys
+            .insert("visualizer".to_string(), String::new());
+        press(&mut app, 'w');
+        assert!(
+            !app.config.playerbar.visible.visualizer,
+            "an empty binding leaves the command to the `:` line"
+        );
+    }
+
+    /// The settings page end to end: its key opens it, the page's own key layer walks its rows,
+    /// and the row's change lands in the config key the row declares.
+    #[tokio::test]
+    async fn the_settings_page_changes_what_its_rows_name() {
+        use crate::ui::settings::SETTINGS;
+
+        let mut app = app();
+        // Past the splash: it is the one page that ignores keys, so a session that presses `,` is
+        // one that has already booted.
+        app.state.navigation.page = Page::Main;
+
+        // The page keys travel as navigation events, so the app has to take the loop's event step
+        // for the page to actually change — which is exactly what the real loop does.
+        press(&mut app, ',');
+        app.handle_events().await.expect("events");
+        assert_eq!(app.state.navigation.page, Page::Settings);
+
+        // Walk to the last row of the table, which is a switch the page draws as 开/关.
+        let Some(target) = SETTINGS.iter().position(|setting| setting.label == "边听边存") else {
+            panic!("the cache switch is a row of the settings page");
+        };
+        while app.state.settings.selected != target {
+            press(&mut app, 'j');
+        }
+
+        let before = app.config.cache.save_on_play;
+        press(&mut app, ' ');
+        assert_eq!(
+            app.config.cache.save_on_play, !before,
+            "space on the row flips the key the row names"
+        );
+    }
 
     /// Enter on the hot-artists table reads the row as an artist: the id is what the page is
     /// opened for, and the name and portrait travel with it so the page has a header before

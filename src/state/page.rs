@@ -7,6 +7,7 @@
 //! that is *about* something rather than about the app (an artist, say) gets `key: None` and
 //! is opened by whatever knows what it is about: the row that names it.
 
+use crossterm::event::KeyEvent;
 use ratatui::{Frame, layout::Rect};
 
 use crate::{
@@ -41,7 +42,17 @@ pub struct PageSpec {
     pub key: Option<char>,
     /// How the page draws.
     pub render: PageRender,
+    /// The keys that are the page's own, consulted before the global key map: what `↑`/`↓` mean
+    /// depends on the page that is up, and a page that owns its keys is where they are written.
+    ///
+    /// The same layering Yazi's keymap has (`Keymap::chords(layer)`) and the shape ratatui's own
+    /// component guidance describes (`handle_key_events` on the component): the page's layer first,
+    /// then the app's. `None` for a page with no keys of its own.
+    pub keys: Option<PageKeys>,
 }
+
+/// One page's key layer: handles the key if it is the page's, and says whether it did.
+pub type PageKeys = fn(&mut App, KeyEvent) -> bool;
 
 /// How a page draws: the whole frame, or its own area inside the shared shell.
 #[derive(Clone, Copy)]
@@ -75,6 +86,7 @@ impl Page {
                 name: "启动页",
                 key: None,
                 render: PageRender::Standalone(ui::draw_splash),
+                keys: None,
             },
             Page::Main => &PageSpec {
                 name: "主界面",
@@ -83,6 +95,7 @@ impl Page {
                     layout: layout::main,
                     content: ui::draw_main,
                 },
+                keys: None,
             },
             Page::Lyrics => &PageSpec {
                 name: "歌词页 / 主界面",
@@ -91,6 +104,7 @@ impl Page {
                     layout: layout::content,
                     content: ui::draw_lyrics,
                 },
+                keys: None,
             },
             Page::Playlist => &PageSpec {
                 name: "播放队列 / 主界面",
@@ -99,6 +113,7 @@ impl Page {
                     layout: layout::content,
                     content: ui::draw_queue,
                 },
+                keys: None,
             },
             Page::Artist => &PageSpec {
                 name: "歌手详情 / 主界面",
@@ -112,6 +127,7 @@ impl Page {
                     layout: layout::content,
                     content: ui::draw_artist,
                 },
+                keys: None,
             },
             Page::Settings => &PageSpec {
                 name: "设置 / 主界面",
@@ -120,11 +136,13 @@ impl Page {
                     layout: layout::content,
                     content: ui::draw_settings,
                 },
+                keys: Some(crate::ui::settings::keys),
             },
             Page::Login => &PageSpec {
                 name: "登录网易云",
                 key: Some('L'),
                 render: PageRender::Standalone(ui::draw_login),
+                keys: None,
             },
         }
     }

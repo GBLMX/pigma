@@ -4,6 +4,7 @@
 mod border;
 mod cache;
 mod column;
+pub mod keymap;
 pub mod lyrics;
 mod navigation;
 mod notify;
@@ -67,6 +68,10 @@ pub struct Config {
     /// own it.
     #[serde(skip)]
     pub persist: bool,
+    /// `[keys]`: which key runs which command, by the command's name — the command table's `key`
+    /// column is the default, and this is what a user rebinds. Empty means "the table's own keys".
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub keys: crate::config::keymap::KeyBindings,
     #[serde(default = "unversioned_config_version")]
     pub config_version: u32,
     pub default_theme: String,
@@ -262,6 +267,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             config_version: CONFIG_VERSION,
+            keys: crate::config::keymap::KeyBindings::new(),
             persist: true,
             default_theme: Theme::default().name,
             light_theme: None,

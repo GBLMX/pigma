@@ -73,7 +73,10 @@ impl App {
         });
     }
 
-    pub(super) async fn handle_events(&mut self) -> color_eyre::Result<()> {
+    /// The loop's event step: what a frame's worth of queued events does to the app. `pub(crate)`
+    /// because driving it is how a test presses a key and sees what the keyboard did — the same
+    /// entry point `App::run` uses.
+    pub(crate) async fn handle_events(&mut self) -> color_eyre::Result<()> {
         if self.playback.state.seeking {
             tokio::select! {
                 biased;
