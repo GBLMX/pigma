@@ -157,6 +157,7 @@ pub const COMMANDS: &[Command] = &[
     setting("notify", "notify errors", "播放出错时通知", "通知"),
     setting("mouse", "mouse", "鼠标捕获开关", "终端"),
     setting("cursor", "cursor", "输入框光标形状", "终端"),
+    setting("progress", "progress", "进度条样式", "播放条"),
     setting("lyrics", "lyrics", "歌词显示样式", "歌词"),
     setting("lyricgradient", "lyricgradient", "歌词渐变预设", "歌词"),
     setting("saveonplay", "saveonplay", "边听边存开关", "缓存"),

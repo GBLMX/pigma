@@ -294,19 +294,22 @@ fn render_gauge(
     } else {
         pb.unfilled_color.as_str()
     };
+    // Resolved once, here: the style's symbols unless a key overrides them, and the style's
+    // gradient unless `gradient_preset` was written.
+    let (filled, unfilled) = pb.progress_symbols();
 
-    if let Some(preset) = pb.gradient_preset {
+    if let Some(preset) = pb.progress_gradient() {
         let gauge = GradientLineGauge::new(preset)
             .ratio(ratio)
             .label(label)
-            .filled_symbol(&pb.filled_symbol)
-            .unfilled_symbol(&pb.unfilled_symbol)
+            .filled_symbol(filled)
+            .unfilled_symbol(unfilled)
             .unfilled_style(Style::default().fg(colors.field_color(unfilled_color)));
         f.render_widget(gauge, area);
     } else {
         let gauge = LineGauge::default()
-            .filled_symbol(&pb.filled_symbol)
-            .unfilled_symbol(&pb.unfilled_symbol)
+            .filled_symbol(filled)
+            .unfilled_symbol(unfilled)
             .filled_style(Style::default().fg(colors.field_color(&pb.filled_color)))
             .unfilled_style(Style::default().fg(colors.field_color(unfilled_color)))
             .ratio(ratio)
@@ -520,6 +523,7 @@ mod tests {
     use ratatui_image::picker::Picker;
 
     use super::*;
+    use crate::config::ProgressStyle;
 
     fn playing() -> PlaybackState {
         PlaybackState {
@@ -578,6 +582,75 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The style decides what the bar is made of, and the only proof is the frame: a style whose
+    /// symbols never reach the gauge draws the old bar in silence. It is also where the style's
+    /// gradient shows up — `blocks` paints each cell a different shade, the flat default none.
+    #[test]
+    fn the_progress_bar_draws_the_style() {
+        const WIDTH: u16 = 24;
+        let theme = Theme::default();
+
+        // The gauge writes a label cell first, so the bar is counted by symbol rather than
+        // compared as one string.
+        let render = |style: ProgressStyle| {
+            let pb = PlayerbarConfig {
+                progress_style: style,
+                ..PlayerbarConfig::default()
+            };
+            let area = Rect::new(0, 0, WIDTH, 1);
+            let mut terminal = Terminal::new(TestBackend::new(WIDTH, 1)).expect("backend");
+            terminal
+                .draw(|f| render_gauge(f, &pb, &theme, false, 0.5, Line::default(), area))
+                .expect("draw");
+
+            let buffer = terminal.backend().buffer().clone();
+            let row: String = (0..WIDTH).map(|x| buffer[(x, 0)].symbol()).collect();
+            let (filled, _) = style.symbols();
+            let filled_cells: Vec<ratatui::style::Color> = (0..WIDTH)
+                .filter(|x| buffer[(*x, 0)].symbol() == filled)
+                .map(|x| buffer[(x, 0)].style().fg.unwrap_or_default())
+                .collect();
+
+            (row, filled_cells)
+        };
+
+        let (thick, thick_shades) = render(ProgressStyle::Thick);
+        let (segment, _) = render(ProgressStyle::Segment);
+        let (plain, _) = render(ProgressStyle::Plain);
+        let (blocks, block_shades) = render(ProgressStyle::Blocks);
+
+        // Half of the bar is filled, in each style's own symbols — the default one included,
+        // which is what this bar drew before styles existed. (`plain`'s track is blank: the bar
+        // is a run of the glyph and nothing else.)
+        assert_eq!(
+            (thick.matches('━').count(), thick.matches('─').count()),
+            (11, 12),
+            "{thick}"
+        );
+        assert_eq!(
+            (plain.matches('━').count(), plain.matches('─').count()),
+            (11, 0),
+            "{plain}"
+        );
+        assert_eq!(
+            (blocks.matches('█').count(), blocks.matches('░').count()),
+            (11, 12),
+            "{blocks}"
+        );
+        assert_eq!(segment.matches('/').count(), 23, "{segment}");
+
+        // The style's gradient reaches the gauge: one colour for the flat default, a spread of
+        // them for `blocks` (turbo).
+        let shades = |cells: &[ratatui::style::Color]| {
+            cells
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+        };
+        assert_eq!(shades(&thick_shades), 1, "the default bar is one colour");
+        assert!(shades(&block_shades) > 1, "blocks carries a gradient");
     }
 
     #[test]

@@ -434,7 +434,7 @@ impl Theme {
 /// `unfilled_color_cached = "warning"` produced five log lines a second, and the log file grew
 /// without bound again. The lookup has to stay on the render path (that is how config-driven
 /// colours work), but the warning only has to be said once per name per run.
-fn report_unknown_field_once(name: &str) -> bool {
+pub(crate) fn report_unknown_field_once(name: &str) -> bool {
     static REPORTED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
     let reported = REPORTED.get_or_init(Default::default);
     match reported.lock() {

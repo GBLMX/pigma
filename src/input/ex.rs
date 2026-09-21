@@ -22,7 +22,7 @@ use crossterm::{
 use crate::{
     app::App,
     cli::parse_volume,
-    config::{Config, LyricStyle, NotifyConfig, Pane},
+    config::{Config, LyricStyle, NotifyConfig, Pane, ProgressStyle},
     event::{AppEvent, AuthEvent, NavigationEvent},
     ipc::MsgAction,
     state::{LoginMethod, Page},
@@ -51,6 +51,8 @@ pub(crate) enum ExCommand {
     NavPos,
     /// Draw the translated lyric lines under the originals; `None` toggles, like the `y` key.
     Translation(Option<bool>),
+    /// The progress bar's look; `None` cycles, like the bare `:lyrics`.
+    ProgressStyle(Option<String>),
     /// Turn the record on the player bar; `None` toggles, like the `t` key.
     Spin(Option<bool>),
     /// Write to the download cache while playing; `None` toggles. The engine copied the
@@ -162,6 +164,7 @@ impl ExCommand {
             }
             "theme" => Ok(Self::Theme(optional_argument(&args)?)),
             "lyrics" => Ok(Self::LyricStyle(optional_argument(&args)?)),
+            "progress" => Ok(Self::ProgressStyle(optional_argument(&args)?)),
             "volume" => Ok(Self::Volume(required("音量")?)),
             "seek" => Ok(Self::Seek(required("跳转位置")?)),
             "visualizer" => Ok(Self::Visualizer(optional_on_off(args.first().copied())?)),
@@ -476,6 +479,7 @@ fn candidate_names(head: &str, typed: &str, themes: &[&str]) -> Vec<String> {
             "pane" => Pane::names(),
             "layout" => vec!["default", "minimal", "modern"],
             "lyrics" => LyricStyle::ALL.iter().map(|s| s.name()).collect(),
+            "progress" => ProgressStyle::ALL.iter().map(|s| s.name()).collect(),
             _ => Vec::new(),
         }
     };
@@ -686,6 +690,29 @@ pub(crate) fn execute(app: &mut App, command: ExCommand) -> Result<(), String> {
             app.config.save();
             app.toast(format!("歌词样式: {} — {}", style.name(), style.describe()));
         }
+        ExCommand::ProgressStyle(None) => {
+            // Bare, it cycles — the same shape as the bare `:lyrics`.
+            let next = app.config.playerbar.progress_style.next();
+            app.config.playerbar.progress_style = next;
+            app.config.save();
+            app.toast(format!(
+                "进度条样式: {} — {}",
+                next.name(),
+                next.describe()
+            ));
+        }
+        ExCommand::ProgressStyle(Some(name)) => {
+            let Some(style) = ProgressStyle::parse(&name) else {
+                let known: Vec<&str> = ProgressStyle::ALL.iter().map(|s| s.name()).collect();
+                return Err(format!(
+                    "未知进度条样式: {name}（可用: {}）",
+                    known.join(" / ")
+                ));
+            };
+            app.config.playerbar.progress_style = style;
+            app.config.save();
+            app.toast(format!("进度条样式: {} — {}", style.name(), style.describe()));
+        }
         ExCommand::Volume(value) => match parse_volume(&value) {
             Err(error) => return Err(error.to_string()),
             Ok(MsgAction::Volume { absolute, delta }) => {
@@ -861,6 +888,14 @@ mod tests {
         assert_eq!(ExCommand::parse("spin on"), Ok(ExCommand::Spin(Some(true))));
         // Bare, it toggles — the same thing the `t` key does.
         assert_eq!(ExCommand::parse("spin"), Ok(ExCommand::Spin(None)));
+        assert_eq!(
+            ExCommand::parse("progress"),
+            Ok(ExCommand::ProgressStyle(None))
+        );
+        assert_eq!(
+            ExCommand::parse("progress segment"),
+            Ok(ExCommand::ProgressStyle(Some("segment".to_string())))
+        );
         assert_eq!(
             ExCommand::parse("translation"),
             Ok(ExCommand::Translation(None))
