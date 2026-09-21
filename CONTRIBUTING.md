@@ -140,6 +140,7 @@ cat /proc/<pid>/task/*/wchan                      # 内核视角：线程卡在�
 | 页面表（绘制/布局/按键三处分发合一） | `src/state/page.rs`、`src/ui.rs`、`src/layout.rs` |
 | 主题内部（`palette` 对比度、`random`、稳定排序） | `src/config/theme.rs`、`src/app/theme.rs` |
 | 启动画面字形（FIGlet `Calvin S` 的渲染结果） | `src/ui/splash.rs` |
+| 一键安装脚本（上游没有）与它依赖的发布契约 | `install.sh`、`install.ps1`、`.github/workflows/release.yml` 里生成 `SHA256SUMS` 的那一步（上游若改发布作业，这里必然冲突） |
 
 同步方式是**按提交挑**，不合并：
 
