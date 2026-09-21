@@ -1,5 +1,10 @@
 name: CI
 
+# Least privilege: the workflows only read the repository. (The release workflow asks for the
+# write it needs on its own.)
+permissions:
+  contents: read
+
 on:
   pull_request:
     paths-ignore:
@@ -17,6 +22,8 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+# A superseded push stops costing runner time: the newest commit on a branch is the only one
+# whose result anyone reads.
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
@@ -25,6 +32,7 @@ jobs:
   skip-check:
     name: skip release commits
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       skip: ${{ steps.check.outputs.skip }}
     steps:
@@ -47,6 +55,7 @@ jobs:
     needs: skip-check
     if: needs.skip-check.outputs.skip == 'false'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -59,13 +68,12 @@ jobs:
           components: rustfmt
       - name: check formatting
         run: cargo +nightly fmt -- --check
-      - name: Cache Cargo dependencies
-        uses: Swatinem/rust-cache@v2
   clippy:
     name: clippy
     needs: skip-check
     if: needs.skip-check.outputs.skip == 'false'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       checks: write
@@ -84,19 +92,22 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y pkg-config libasound2-dev
+      # Before the build, not after it: a cache step that runs last restores nothing and the
+      # next run compiles the whole workspace again.
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
       - name: Run clippy action
         uses: clechasseur/rs-clippy-check@v5
         with:
           # Cover the workspace members (`crates/ncm-api`, `crates/sonar`) as well:
           # a package-only clippy run never looked at them.
           args: --workspace --all-targets
-      - name: Cache Cargo dependencies
-        uses: Swatinem/rust-cache@v2
   build-aarch64:
     name: build linux/aarch64
     needs: skip-check
     if: needs.skip-check.outputs.skip == 'false'
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -113,18 +124,24 @@ jobs:
           PKG_CONFIG_PATH = "/usr/lib/aarch64-linux-gnu/pkgconfig"
           EOF
 
+      # Before the build, so it can restore what the last run compiled.
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          # Cross builds write under `target/<triple>`, which the action does not key on.
+          key: aarch64-unknown-linux-gnu
       - name: Build for aarch64-unknown-linux-gnu
         uses: houseabsolute/actions-rust-cross@v1
         with:
           target: aarch64-unknown-linux-gnu
           command: build
           args: '--locked'
-      - name: Cache Cargo dependencies
-        uses: Swatinem/rust-cache@v2
   test:
     needs: skip-check
     if: needs.skip-check.outputs.skip == 'false'
     runs-on: ${{ matrix.os }}
+    # A hang must not burn the runner budget; the slowest job here is a cold build.
+    timeout-minutes: 60
     name: test ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -143,6 +160,10 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y pkg-config libasound2-dev
+      # Before the test run: this is what keeps a three-platform matrix from compiling the
+      # whole workspace from scratch every time. The key is per-OS because the caches are.
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
       - name: cargo generate-lockfile
         if: hashFiles('Cargo.lock') == ''
         run: cargo generate-lockfile
@@ -150,5 +171,3 @@ jobs:
         # `--workspace` also runs the tests of the `crates/*` members, which a
         # package-only invocation silently skipped.
         run: cargo test --locked --workspace --all-features
-      - name: Cache Cargo dependencies
-        uses: Swatinem/rust-cache@v2
