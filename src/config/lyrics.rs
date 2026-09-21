@@ -48,6 +48,15 @@ impl LyricStyle {
         }
     }
 
+    /// The style after this one, wrapping around: what a bare `:lyrics` cycles through.
+    ///
+    /// Derived from [`Self::ALL`] instead of a hand-written chain, so adding a style cannot
+    /// leave the cycle behind — a new variant used to be skippable here without a word.
+    pub fn next(self) -> Self {
+        let at = Self::ALL.iter().position(|style| *style == self).unwrap_or(0);
+        Self::ALL[(at + 1) % Self::ALL.len()]
+    }
+
     /// Short description, for the help and the command line's completion list.
     pub fn describe(self) -> &'static str {
         match self {
@@ -80,6 +89,22 @@ mod tests {
             assert_eq!(back.lyric_style, style, "{text}");
             assert_eq!(LyricStyle::parse(style.name()), Some(style));
         }
+    }
+
+    /// A bare `:lyrics` walks the styles in the order they are offered and comes back round to
+    /// the one it started from — the cycle used to be written out by hand, and a style added to
+    /// `ALL` could be missing from it.
+    #[test]
+    fn the_cycle_visits_every_style_in_order() {
+        let mut seen = vec![LyricStyle::Window];
+        let mut style = LyricStyle::Window;
+        for _ in 1..LyricStyle::ALL.len() {
+            style = style.next();
+            seen.push(style);
+        }
+
+        assert_eq!(seen, LyricStyle::ALL.to_vec());
+        assert_eq!(style.next(), LyricStyle::Window);
     }
 
     /// The names in the config, in the command line and in `name()` are one list.

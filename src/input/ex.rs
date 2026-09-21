@@ -660,13 +660,9 @@ pub(crate) fn execute(app: &mut App, command: ExCommand) -> Result<(), String> {
         }
         ExCommand::LyricStyle(None) => {
             // Bare, it cycles — the same shape as `:visualizer`, `:pitch` and the keys that do
-            // the same thing.
-            let next = match app.config.lyric_style {
-                LyricStyle::Window => LyricStyle::OneLine,
-                LyricStyle::OneLine => LyricStyle::Flow,
-                LyricStyle::Flow => LyricStyle::Plain,
-                LyricStyle::Plain => LyricStyle::Window,
-            };
+            // the same thing. The order is `LyricStyle::ALL`'s, so a new style cannot be added
+            // and then silently skipped here.
+            let next = app.config.lyric_style.next();
             app.config.lyric_style = next;
             app.config.save();
             app.toast(format!("歌词样式: {} — {}", next.name(), next.describe()));
