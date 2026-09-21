@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/GBX1219/boxpigma/theme.schema.json",
+  "$id": "https://github.com/GBLMX/pigma/theme.schema.json",
   "title": "boxpigma user theme",
   "description": "A theme written in the config's [themes.<name>] block: a base, the palette it overrides, and the component sections. Editors that read this file validate the theme as it is typed.",
   "type": "object",

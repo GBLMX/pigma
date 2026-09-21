@@ -178,7 +178,9 @@ RSS 大致是**二进制体积 + 约 3 MB**（1.0 的二进制 11.1 MB），换�
 - [x] command panel 重写，更多运行时配置支持（`ctrl+p` 面板 + `:mouse` / `:cursor` / `:notify` / `:lyricgradient` / `:saveonplay` 等可运行时修改的设置）
 - [x] 云盘源作为 fallback（NCM → sonar → **云盘** → 才报错）
 - [x] 本地音频歌词、元数据重写（`lofty` 读标签；同名侧车 `.lrc` 复用既有歌词管线）
-- [x] 歌手信息（歌手详情页：简介 / 热门曲目 / 专辑）
+- [x] 歌手详情页：简介 / 热门曲目 / **专辑 / 相似歌手** —— 三个列表共用一个光标（`Tab`/`Shift+Tab` 循环），专辑可走可开（`Enter` 打开该专辑，`Esc` 回到歌手页），相似歌手 `Enter` 直接跳过去；鼠标点哪栏就选中哪栏，滚轮走指针所在那栏
+- [x] 推荐生态接入既有侧栏与内容页：相似歌曲 / 包含该歌的歌单 / 听歌排行（本周 · 全部）/ 推荐电台 / 私人 FM（`:simi` `:simiplaylist` `:fm` `:fmtrash`）
+- [x] `[audio]` 播放链（解码之后、设备之前）：`rubato` 采样率转换（**设备与文件一致时不构造任何适配器 = 位完美路径**）、`biquad` 参量 EQ、`ebur128` 响度归一化、Windows 上 WASAPI **独占**输出（设备拒绝时给出可操作原因并回退共享模式）
 - [ ] landing page
 
 ## Preview
@@ -192,9 +194,15 @@ RSS 大致是**二进制体积 + 约 3 MB**（1.0 的二进制 11.1 MB），换�
   </tr>
   <tr>
     <td><img src="./imgs/image_003.png" width="100%" /></td>
+    <td><img src="./imgs/image_004.png" width="100%" /></td>
+  </tr>
+  <tr>
     <td><img src="./imgs/image_005.png" width="100%" /></td>
+    <td></td>
   </tr>
 </table>
+
+它们是**应用自己画出来的**：`src/ui.rs` 里的 `shots` 会把整页渲染到离屏缓冲（就是测试用的那个 `TestBackend`），再导出 HTML 栅格化——所以 UI 一变就能重新生成，也不会带上任何人的账号信息（顶栏是未登录态）。终端支持图形协议（kitty / iTerm2 / sixel）时播放条才会显示封面。
 
 
 ## Install
@@ -305,6 +313,7 @@ cargo build --release
 | 任意可换       |       键位由命令表派生，`[keys]` 里 `命令名 = "键"` 即重绑；值可写多键序列（`"z z"`、`"ctrl+l"`，`Esc` 放弃半截），`""` 解绑     |
 | ,             |       设置页（同 `:settings`）：↑↓ 选择 · ←→ 修改 · 空格 开关     |
 | `ctrl+↑/↓/←/→` |  拖面板边界：顶栏/播放条、侧栏尺寸（同鼠标拖拽）  |
+| tab / shift+tab（歌手页） | 在热门曲目 / 专辑 / 相似歌手之间切换光标；`Enter` 按当前栏生效（歌曲播放、专辑打开、相似歌手跳转） |
 | :             |      命令模式（vim 风格，Tab 补全，见下节）     |
 
 ### 命令模式（vim 风格）
@@ -339,6 +348,10 @@ cargo build --release
 | `:cursor default\|block\|underline\|bar` | 终端光标形状（当场生效） |
 | `:lyricgradient <预设>` | 歌词扫光渐变（`Tab` 列出全部预设） |
 | `:saveonplay on\|off` | 播放时自动写入「我喜欢的音乐」 |
+| `:simi`（`:similar`） | 打开当前播放歌曲的相似歌曲（内容页，`Esc` 回到发起的页面） |
+| `:simiplaylist`（`:songlists`） | 打开包含当前歌曲的歌单 |
+| `:fm` | 取一页私人 FM 并播放 |
+| `:fmtrash`（`:fm-trash`） | 把当前 FM 歌曲从私人 FM 里剔除 |
 
 终端背景为浅色时，`:theme` 配合配置里的 `background = "auto"` 与 `light_theme` 会自动选浅色主题。
 
@@ -521,6 +534,7 @@ Send-boxpigma '{"cmd":"msg","action":{"action":"volume","absolute":0.75}}'  # �
 | `[terminal]` | 鼠标捕获与光标形状 |
 | `[notify]` | 桌面通知开关（切歌 / 出错） |
 | `[cache]` | 内容缓存与 save-on-play |
+| `[audio]` | 播放链：`resample`（用 `rubato` 转换采样率，采样率一致时不动样本）、`[[audio.eq]]`（每段 `freq`/`gain_db`/`q`，参量峰值滤波）、`[audio.loudness]`（`target_lufs`/`max_gain_db`，EBU R128 响度归一化）、`exclusive`（Windows：WASAPI 独占输出，失败自动回退共享模式并说明原因） |
 
 改完可用 `:save` 立即写回；`:` 命令行里 `:theme <Tab>`、`:layout <Tab>` 都能补全可用取值。
 
