@@ -1,6 +1,7 @@
 //! TOML configuration: the runtime `Config` plus the border/cache/column/
 //! navigation/playerbar/theme registries.
 
+mod audio;
 mod border;
 mod cache;
 mod column;
@@ -16,6 +17,7 @@ mod titles;
 
 use std::{collections::HashMap, fs, path::Path};
 
+pub use audio::*;
 pub use border::*;
 pub use cache::*;
 pub use column::*;
@@ -102,6 +104,10 @@ pub struct Config {
     pub navigation: NavConfig,
     #[serde(default)]
     pub cache: CacheConfig,
+    /// `[audio]`: what the player does to the sound on its way to the device — sample-rate
+    /// conversion, the parametric EQ and loudness normalization.
+    #[serde(default)]
+    pub audio: AudioConfig,
     #[serde(default)]
     pub playerbar: PlayerbarConfig,
     #[serde(default)]
@@ -291,6 +297,7 @@ impl Default for Config {
             splash_duration_secs: default_splash_duration(),
             logger: Logger::default(),
             cache: CacheConfig::default(),
+            audio: AudioConfig::default(),
             playerbar: PlayerbarConfig::default(),
             titles: TitlesConfig::default(),
             source_fallback: SonarConfig::default(),

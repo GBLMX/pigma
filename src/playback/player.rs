@@ -1,3 +1,4 @@
+use super::chain;
 use std::{
     io::{Read, Seek, SeekFrom},
     sync::{
@@ -93,6 +94,11 @@ pub enum ControlCmd {
 /// Run the audio player as a persistent blocking task. The task is spawned once
 /// and stays alive across songs — new sources are fed via ControlCmd::Switch.
 ///
+/// The rate the open device runs at, which is what the file's rate has to be converted to.
+fn device_rate(sink: &rodio::MixerDeviceSink) -> Option<u32> {
+    Some(sink.config().sample_rate().get())
+}
+
 /// The audio device sink is owned by this task (created lazily on first
 /// playback) so it can be rebuilt when the output device goes away: Bluetooth
 /// headsets being disconnected/reconnected invalidate the old stream, and the
@@ -101,6 +107,7 @@ pub(super) fn run(
     initial_reader: SharedReader,
     initial_seek_time: Option<Duration>,
     initial_volume: f32,
+    dsp: crate::config::AudioConfig,
     event_tx: mpsc::UnboundedSender<Event>,
     control_rx: std::sync::mpsc::Receiver<ControlCmd>,
 ) {
@@ -174,6 +181,19 @@ pub(super) fn run(
                                 (Box::new(d), Duration::default())
                             };
                         seek_offset = offset;
+                        // Convert the file's rate to the device's before anything else looks
+                        // at the samples: the spectrum shows what is heard, and so does the
+                        // volume the device gets. A file already at the device's rate is not
+                        // touched at all, which is the bit-perfect path.
+                        let source: Box<dyn Source<Item = f32> + Send> =
+                            match (dsp.resample, sink.as_ref().and_then(device_rate)) {
+                                (true, Some(rate)) => match chain::Resample::new(source, rate) {
+                                    Ok(resampled) => Box::new(resampled),
+                                    // The device already runs at the file's rate: nothing to do.
+                                    Err(untouched) => untouched,
+                                },
+                                _ => source,
+                            };
                         let p = rodio::Player::connect_new(
                             &sink.as_ref().expect("sink ensured").mixer().clone(),
                         );

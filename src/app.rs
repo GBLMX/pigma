@@ -164,6 +164,8 @@ impl App {
         let quality = ncm_api::SongQuality::from_level(&config.cache.quality)
             .unwrap_or(ncm_api::SongQuality::Higher);
         let save_on_play = config.cache.save_on_play;
+        // The audio chain's settings travel with the engine: the player thread owns its copy.
+        let audio = config.audio.clone();
 
         let cache_dir = {
             let expanded = expand_tilde(&config.cache.cache_dir);
@@ -292,6 +294,9 @@ impl App {
                 cache,
                 base_dir,
                 quality,
+                // The engine copies the chain's settings: it hands them to the player thread
+                // when the first song starts.
+                audio.clone(),
                 save_on_play,
                 stream_client,
                 Arc::clone(&finder),

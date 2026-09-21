@@ -23,7 +23,10 @@ enum PlayerCmd {
 }
 
 impl PlaybackHandle {
-    pub(super) fn new(event_tx: tokio_mpsc::UnboundedSender<Event>) -> Self {
+    pub(super) fn new(
+        event_tx: tokio_mpsc::UnboundedSender<Event>,
+        dsp: crate::config::AudioConfig,
+    ) -> Self {
         let (cmd_tx, mut cmd_rx) = tokio_mpsc::unbounded_channel::<PlayerCmd>();
 
         tokio::spawn(async move {
@@ -44,7 +47,7 @@ impl PlaybackHandle {
                             let (ctrl_tx, ctrl_rx) = mpsc::channel();
                             control_tx = Some(ctrl_tx);
                             let tx = event_tx.clone();
-                            player::run(input, seek_time, last_volume, tx, ctrl_rx);
+                            player::run(input, seek_time, last_volume, dsp.clone(), tx, ctrl_rx);
                         }
                     }
                     PlayerCmd::SeekTo(seek_time) => {
