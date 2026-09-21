@@ -1,0 +1,53 @@
+name: Pages
+
+# 把 docs/ 作为静态站点发布到 GitHub Pages。
+#
+# 【需要人工做一次的设置】仓库 Settings → Pages → Build and deployment → Source 必须选成
+# "GitHub Actions"。GitHub 没有为这一步提供 API，workflow 里也点不动它 —— 只能人工选一次，
+# 否则这个 workflow 跑完也是白跑（站点照旧或 404）；deploy 那一步会直接报错并提示这一点。
+#
+# 站点内容就是 docs/ 目录本身（入口 docs/index.html），这里不做任何构建：
+# 页面是单文件 HTML + 内联 CSS，图片走仓库的 raw 地址，所以产物等于仓库里的那几份文件。
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'docs/**'
+  workflow_dispatch:
+
+# 部署 Pages 需要这三项：读仓库、写 Pages、用 OIDC 取部署令牌。多一项都不给。
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Pages 的部署串行：新推送等前一次落地，而不是把它掐掉 —— 半途中断的站点比稍旧的站点糟。
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: deploy docs/
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v6
+
+      - name: Upload docs/ as the site artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: docs
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

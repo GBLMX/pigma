@@ -8,6 +8,10 @@
 //!   line until the connection closes (event push for waybar / other clients).
 //! - `{"cmd":"msg","action":...}` → the server forwards an `IpcEvent` into the
 //!   app's event channel and replies `{"ok":true}`.
+//! - `{"cmd":"capabilities"}` → the server replies with its self-describing
+//!   contract: the API version, the program version, every `msg` action it
+//!   implements (`ACTIONS`) and the endpoint it listens on. Read-only, so it
+//!   answers even before login or with nothing loaded.
 //!
 //! Transport is platform-specific: a Unix domain socket at
 //! `~/.cache/boxpigma/boxpigma.sock` on Linux/macOS, and a named pipe `\\.\pipe\boxpigma`
@@ -43,12 +47,17 @@ pub const SOCKET_FILE: &str = "boxpigma.sock";
 const PIPE_NAME: &str = r"\\.\pipe\boxpigma";
 
 /// Request sent from the CLI to the running TUI.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "cmd", rename_all = "snake_case")]
 pub enum IpcRequest {
     Status,
     /// Return the current playback queue (`boxpigma status -L`).
     List,
+    /// Return the self-describing contract (`boxpigma msg capabilities`): the
+    /// API version, the program version, the [`ACTIONS`] catalogue and the
+    /// endpoint in use. Read-only, so it answers without login or playback.
+    #[serde(alias = "caps")]
+    Capabilities,
     /// Keep the connection open and stream each `StatusSnapshot` change as a
     /// JSON line. An initial snapshot is sent immediately on connect.
     Subscribe,
@@ -65,9 +74,14 @@ pub enum IpcRequest {
 }
 
 /// A playback control action for `boxpigma msg`.
+///
+/// The accepted names are [`ACTIONS`]: each variant's canonical name plus the
+/// `alias`es below, which mirror that table's aliases — the
+/// `every_listed_action_name_dispatches` test fails if the two drift apart.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum MsgAction {
+    #[serde(alias = "prev")]
     Previous,
     Next,
     Pause,
@@ -78,6 +92,7 @@ pub enum MsgAction {
     },
     /// Play/pause toggle (the TUI spacebar semantics: start when stopped,
     /// resume when paused, pause when playing).
+    #[serde(alias = "play_pause", alias = "toggle-play", alias = "play-pause")]
     TogglePlay,
     /// Exactly one of `delta` / `absolute` is set:
     /// - `delta`: fraction of 0..=1 to add/subtract (mirrors the TUI's `+`/`-`).
@@ -89,10 +104,12 @@ pub enum MsgAction {
     Mode,
     Like,
     Dislike,
+    #[serde(alias = "unlike", alias = "toggle")]
     ToggleLike,
     /// Dynamically switch the daemon's queue to another endpoint. `endpoint` is
     /// an API endpoint name (e.g. `toplist`, `liked`); `playlist` optionally
     /// picks the 1-based playlist within list-type endpoints.
+    #[serde(alias = "switch-list", alias = "switch")]
     SwitchList {
         endpoint: String,
         playlist: Option<usize>,
@@ -140,6 +157,211 @@ impl From<MsgAction> for IpcEvent {
                 IpcEvent::SwitchList { endpoint, playlist }
             }
         }
+    }
+}
+
+/* -------------------------------------------------------------------------- */
+/*                          `msg` action catalogue                           */
+/* -------------------------------------------------------------------------- */
+
+/// Contract version reported as `api` by [`capabilities`].
+///
+/// Bump it only when an action is renamed or removed; a new action, or a new
+/// field anywhere in this payload, keeps the same version (see `SKILLS.md`).
+pub const API_VERSION: u32 = 1;
+
+/// One entry of the `boxpigma msg` action list: name, aliases, whether the
+/// action takes a value argument, a one-line summary, plus the internal
+/// dispatch branch.
+///
+/// [`ACTIONS`] is the only place action names are listed: the `capabilities`
+/// payload, the CLI's accepted values and the CLI's dispatch all derive from it
+/// (see `src/cli.rs`), so the published list cannot drift from the
+/// implementation. The one other appearance is the serde `alias`es on
+/// [`MsgAction`] (the wire format); the
+/// `every_listed_action_name_dispatches` test keeps the two in sync.
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct ActionSpec {
+    /// Canonical name; also the `name` field of `capabilities`.
+    pub name: &'static str,
+    /// Equivalent spellings, accepted by both the CLI and the IPC surface.
+    pub aliases: &'static [&'static str],
+    /// Whether a value argument is accepted (`boxpigma msg <ACTION> <VALUE>`).
+    pub takes_value: bool,
+    /// One-line description, used by `--help` and `capabilities`.
+    pub summary: &'static str,
+    /// Dispatch branch; internal, never serialized.
+    #[serde(skip)]
+    pub(crate) kind: ActionKind,
+}
+
+/// What `boxpigma msg` does with an action.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ActionKind {
+    /// Control action: sent to the daemon as a [`MsgAction`], answered `{"ok":true}`.
+    Control(ControlAction),
+    /// Request/response action: answered by the daemon with data.
+    Query(QueryAction),
+}
+
+/// Control actions, one per [`MsgAction`] variant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ControlAction {
+    Previous,
+    Next,
+    Pause,
+    Play,
+    TogglePlay,
+    Volume,
+    Mode,
+    Like,
+    Dislike,
+    ToggleLike,
+    SwitchList,
+}
+
+/// Request/response actions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum QueryAction {
+    /// Print the playback queue (with an endpoint argument: switch the queue).
+    List,
+    /// Search songs.
+    Search,
+    /// Print the capability contract.
+    Capabilities,
+}
+
+/// Every `boxpigma msg` action, ascending by name (the order `capabilities`
+/// publishes, asserted by `action_catalogue_is_consistent`).
+pub const ACTIONS: &[ActionSpec] = &[
+    ActionSpec {
+        name: "capabilities",
+        aliases: &["caps"],
+        takes_value: false,
+        summary: "Print this contract: API version, program version, actions, endpoint",
+        kind: ActionKind::Query(QueryAction::Capabilities),
+    },
+    ActionSpec {
+        name: "dislike",
+        aliases: &[],
+        takes_value: false,
+        summary: "Dislike the current song",
+        kind: ActionKind::Control(ControlAction::Dislike),
+    },
+    ActionSpec {
+        name: "like",
+        aliases: &[],
+        takes_value: false,
+        summary: "Like the current song",
+        kind: ActionKind::Control(ControlAction::Like),
+    },
+    ActionSpec {
+        name: "list",
+        aliases: &[],
+        takes_value: true,
+        summary: "Print the playback queue, or switch it when given an endpoint",
+        kind: ActionKind::Query(QueryAction::List),
+    },
+    ActionSpec {
+        name: "mode",
+        aliases: &[],
+        takes_value: false,
+        summary: "Cycle the play mode",
+        kind: ActionKind::Control(ControlAction::Mode),
+    },
+    ActionSpec {
+        name: "next",
+        aliases: &[],
+        takes_value: false,
+        summary: "Go to the next song",
+        kind: ActionKind::Control(ControlAction::Next),
+    },
+    ActionSpec {
+        name: "pause",
+        aliases: &[],
+        takes_value: false,
+        summary: "Pause playback",
+        kind: ActionKind::Control(ControlAction::Pause),
+    },
+    ActionSpec {
+        name: "play",
+        aliases: &[],
+        takes_value: true,
+        summary: "Play/resume, or jump to a song id in the active queue",
+        kind: ActionKind::Control(ControlAction::Play),
+    },
+    ActionSpec {
+        name: "previous",
+        aliases: &["prev"],
+        takes_value: false,
+        summary: "Go to the previous song",
+        kind: ActionKind::Control(ControlAction::Previous),
+    },
+    ActionSpec {
+        name: "search",
+        aliases: &[],
+        takes_value: true,
+        summary: "Search songs across NCM and the enabled sonar sources",
+        kind: ActionKind::Query(QueryAction::Search),
+    },
+    ActionSpec {
+        name: "switch-list",
+        aliases: &["switch"],
+        takes_value: true,
+        summary: "Switch the queue to another endpoint (see --playlist)",
+        kind: ActionKind::Control(ControlAction::SwitchList),
+    },
+    ActionSpec {
+        name: "toggle_like",
+        aliases: &["unlike", "toggle"],
+        takes_value: false,
+        summary: "Toggle like on the current song",
+        kind: ActionKind::Control(ControlAction::ToggleLike),
+    },
+    ActionSpec {
+        name: "toggle_play",
+        aliases: &["play_pause", "toggle-play", "play-pause"],
+        takes_value: false,
+        summary: "Toggle play/pause (start when stopped, resume when paused)",
+        kind: ActionKind::Control(ControlAction::TogglePlay),
+    },
+    ActionSpec {
+        name: "volume",
+        aliases: &[],
+        takes_value: true,
+        summary: "Set the volume (0-100) or adjust it (+5/-5)",
+        kind: ActionKind::Control(ControlAction::Volume),
+    },
+];
+
+/// Look up an action by canonical name or alias.
+pub fn action_spec(name: &str) -> Option<&'static ActionSpec> {
+    ACTIONS
+        .iter()
+        .find(|spec| spec.name == name || spec.aliases.contains(&name))
+}
+
+/// Payload of the `capabilities` action: what a running instance supports.
+#[derive(Debug, Serialize)]
+pub struct Capabilities {
+    /// Contract version, see [`API_VERSION`].
+    pub api: u32,
+    /// This program's version.
+    pub version: &'static str,
+    /// Every action this build implements, ascending by name.
+    pub actions: &'static [ActionSpec],
+    /// The socket / named pipe this instance listens on.
+    pub socket: String,
+}
+
+/// Build the `capabilities` payload. Read-only: it reports the compiled-in
+/// table, so it never touches login state or playback.
+pub fn capabilities() -> Capabilities {
+    Capabilities {
+        api: API_VERSION,
+        version: env!("CARGO_PKG_VERSION"),
+        actions: ACTIONS,
+        socket: resolve_socket_path().to_string_lossy().into_owned(),
     }
 }
 
@@ -438,8 +660,9 @@ type AcceptedStream = tokio::net::windows::named_pipe::NamedPipeServer;
 /// Spawns a background task that accepts connections, answering `status` and
 /// `list` requests from `status_snapshot` / `queue_snapshot`, streaming
 /// snapshot changes to `subscribe` clients via `status_tx`, answering `search`
-/// requests with `searcher`, and forwarding `msg` requests as `IpcEvent`s into
-/// `event_tx`. Returns a guard that removes the socket file on drop.
+/// requests with `searcher` and `capabilities` requests from the [`ACTIONS`]
+/// catalogue, and forwarding `msg` requests as `IpcEvent`s into `event_tx`.
+/// Returns a guard that removes the socket file on drop.
 pub fn start_server(
     status_snapshot: Arc<Mutex<StatusSnapshot>>,
     queue_snapshot: Arc<Mutex<QueueSnapshot>>,
@@ -557,6 +780,10 @@ async fn handle_connection<S>(
             let reply = serde_json::to_string(&results).unwrap_or_default();
             let _ = write_reply(&mut stream, &reply).await;
         }
+        IpcRequest::Capabilities => {
+            let reply = serde_json::to_string(&capabilities()).unwrap_or_default();
+            let _ = write_reply(&mut stream, &reply).await;
+        }
         IpcRequest::Subscribe => stream_updates(stream, snapshot, status_tx).await,
     }
 }
@@ -653,6 +880,39 @@ pub async fn fetch_queue() -> color_eyre::Result<QueueSnapshot> {
     serde_json::from_str(&buf).wrap_err("invalid list response")
 }
 
+/// Ask the running instance for its contract (`boxpigma msg capabilities`).
+/// Returns the reply as-is: the CLI prints it verbatim, so what a script reads
+/// from the CLI is what the daemon sent.
+pub async fn fetch_capabilities() -> color_eyre::Result<serde_json::Value> {
+    let mut stream = connect().await?;
+    stream
+        .write_all(br#"{"cmd":"capabilities"}"#)
+        .await
+        .wrap_err("failed to send capabilities request")?;
+    stream.write_all(b"\n").await?;
+    let mut buf = String::new();
+    let mut reader = BufReader::new(stream);
+    reader
+        .read_line(&mut buf)
+        .await
+        .wrap_err("failed to read capabilities response")?;
+    parse_capabilities_reply(&buf)
+}
+
+/// Parse the reply line of a `capabilities` request.
+///
+/// An empty line means the instance dropped the request without answering —
+/// which is what a build that predates this action does — so say so instead of
+/// reporting a JSON syntax error.
+fn parse_capabilities_reply(reply: &str) -> color_eyre::Result<serde_json::Value> {
+    if reply.trim().is_empty() {
+        color_eyre::eyre::bail!(
+            "the running instance did not answer `capabilities` (it is probably an older boxpigma; restart it)"
+        );
+    }
+    serde_json::from_str(reply).wrap_err("invalid capabilities response")
+}
+
 /// Subscribe to status updates (`{"cmd":"subscribe"}`). Sends the request and
 /// returns a line reader over the open connection; every subsequent
 /// `StatusSnapshot` change is delivered as one JSON line. The connection stays
@@ -711,4 +971,130 @@ pub async fn send_msg(action: MsgAction) -> color_eyre::Result<()> {
         .and_then(|v| v.get("ok").and_then(|b| b.as_bool()))
         .ok_or_eyre("invalid msg response")
         .map(|_| ())
+}
+
+/* -------------------------------------------------------------------------- */
+/*                                   Testing                                  */
+/* -------------------------------------------------------------------------- */
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every name an action answers to: the canonical one plus its aliases.
+    fn names(spec: &ActionSpec) -> impl Iterator<Item = &'static str> {
+        std::iter::once(spec.name).chain(spec.aliases.iter().copied())
+    }
+
+    /// The smallest request a client can send for `spec` under `name`, in the
+    /// same shape `boxpigma msg` puts on the wire.
+    fn wire_request(spec: &ActionSpec, name: &str) -> serde_json::Value {
+        match spec.kind {
+            ActionKind::Query(QueryAction::List) => serde_json::json!({ "cmd": "list" }),
+            ActionKind::Query(QueryAction::Search) => {
+                serde_json::json!({ "cmd": "search", "keyword": "test" })
+            }
+            ActionKind::Query(QueryAction::Capabilities) => serde_json::json!({ "cmd": name }),
+            ActionKind::Control(ControlAction::SwitchList) => serde_json::json!({
+                "cmd": "msg",
+                "action": { "action": name, "endpoint": "liked" },
+            }),
+            ActionKind::Control(_) => {
+                serde_json::json!({ "cmd": "msg", "action": { "action": name } })
+            }
+        }
+    }
+
+    /// The catalogue drives the check (rather than a second hand-written list):
+    /// every published name and alias is recognized by request dispatch, and an
+    /// alias lands on exactly the branch its canonical name lands on.
+    #[test]
+    fn every_listed_action_name_dispatches() {
+        for spec in ACTIONS {
+            let canonical: IpcRequest = serde_json::from_value(wire_request(spec, spec.name))
+                .unwrap_or_else(|e| panic!("`{}` is not dispatched: {e}", spec.name));
+            for name in names(spec) {
+                assert_eq!(
+                    action_spec(name).map(|s| s.name),
+                    Some(spec.name),
+                    "`{name}` is missing from the catalogue"
+                );
+                let request: IpcRequest = serde_json::from_value(wire_request(spec, name))
+                    .unwrap_or_else(|e| panic!("dispatch rejects `{name}`: {e}"));
+                assert_eq!(
+                    request, canonical,
+                    "`{name}` does not reach the `{}` branch",
+                    spec.name
+                );
+            }
+        }
+    }
+
+    /// The catalogue has to be self-consistent: unique names, ascending order
+    /// (that order *is* the published one) and a summary for every action.
+    #[test]
+    fn action_catalogue_is_consistent() {
+        let mut seen = std::collections::HashSet::new();
+        for spec in ACTIONS {
+            for name in names(spec) {
+                assert!(seen.insert(name), "`{name}` is listed twice");
+            }
+            assert!(!spec.summary.is_empty(), "`{}` has no summary", spec.name);
+        }
+        assert!(ACTIONS.windows(2).all(|w| w[0].name < w[1].name));
+    }
+
+    #[test]
+    fn capabilities_reports_api_version_and_sorted_actions() {
+        let json = serde_json::to_value(capabilities()).expect("capabilities must serialize");
+
+        assert_eq!(json["api"], serde_json::json!(API_VERSION));
+        assert_eq!(
+            json["version"],
+            serde_json::json!(env!("CARGO_PKG_VERSION"))
+        );
+        assert!(!json["socket"].as_str().unwrap_or_default().is_empty());
+
+        let actions = json["actions"].as_array().expect("actions is an array");
+        assert_eq!(actions.len(), ACTIONS.len());
+        assert!(!actions.is_empty());
+        let published: Vec<&str> = actions
+            .iter()
+            .map(|a| a["name"].as_str().expect("name is a string"))
+            .collect();
+        assert!(
+            published.windows(2).all(|w| w[0] < w[1]),
+            "actions must be sorted by name: {published:?}"
+        );
+        for action in actions {
+            assert!(action["aliases"].is_array());
+            assert!(action["takes_value"].is_boolean());
+            assert!(action["summary"].as_str().is_some_and(|s| !s.is_empty()));
+            assert!(
+                action.get("kind").is_none(),
+                "internal field leaked: {action}"
+            );
+        }
+    }
+
+    /// What the CLI prints for `msg capabilities` is the parsed reply, so a
+    /// compact wire line and the pretty output must carry the same JSON.
+    #[test]
+    fn capabilities_round_trips_over_the_wire() {
+        let payload = capabilities();
+        let line = serde_json::to_string(&payload).expect("capabilities must serialize");
+        assert_eq!(
+            parse_capabilities_reply(&line).unwrap(),
+            serde_json::to_value(&payload).unwrap()
+        );
+    }
+
+    /// A build without this action drops the request and answers nothing; that
+    /// must not be reported as a JSON syntax error.
+    #[test]
+    fn capabilities_reply_explains_an_empty_answer() {
+        let err = parse_capabilities_reply("\n").expect_err("an empty reply is an error");
+        assert!(err.to_string().contains("older boxpigma"), "{err}");
+        assert!(parse_capabilities_reply(r#"{"api":1}"#).is_ok());
+    }
 }

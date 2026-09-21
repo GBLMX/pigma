@@ -126,8 +126,9 @@ boxpigma msg [OPTIONS] <ACTION> [VALUE]
 | `like` | | 喜欢当前曲目 |
 | `dislike` | | 不喜欢当前曲目 |
 | `toggle_like` | `unlike` `toggle` | 喜欢/取消喜欢（切换） |
+| `capabilities` | `caps` | 打印本 IPC 契约（接口版本、程序版本、动作清单、socket 路径）；只读，无需登录 |
 
-选项：`--playlist <INDEX>`（switch-list 用）、`--json`（list 用）、`--socket <SOCKET>`。
+选项：`--playlist <INDEX>`（switch-list 用）、`--json`（list / capabilities 用）、`--socket <SOCKET>`。
 
 ```bash
 boxpigma msg play
@@ -143,6 +144,41 @@ boxpigma msg switch-list toplist --playlist 2
 boxpigma msg toggle_like
 ```
 
+### `boxpigma msg capabilities` – 自描述的扩展契约
+
+这是给**外部工具**（waybar、播放控制脚本、其它 agent）用的契约入口：先问一次动作清单，
+再决定发什么命令，不必猜某个版本支持哪些动作、别名怎么写。它只读、不依赖登录，
+守护进程一首歌都没放时也照常回答。
+
+```bash
+boxpigma msg capabilities          # 人读的表格（动作 + 别名 + 是否吃参数 + 说明）
+boxpigma msg capabilities --json   # 与 IPC 返回同一份 JSON，供脚本解析
+boxpigma msg caps                  # 别名，等价
+```
+
+`--json` / socket 返回的形状（`api` 是契约版本，`version` 是程序版本，`actions` 按 `name` 升序，
+`socket` 是这个实例实际监听的 socket / 命名管道路径；下面只留了前几个动作）：
+
+```json
+{
+  "api": 1,
+  "version": "1.4.0",
+  "actions": [
+    { "name": "capabilities", "aliases": ["caps"], "takes_value": false, "summary": "Print this contract: API version, program version, actions, endpoint" },
+    { "name": "dislike", "aliases": [], "takes_value": false, "summary": "Dislike the current song" },
+    { "name": "next", "aliases": [], "takes_value": false, "summary": "Go to the next song" },
+    { "name": "previous", "aliases": ["prev"], "takes_value": false, "summary": "Go to the previous song" },
+    { "name": "volume", "aliases": [], "takes_value": true, "summary": "Set the volume (0-100) or adjust it (+5/-5)" }
+  ],
+  "socket": "/home/you/.cache/boxpigma/boxpigma.sock"
+}
+```
+
+同一份数据也能直接问 socket（回一行 JSON，见下面「IPC 协议」一节）。
+
+**契约版本规则**：只有动作被**改名或删除**时才递增 `api`；新增动作、或在现有 JSON 里新增字段
+都不递增 —— 所以工具可以放心忽略不认识的字段，只在 `api` 变大时才重新读一遍动作清单。
+
 ---
 
 ## IPC 协议（直接走 socket/管道）
@@ -152,12 +188,16 @@ boxpigma msg toggle_like
 
 > `action` 是内部标签对象，必须写成 `{"cmd":"msg","action":{"action":...}}` 的嵌套形式
 > （即 `boxpigma msg` 实际发送的 JSON）；写成 `{"action":"play"}` 会被服务端丢弃。
+> 嵌套里的 `action` 值可以是 `boxpigma msg capabilities` 列出的任意名字或别名
+> （如 `prev`、`toggle-play`、`switch`）。
 
 ```bash
 # 查询状态（回一行 JSON）
 printf '{"cmd":"status"}\n' | socat - "$HOME/.cache/boxpigma/boxpigma.sock"
 # 列出播放队列
 printf '{"cmd":"list"}\n' | socat - "$HOME/.cache/boxpigma/boxpigma.sock"
+# 问能力（回一行 JSON：契约版本 + 程序版本 + 动作清单 + socket 路径）
+printf '{"cmd":"capabilities"}\n' | socat - "$HOME/.cache/boxpigma/boxpigma.sock"
 # 搜索（回一行 JSON 数组，结果已注册到守护进程，可直接 play 其 id）
 printf '{"cmd":"search","keyword":"周杰伦"}\n' | socat - "$HOME/.cache/boxpigma/boxpigma.sock"
 # 播放控制（注意嵌套的 action 对象）
@@ -247,7 +287,7 @@ boxpigma msg --socket /tmp/music.sock play
 | 提示未登录 | 需登录端点（`liked` 等）要求已登录，先在 TUI 登录（`L` 键） |
 | 队列为空 | 实例未加载歌曲队列；先 `boxpigma msg switch-list <endpoint>` 切换或 `boxpigma -d` 加载端点 |
 | `--playlist N` 越界 | 歌单序号与 TUI 列表顺序一致，先在 TUI 里确认 |
-| 未知动作 | `boxpigma msg --help` 查看合法动作 |
+| 未知动作 | `boxpigma msg --help` 查看合法动作，或 `boxpigma msg capabilities` 问运行中的实例 |
 
 ---
 

@@ -2,9 +2,8 @@
 # Format check before a commit.
 #
 # CI runs `cargo +nightly fmt -- --check` on every push, and the repo's rustfmt options are
-# nightly-only: a local `cargo fmt` (stable) cannot see them and reports the tree as fine while
-# CI goes red. That happened twice in one day, which is why this exists rather than a note in
-# CONTRIBUTING.
+# nightly-only: a stable `cargo fmt` cannot see them, reports the tree as fine, and the push
+# fails. This hook runs the same check before the commit instead.
 #
 # Enable it once per clone:
 #

@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>boxpigma —— 终端里的网易云音乐客户端</title>
+<meta name="description" content="boxpigma 是 Rust 写的终端音乐客户端：流式播放与边听边存、多源 fallback、逐字歌词、歌手页三栏、命令行与 JSON IPC。Apache-2.0，发布 Linux / macOS / Windows 六个平台的构建。">
+<meta name="theme-color" content="#0b0b0d">
+<link rel="icon" type="image/png" href="https://raw.githubusercontent.com/GBLMX/pigma/main/imgs/logo.png">
+<style>
+  :root {
+    --bg: #0b0b0d;
+    --surface: #141417;
+    --surface-2: #1b1b1f;
+    --border: #2c2c32;
+    --text: #f2f2f4;
+    --muted: #a4a4ad;
+    --accent: #e60012;
+    --accent-ink: #ffffff;
+    --accent-text: #ff5f6d;
+    --radius: 14px;
+    --max: 1080px;
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+                 "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    font-size: 16px;
+    line-height: 1.65;
+  }
+  img { max-width: 100%; height: auto; display: block; }
+  a { color: var(--accent-text); }
+  a:focus-visible, button:focus-visible {
+    outline: 2px solid var(--accent-text);
+    outline-offset: 3px;
+    border-radius: 4px;
+  }
+  .wrap { max-width: var(--max); margin: 0 auto; padding: 0 20px; }
+  code, kbd, pre {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+                 "Liberation Mono", monospace;
+  }
+  code { font-size: 0.92em; color: var(--text); }
+
+  /* ---------- 顶栏 ---------- */
+  .topbar {
+    position: sticky; top: 0; z-index: 10;
+    border-bottom: 1px solid var(--border);
+    background: rgba(11, 11, 13, 0.92);
+    backdrop-filter: blur(8px);
+  }
+  .topbar .wrap {
+    display: flex; align-items: center; gap: 14px;
+    min-height: 58px;
+  }
+  .brand {
+    display: flex; align-items: center; gap: 10px;
+    color: var(--text); text-decoration: none; font-weight: 700;
+    letter-spacing: 0.01em;
+  }
+  .brand img { width: 26px; height: 26px; border-radius: 7px; }
+  .topnav { margin-left: auto; display: flex; gap: 18px; flex-wrap: wrap; }
+  .topnav a { color: var(--muted); text-decoration: none; font-size: 0.94rem; }
+  .topnav a:hover { color: var(--text); }
+
+  /* ---------- 首屏 ---------- */
+  .hero { padding: 72px 0 56px; }
+  .hero .lede { max-width: 46rem; }
+  .pill {
+    display: inline-block; margin: 0 0 18px;
+    padding: 3px 12px; border: 1px solid var(--border); border-radius: 999px;
+    background: var(--surface); color: var(--muted); font-size: 0.84rem;
+  }
+  h1 {
+    margin: 0 0 12px;
+    font-size: clamp(2.4rem, 6vw, 3.6rem);
+    line-height: 1.1; letter-spacing: -0.02em;
+  }
+  h1 .dot { color: var(--accent); }
+  .tagline { margin: 0 0 10px; font-size: clamp(1.1rem, 2.6vw, 1.45rem); font-weight: 600; }
+  .sub { margin: 0 0 28px; color: var(--muted); }
+  .actions { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 34px; }
+  .btn {
+    display: inline-block; padding: 11px 22px; border-radius: 10px;
+    font-weight: 600; text-decoration: none; border: 1px solid transparent;
+    transition: transform 0.12s ease, filter 0.12s ease;
+  }
+  .btn:hover { transform: translateY(-1px); }
+  .btn-primary { background: var(--accent); color: var(--accent-ink); }
+  .btn-primary:hover { filter: brightness(1.1); }
+  .btn-ghost { background: var(--surface); color: var(--text); border-color: var(--border); }
+  .btn-ghost:hover { background: var(--surface-2); }
+
+  .badges { display: flex; flex-wrap: wrap; gap: 8px; padding: 0; margin: 0; list-style: none; }
+  .badges li {
+    padding: 5px 12px; border: 1px solid var(--border); border-radius: 999px;
+    background: var(--surface); color: var(--muted); font-size: 0.85rem;
+  }
+  .badges strong { color: var(--text); font-weight: 600; }
+
+  /* ---------- 通用区块 ---------- */
+  section { padding: 46px 0; border-top: 1px solid var(--border); }
+  h2 { margin: 0 0 8px; font-size: clamp(1.5rem, 3.4vw, 1.9rem); letter-spacing: -0.01em; }
+  h2::before { content: "▍"; color: var(--accent); margin-right: 8px; }
+  .section-note { margin: 0 0 30px; color: var(--muted); }
+
+  /* ---------- 预览 ---------- */
+  .shots { display: grid; gap: 22px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+  .shots figure {
+    margin: 0; background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); overflow: hidden;
+  }
+  .shots img { border-bottom: 1px solid var(--border); background: var(--bg); }
+  .shots figcaption { padding: 12px 16px; font-size: 0.93rem; }
+  .shots figcaption b { display: block; font-weight: 600; }
+  .shots figcaption span { color: var(--muted); font-size: 0.88rem; }
+  .shots .wide { grid-column: 1 / -1; }
+
+  /* ---------- 特性 ---------- */
+  .features { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); }
+  .features article {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 18px 20px;
+  }
+  .features h3 { margin: 0 0 6px; font-size: 1.02rem; }
+  .features h3::before { content: "›"; color: var(--accent); margin-right: 8px; font-weight: 700; }
+  .features p { margin: 0; color: var(--muted); font-size: 0.93rem; }
+  .features code { color: var(--text); background: var(--surface-2); padding: 1px 5px; border-radius: 5px; }
+
+  /* ---------- 安装 ---------- */
+  .install-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
+  .install-grid article {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 18px 20px;
+  }
+  .install-grid h3 { margin: 0 0 10px; font-size: 1rem; }
+  .install-grid p { margin: 10px 0 0; color: var(--muted); font-size: 0.9rem; }
+  pre {
+    margin: 0; padding: 13px 15px;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+    font-size: 0.85rem; line-height: 1.55; color: var(--text);
+    white-space: pre-wrap; overflow-wrap: anywhere;
+  }
+
+  /* ---------- 页脚 ---------- */
+  footer { border-top: 1px solid var(--border); padding: 34px 0 54px; color: var(--muted); font-size: 0.9rem; }
+  footer p { margin: 0 0 8px; }
+  footer .links { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
+  footer .fine { color: var(--muted); }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="wrap">
+    <a class="brand" href="#top">
+      <img src="https://raw.githubusercontent.com/GBLMX/pigma/main/imgs/logo.png" alt="boxpigma 图标" width="26" height="26">
+      boxpigma
+    </a>
+    <nav class="topnav" aria-label="页面导航">
+      <a href="#preview">预览</a>
+      <a href="#features">特性</a>
+      <a href="#install">安装</a>
+      <a href="https://github.com/GBLMX/pigma">仓库</a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+
+  <section class="hero" aria-labelledby="hero-title">
+    <div class="wrap lede">
+      <p class="pill">v1.4.0 · Apache-2.0 · Rust + Ratatui</p>
+      <h1 id="hero-title">boxpigma<span class="dot">.</span></h1>
+      <p class="tagline">终端里的网易云音乐客户端。</p>
+      <p class="sub">
+        在 TUI 里登录、搜索、听歌与管队列：流式播放与边听边存、逐字歌词、多源 fallback，
+        键盘与鼠标一套操作逻辑，封面走终端的图形协议。
+      </p>
+      <div class="actions">
+        <a class="btn btn-primary" href="https://github.com/GBLMX/pigma/releases/latest">下载最新版</a>
+        <a class="btn btn-ghost" href="https://github.com/GBLMX/pigma">看源码</a>
+      </div>
+      <ul class="badges" aria-label="支持平台">
+        <li><strong>Linux</strong> x86_64 · aarch64</li>
+        <li><strong>macOS</strong> x86_64 · aarch64</li>
+        <li><strong>Windows</strong> x86_64 · aarch64</li>
+        <li>每个 release 附 SHA256SUMS</li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="preview" aria-labelledby="preview-title">
+    <div class="wrap">
+      <h2 id="preview-title">预览</h2>
+      <p class="section-note">
+        以下画面由程序自身渲染导出，随界面更新重新生成。
+      </p>
+
+      <div class="shots">
+        <figure class="wide">
+          <img src="https://raw.githubusercontent.com/GBLMX/pigma/main/imgs/image_001.png"
+               alt="boxpigma 主界面：左侧导航栏（发现 / 我的音乐），右侧是每日推荐歌曲列表，底部是播放条"
+               width="1280" height="768" loading="lazy">
+          <figcaption>
+            <b>主界面</b>
+            <span>左侧导航、右侧内容列表与底部播放条：每日推荐、歌单、搜索、最近播放都在一屏之内。</span>
+          </figcaption>
+        </figure>
+
+        <figure>
+          <img src="https://raw.githubusercontent.com/GBLMX/pigma/main/imgs/image_002.png"
+               alt="boxpigma 歌手页：热门曲目、专辑、相似歌手三个区块同屏，底部是播放条"
+               width="1280" height="768" loading="lazy">
+          <figcaption>
+            <b>歌手页（热门曲目 · 专辑 · 相似歌手）</b>
+            <span>三个列表共用一个光标：<kbd>Tab</kbd> / <kbd>Shift+Tab</kbd> 循环，鼠标点哪栏就选中哪栏，滚轮走指针所在那栏。</span>
+          </figcaption>
+        </figure>
+
+        <figure>
+          <img src="https://raw.githubusercontent.com/GBLMX/pigma/main/imgs/image_003.png"
+               alt="boxpigma 设置页：左侧是分组（外观 / 歌词 / 播放条 / 通知 / 缓存），右侧是条目与当前值"
+               width="1280" height="768" loading="lazy">
+          <figcaption>
+            <b>设置页</b>
+            <span>外观、歌词、播放条、通知、缓存五组开关收进一张表，值直接从 <code>config.toml</code> 读回。</span>
+          </figcaption>
+        </figure>
+
+        <figure>
+          <img src="https://raw.githubusercontent.com/GBLMX/pigma/main/imgs/image_004.png"
+               alt="boxpigma 队列页：标签为多个歌单，下面是待播曲目列表"
+               width="1280" height="768" loading="lazy">
+          <figcaption>
+            <b>队列页</b>
+            <span>当前队列的曲目一览，可以按标签在多个来源之间切换。</span>
+          </figcaption>
+        </figure>
+
+        <figure>
+          <img src="https://raw.githubusercontent.com/GBLMX/pigma/main/imgs/image_005.png"
+               alt="boxpigma 命令面板：在主界面上叠一层命令列表，右侧是每个命令的说明"
+               width="1280" height="768" loading="lazy">
+          <figcaption>
+            <b>命令面板</b>
+            <span><kbd>Ctrl+P</kbd> 打开，命令按分组的顺序列出；<kbd>:</kbd> 则是同源的 vim 风格命令行。</span>
+          </figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <section id="features" aria-labelledby="features-title">
+    <div class="wrap">
+      <h2 id="features-title">特性</h2>
+      <p class="section-note">从播放、界面到集成，当前版本已具备的能力如下。</p>
+
+      <div class="features">
+        <article>
+          <h3>流式播放与边听边存</h3>
+          <p>边下边播，低延迟 seek，也能直接放本地音频；开启边听边存后播放即写入缓存（下载管理与它共用一套）。</p>
+        </article>
+        <article>
+          <h3>多源 fallback</h3>
+          <p>官方源拿不到时依次走 <code>kugou</code> / <code>kuwo</code> / <code>bilibili</code> / <code>youtube</code>，都不需要 cookie。</p>
+        </article>
+        <article>
+          <h3>歌词五种样式 + 逐字</h3>
+          <p><code>window</code> / <code>one_line</code> / <code>ktv</code> / <code>flow</code> / <code>plain</code>，配合逐字扫光高亮；译文可随原文开关。</p>
+        </article>
+        <article>
+          <h3>歌手页三栏</h3>
+          <p>热门曲目、专辑、相似歌手同屏，三栏共用一个光标，键盘与鼠标的行为一致。</p>
+        </article>
+        <article>
+          <h3>推荐生态</h3>
+          <p>每日推荐、相似歌曲、包含该歌的歌单、听歌排行（本周 · 全部）、推荐电台、私人 FM 都接进侧栏与内容页。</p>
+        </article>
+        <article>
+          <h3>音质与音频链</h3>
+          <p>八档音质（standard / higher / exhigh / lossless / hires / jyeffect / sky / jymaster），解码之后到设备之前可挂 <code>rubato</code> 重采样、参量 EQ、EBU R128 响度归一化；Windows 上走 WASAPI 独占，设备拒绝时回退共享模式。</p>
+        </article>
+        <article>
+          <h3>终端图形协议封面</h3>
+          <p>kitty 图形协议画封面并做圆角裁切，用哪个协议以终端的回答为准，tmux 里自动回退。</p>
+        </article>
+        <article>
+          <h3>主题系统</h3>
+          <p>内置 20 套主题，<code>[themes.&lt;名&gt;]</code> 按组件继承式自定义；仓库带 <code>theme.schema.json</code>，编辑器里能校验与补全。</p>
+        </article>
+        <article>
+          <h3>设置页与 vim 风格命令</h3>
+          <p><kbd>,</kbd> 或 <code>:settings</code> 开设置页；<kbd>:</kbd> 打开命令行并支持 Tab 补全，<code>:theme</code>、<code>:lyrics</code>、<code>:simi</code>、<code>:fm</code> 都能运行时改。</p>
+        </article>
+        <article>
+          <h3>CLI 控制与 JSON IPC</h3>
+          <p><code>boxpigma status</code> / <code>msg</code> 查询与控制一个正在运行的实例（waybar 之类都能接），配合 <code>-d</code> 守护进程模式即可无终端常驻。</p>
+        </article>
+        <article>
+          <h3>系统包管理器安装</h3>
+          <p><code>yay</code> / <code>paru</code> / <code>scoop</code> 走各家包管理器，另有 bash / zsh / fish / elvish / powershell 的 shell 补全。</p>
+        </article>
+        <article>
+          <h3>单一 Cargo workspace</h3>
+          <p>两个 crate 收进一个 workspace，<code>cargo test/clippy --workspace</code> 覆盖全部成员；CI 覆盖 Linux、macOS、Windows 三平台并检查 workspace 成员。</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section id="install" aria-labelledby="install-title">
+    <div class="wrap">
+      <h2 id="install-title">安装</h2>
+      <p class="section-note">下面两条命令从本仓库的 release 下载，并校验随发布附带的 <code>SHA256SUMS</code>。</p>
+
+      <div class="install-grid">
+        <article>
+          <h3>Linux / macOS</h3>
+          <pre><code>curl -fsSL https://raw.githubusercontent.com/GBLMX/pigma/main/install.sh | sh</code></pre>
+          <p>脚本按 <code>uname</code> 判定平台，默认装到 <code>~/.local/bin</code>；先看一眼它要做什么可以加 <code>--dry-run</code>。</p>
+        </article>
+        <article>
+          <h3>Windows / PowerShell</h3>
+          <pre><code>irm https://raw.githubusercontent.com/GBLMX/pigma/main/install.ps1 | iex</code></pre>
+          <p>也可以从 releases 直接下载 <code>boxpigma-x86_64-pc-windows-msvc.zip</code> 解包使用。</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <nav class="links" aria-label="相关链接">
+      <a href="https://github.com/GBLMX/pigma">GitHub 仓库</a>
+      <a href="https://github.com/GBLMX/pigma/releases/latest">最新 release</a>
+      <a href="https://github.com/GBLMX/pigma/blob/main/README.md#%E6%9C%AC%E4%BB%93%E5%BA%93%E4%B8%8E%E5%8E%9F%E4%BD%9C%E8%80%85">本仓库与原作者</a>
+      <a href="https://github.com/GBLMX/pigma/blob/main/LICENSE">Apache-2.0 许可证</a>
+    </nav>
+    <p>Licensed under the Apache-2.0 license. 上游项目的原始版权与许可声明保留在仓库的 LICENSE 文件中，未作改动。</p>
+    <p class="fine">本项目仅供学习与研究使用；登录后的数据、缓存与配置都留在本机。</p>
+  </div>
+</footer>
+
+</body>
+</html>

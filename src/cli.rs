@@ -5,14 +5,14 @@ use std::path::PathBuf;
 
 use clap::{
     Parser, Subcommand, ValueHint,
-    builder::{Styles, styling::AnsiColor},
+    builder::{PossibleValue, PossibleValuesParser, Styles, styling::AnsiColor},
 };
 
 use crate::{
     app::App,
     cli,
     config::Config,
-    ipc::{self, MsgAction, StatusSnapshot},
+    ipc::{self, ActionKind, ControlAction, MsgAction, QueryAction, StatusSnapshot},
     logger::init_logger,
     utils::format_duration,
 };
@@ -22,6 +22,18 @@ const STYLES: Styles = Styles::styled()
     .usage(AnsiColor::Yellow.on_default().bold())
     .literal(AnsiColor::Cyan.on_default().bold())
     .placeholder(AnsiColor::Cyan.on_default());
+
+/// The accepted `boxpigma msg` actions. Names, aliases and help text all come
+/// from [`ipc::ACTIONS`], so the CLI, the shell completions and the
+/// `capabilities` payload cannot disagree about what exists.
+fn msg_action_parser() -> PossibleValuesParser {
+    PossibleValuesParser::new(ipc::ACTIONS.iter().map(|spec| {
+        spec.aliases.iter().fold(
+            PossibleValue::new(spec.name).help(spec.summary),
+            |value, alias| value.alias(*alias),
+        )
+    }))
+}
 
 #[derive(Debug, Parser)]
 #[command(
@@ -78,7 +90,8 @@ pub enum Command {
     /// Control the running instance.
     Msg {
         /// Playback action. Possible values are listed below.
-        action: MsgActionArg,
+        #[arg(value_parser = msg_action_parser(), value_hint = ValueHint::Other)]
+        action: String,
         /// Value for `play` (a song id), `search` (a keyword), `volume`
         /// (`75`/`+5`/`-5`), the endpoint for `switch-list`/`list`, or omitted.
         #[arg(allow_hyphen_values = true, value_hint = ValueHint::Other)]
@@ -99,48 +112,6 @@ pub enum Command {
         #[arg(value_parser = ["bash", "zsh", "fish", "elvish", "powershell"])]
         shell: String,
     },
-}
-
-/// `boxpigma msg` action selector. The `#[value(name)]`/`#[value(alias)]` names are
-/// what the shell-completion script offers (and what `parse_msg_action` accepts).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
-pub enum MsgActionArg {
-    /// Go to the previous song.
-    #[value(name = "previous", alias = "prev")]
-    Previous,
-    /// Go to the next song.
-    Next,
-    /// Pause playback.
-    Pause,
-    /// Play / resume, or play a specific song id in the queue.
-    Play,
-    /// Toggle play/pause (start when stopped, resume when paused).
-    #[value(
-        name = "toggle_play",
-        alias = "play_pause",
-        alias = "toggle-play",
-        alias = "play-pause"
-    )]
-    TogglePlay,
-    /// Switch the queue to another endpoint (optionally `--playlist N`).
-    #[value(name = "switch-list", alias = "switch")]
-    SwitchList,
-    /// Set (absolute 0-100) or adjust (`+5`/`-5`) the volume.
-    Volume,
-    /// Cycle the playback mode.
-    Mode,
-    /// Like the current song.
-    Like,
-    /// Dislike the current song.
-    Dislike,
-    /// Toggle like on the current song.
-    #[value(name = "toggle_like", alias = "unlike", alias = "toggle")]
-    ToggleLike,
-    /// Print the playback queue (`▶` marks the current song), or switch queues
-    /// when given an endpoint.
-    List,
-    /// Search songs across NCM + sonar sources.
-    Search,
 }
 
 /* -------------------------------------------------------------------------- */
@@ -207,18 +178,33 @@ fn print_queue(queue: &ipc::QueueSnapshot) {
     print!("{}", render_queue(queue));
 }
 
-/// `boxpigma msg` handler. `list` (no value) prints the live playback queue, and
-/// `search` is a request/response command (the daemon returns matching songs and
-/// registers them for a later `boxpigma msg play <id>`); everything else is a
-/// fire-and-forget control action.
+/// `boxpigma msg` handler. `capabilities`, `list` (no value) and `search` are
+/// request/response commands answered by the daemon; everything else is a
+/// fire-and-forget control action. The action name is resolved through
+/// [`ipc::ACTIONS`], so the CLI accepts exactly what `capabilities` advertises.
 pub async fn msg(
-    action: MsgActionArg,
+    action: &str,
     value: Option<&str>,
     playlist: Option<usize>,
     json: bool,
 ) -> color_eyre::Result<()> {
-    match action {
-        MsgActionArg::List => {
+    let spec = ipc::action_spec(action).ok_or_else(|| {
+        color_eyre::eyre::eyre!("unknown action `{action}` (see `boxpigma msg capabilities`)")
+    })?;
+    if value.is_some() && !spec.takes_value {
+        color_eyre::eyre::bail!(
+            "`{}` takes no value (see `boxpigma msg capabilities`)",
+            spec.name
+        );
+    }
+
+    match spec.kind {
+        ActionKind::Query(QueryAction::Capabilities) => {
+            let capabilities = ipc::fetch_capabilities().await?;
+            print_capabilities(&capabilities, json);
+            Ok(())
+        }
+        ActionKind::Query(QueryAction::List) => {
             // `boxpigma msg list <endpoint>` keeps the old switch-list alias;
             // `boxpigma msg list` with no value prints the live playback queue.
             if let Some(endpoint) = value {
@@ -237,7 +223,7 @@ pub async fn msg(
             }
             Ok(())
         }
-        MsgActionArg::Search => {
+        ActionKind::Query(QueryAction::Search) => {
             let keyword = value.ok_or_else(|| {
                 color_eyre::eyre::eyre!(
                     "search requires a keyword (e.g. `boxpigma msg search 周杰伦`)"
@@ -256,24 +242,66 @@ pub async fn msg(
             }
             Ok(())
         }
-        other => {
-            let action = parse_msg_action(other, value, playlist)?;
+        ActionKind::Control(action) => {
+            let action = parse_msg_action(action, value, playlist)?;
             ipc::send_msg(action).await?;
             Ok(())
         }
     }
 }
 
+/// Print the `capabilities` reply. `--json` pretty-prints the reply the daemon
+/// sent (same fields, same values) for scripts; the plain form is for humans.
+fn print_capabilities(capabilities: &serde_json::Value, json: bool) {
+    if json {
+        match serde_json::to_string_pretty(capabilities) {
+            Ok(text) => println!("{text}"),
+            Err(e) => eprintln!("failed to render capabilities: {e}"),
+        }
+        return;
+    }
+    let text = |value: &serde_json::Value| value.as_str().unwrap_or_default().to_string();
+    println!(
+        "api {} · boxpigma {} · {}",
+        capabilities["api"],
+        text(&capabilities["version"]),
+        text(&capabilities["socket"])
+    );
+    for action in capabilities["actions"].as_array().into_iter().flatten() {
+        let aliases: Vec<String> = action["aliases"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(text)
+            .collect();
+        let name = match aliases.is_empty() {
+            true => text(&action["name"]),
+            false => format!("{} ({})", text(&action["name"]), aliases.join(", ")),
+        };
+        println!(
+            "  {name:<28} {:<5} {}",
+            if action["takes_value"].as_bool().unwrap_or(false) {
+                "VALUE"
+            } else {
+                ""
+            },
+            text(&action["summary"])
+        );
+    }
+}
+
+/// Turn a control action plus the command-line value into the wire
+/// [`MsgAction`].
 fn parse_msg_action(
-    action: MsgActionArg,
+    action: ControlAction,
     value: Option<&str>,
     playlist: Option<usize>,
 ) -> color_eyre::Result<MsgAction> {
-    match action {
-        MsgActionArg::Previous => Ok(MsgAction::Previous),
-        MsgActionArg::Next => Ok(MsgAction::Next),
-        MsgActionArg::Pause => Ok(MsgAction::Pause),
-        MsgActionArg::Play => {
+    Ok(match action {
+        ControlAction::Previous => MsgAction::Previous,
+        ControlAction::Next => MsgAction::Next,
+        ControlAction::Pause => MsgAction::Pause,
+        ControlAction::Play => {
             let song_id = match value {
                 None => None,
                 Some(v) => Some(v.parse().map_err(|_| {
@@ -282,33 +310,31 @@ fn parse_msg_action(
                     )
                 })?),
             };
-            Ok(MsgAction::Play { song_id })
+            MsgAction::Play { song_id }
         }
-        MsgActionArg::TogglePlay => Ok(MsgAction::TogglePlay),
-        MsgActionArg::SwitchList => {
+        ControlAction::TogglePlay => MsgAction::TogglePlay,
+        ControlAction::SwitchList => {
             let endpoint = value.ok_or_else(|| {
                 color_eyre::eyre::eyre!(
                     "switch-list requires an endpoint (e.g. `boxpigma msg switch-list toplist`)"
                 )
             })?;
-            Ok(MsgAction::SwitchList {
+            MsgAction::SwitchList {
                 endpoint: endpoint.to_string(),
                 playlist,
-            })
+            }
         }
-        MsgActionArg::Volume => {
+        ControlAction::Volume => {
             let value = value.ok_or_else(|| {
                 color_eyre::eyre::eyre!("volume requires a value like `75`, `+5` or `-5`")
             })?;
-            parse_volume(value)
+            parse_volume(value)?
         }
-        MsgActionArg::Mode => Ok(MsgAction::Mode),
-        MsgActionArg::Like => Ok(MsgAction::Like),
-        MsgActionArg::Dislike => Ok(MsgAction::Dislike),
-        MsgActionArg::ToggleLike => Ok(MsgAction::ToggleLike),
-        // Handled above in `msg` before parsing.
-        MsgActionArg::List | MsgActionArg::Search => unreachable!(),
-    }
+        ControlAction::Mode => MsgAction::Mode,
+        ControlAction::Like => MsgAction::Like,
+        ControlAction::Dislike => MsgAction::Dislike,
+        ControlAction::ToggleLike => MsgAction::ToggleLike,
+    })
 }
 
 /// Parse a volume value. A leading `+`/`-` is a delta (percent) applied via
@@ -481,7 +507,7 @@ pub async fn run_cli(mut cli: Cli) -> color_eyre::Result<Option<App>> {
             json,
             ..
         }) => {
-            cli::msg(*action, value.as_deref(), *playlist, *json).await?;
+            cli::msg(action, value.as_deref(), *playlist, *json).await?;
             return Ok(None);
         }
         Some(Command::Completions { shell }) => {
@@ -584,10 +610,10 @@ mod tests {
 
     #[test]
     fn parse_msg_play_with_optional_id() {
-        let plain = parse_msg_action(MsgActionArg::Play, None, None).unwrap();
+        let plain = parse_msg_action(ControlAction::Play, None, None).unwrap();
         assert_eq!(plain, MsgAction::Play { song_id: None });
 
-        let with_id = parse_msg_action(MsgActionArg::Play, Some("187186"), None).unwrap();
+        let with_id = parse_msg_action(ControlAction::Play, Some("187186"), None).unwrap();
         assert_eq!(
             with_id,
             MsgAction::Play {
@@ -595,9 +621,9 @@ mod tests {
             }
         );
 
-        assert!(parse_msg_action(MsgActionArg::Play, Some("abc"), None).is_err());
+        assert!(parse_msg_action(ControlAction::Play, Some("abc"), None).is_err());
         assert_eq!(
-            parse_msg_action(MsgActionArg::TogglePlay, None, None).unwrap(),
+            parse_msg_action(ControlAction::TogglePlay, None, None).unwrap(),
             MsgAction::TogglePlay
         );
     }
@@ -605,20 +631,55 @@ mod tests {
     #[test]
     fn msg_switch_list_and_aliases() {
         assert_eq!(
-            parse_msg_action(MsgActionArg::SwitchList, Some("toplist"), None).unwrap(),
+            ipc::action_spec("switch").map(|s| s.name),
+            Some("switch-list")
+        );
+        assert_eq!(ipc::action_spec("prev").map(|s| s.name), Some("previous"));
+        assert_eq!(
+            parse_msg_action(ControlAction::SwitchList, Some("toplist"), None).unwrap(),
             MsgAction::SwitchList {
                 endpoint: "toplist".into(),
                 playlist: None,
             }
         );
         assert_eq!(
-            parse_msg_action(MsgActionArg::ToggleLike, None, None).unwrap(),
+            parse_msg_action(ControlAction::ToggleLike, None, None).unwrap(),
             MsgAction::ToggleLike
         );
         assert_eq!(
-            parse_msg_action(MsgActionArg::Previous, None, None).unwrap(),
+            parse_msg_action(ControlAction::Previous, None, None).unwrap(),
             MsgAction::Previous
         );
+    }
+
+    /// The CLI accepts every name `capabilities` publishes — canonical names and
+    /// aliases alike — and resolves it to the action the catalogue names.
+    #[test]
+    fn every_published_action_parses() {
+        for spec in ipc::ACTIONS {
+            for name in std::iter::once(spec.name).chain(spec.aliases.iter().copied()) {
+                let cli = Cli::try_parse_from(["boxpigma", "msg", name])
+                    .unwrap_or_else(|e| panic!("`msg {name}` was rejected: {e}"));
+                let Some(Command::Msg { action, .. }) = cli.command else {
+                    panic!("`msg {name}` did not parse as the msg subcommand");
+                };
+                assert_eq!(action, name);
+                assert_eq!(
+                    ipc::action_spec(&action).map(|s| s.name),
+                    Some(spec.name),
+                    "`{name}` resolved to the wrong action"
+                );
+            }
+        }
+    }
+
+    /// A control action that takes no value must not silently swallow one.
+    #[tokio::test]
+    async fn msg_rejects_a_value_for_an_action_that_takes_none() {
+        let err = msg("next", Some("oops"), None, false)
+            .await
+            .expect_err("`next` takes no value");
+        assert!(err.to_string().contains("takes no value"), "{err}");
     }
 
     #[test]
