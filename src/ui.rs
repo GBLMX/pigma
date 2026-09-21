@@ -2,7 +2,7 @@
 //! navigation, lyrics, toasts, spinners, breadcrumbs, ...).
 
 mod artist;
-mod block;
+pub(crate) mod block;
 mod breadcrumb;
 mod command_panel;
 mod content;
@@ -405,7 +405,7 @@ pub(crate) fn draw_settings(f: &mut Frame, app: &mut App, areas: &layout::Layout
         app.terminal_background,
         app.state.tick,
     );
-    settings::draw(f, &app.config, app.state.settings.selected, &bs, areas.content);
+    settings::draw(f, &app.config, &mut app.state.settings, &bs, areas.content);
 }
 
 /// The artist page: one singer's profile, hot songs and albums, in the content area.

@@ -281,11 +281,27 @@ fn index_of(setting: &Setting) -> usize {
         .unwrap_or(0)
 }
 
+/// Which of the page's two panes the keys are talking to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Focus {
+    /// The sections on the left: `↑↓` walks them, and the page follows to that section's first row.
+    Sections,
+    /// The rows on the right: `↑↓` walks them and `←→` changes the one under the cursor. The
+    /// default, because changing a setting is what the page is for.
+    #[default]
+    Rows,
+}
+
 /// What the page needs to remember between frames.
 #[derive(Debug, Default)]
 pub struct SettingsState {
     /// The row the cursor is on, as an index into [`SETTINGS`].
     pub selected: usize,
+    pub focus: Focus,
+    /// The panes' hit areas, rebuilt on every draw: a click lands on what is on screen now, not on
+    /// what a former frame had there.
+    pub row_hits: Vec<Rect>,
+    pub section_hits: Vec<Rect>,
 }
 
 impl SettingsState {
@@ -295,6 +311,47 @@ impl SettingsState {
         let len = SETTINGS.len() as i32;
         self.selected = (self.selected as i32 + step).rem_euclid(len) as usize;
     }
+
+    /// Move the cursor to the first row of the previous (`step < 0`) or next section, so the
+    /// sections are walked the way the rows are.
+    pub fn move_section(&mut self, step: i32) {
+        let groups = groups();
+        let current = SETTINGS[self.selected].group;
+        let at = groups.iter().position(|group| *group == current).unwrap_or(0) as i32;
+        let next = (at + step).rem_euclid(groups.len() as i32) as usize;
+        let group = groups[next];
+
+        self.selected = SETTINGS
+            .iter()
+            .position(|setting| setting.group == group)
+            .unwrap_or(0);
+    }
+
+    /// Switch panes: what `Tab` does, and what a click on the other pane does.
+    pub fn toggle_focus(&mut self) {
+        self.focus = match self.focus {
+            Focus::Sections => Focus::Rows,
+            Focus::Rows => Focus::Sections,
+        };
+    }
+
+    /// Select the row at `index`, in the rows pane.
+    pub fn select_row(&mut self, index: usize) {
+        if index < SETTINGS.len() {
+            self.selected = index;
+            self.focus = Focus::Rows;
+        }
+    }
+
+    /// Select the first row of the section at `index`, in the sections pane.
+    pub fn select_section(&mut self, index: usize) {
+        if let Some(group) = groups().get(index)
+            && let Some(row) = SETTINGS.iter().position(|setting| setting.group == *group)
+        {
+            self.selected = row;
+            self.focus = Focus::Sections;
+        }
+    }
 }
 
 /// Draw the settings page in the page's area: the sections on the left, the rows of the section
@@ -302,7 +359,7 @@ impl SettingsState {
 pub(crate) fn draw(
     f: &mut Frame,
     config: &crate::config::Config,
-    selected: usize,
+    state: &mut SettingsState,
     bs: &BlockStyle<'_>,
     area: Rect,
 ) {
@@ -310,7 +367,8 @@ pub(crate) fn draw(
     let inner = block.inner(area);
     f.render_widget(block.block_padding(Padding::vertical(1)), area);
 
-    let selected = selected.min(SETTINGS.len() - 1);
+    let selected = state.selected.min(SETTINGS.len() - 1);
+    let focused = state.focus;
     let current = SETTINGS[selected].group;
     let values = values(config);
     let colors = bs.colors;
@@ -329,23 +387,45 @@ pub(crate) fn draw(
     ])
     .areas(inner);
 
+    // The sections, and where each of them is on screen: a click lands on a row rather than on a
+    // guess about where the column was.
+    state.section_hits.clear();
     let section_lines: Vec<Line> = groups()
         .into_iter()
-        .map(|group| {
-            let style = if group == current {
-                Style::default()
+        .enumerate()
+        .map(|(index, group)| {
+            state.section_hits.push(Rect {
+                x: sections.x,
+                y: sections.y + index as u16,
+                width: sections.width,
+                height: 1,
+            });
+
+            let style = match (group == current, focused) {
+                // The pane the keys are talking to is the one that reads as chosen; the other still
+                // shows where the page is, quietly.
+                (true, Focus::Sections) => Style::default()
                     .fg(colors.accent)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(colors.muted)
+                    .add_modifier(Modifier::BOLD),
+                (true, Focus::Rows) => Style::default().fg(colors.accent),
+                _ => Style::default().fg(colors.muted),
             };
             Line::from(Span::styled(format!("  {group}"), style))
         })
         .collect();
     f.render_widget(Paragraph::new(section_lines), sections);
 
+    state.row_hits.clear();
     let rows_lines: Vec<Line> = rows_in(current)
-        .map(|(index, setting)| {
+        .enumerate()
+        .map(|(offset, (index, setting))| {
+            state.row_hits.push(Rect {
+                x: rows.x,
+                y: rows.y + offset as u16,
+                width: rows.width,
+                height: 1,
+            });
+
             let style = if index == selected {
                 Style::default()
                     .fg(colors.accent)
@@ -377,12 +457,68 @@ pub(crate) fn draw(
     f.render_widget(Paragraph::new(rows_lines), rows);
 
     let hint = Line::from(Span::styled(
-        "↑↓ 选择 · ←→ 修改 · 空格 开关 · Esc 返回",
+        "Tab 分组/条目 · ↑↓ 选择 · ←→ 修改 · 空格 开关 · Esc 返回",
         Style::default().fg(colors.muted),
     ))
     .alignment(Alignment::Left);
     let hint_area = Rect::new(rows.x, inner.bottom().saturating_sub(1), rows.width, 1);
     f.render_widget(Paragraph::new(hint), hint_area);
+}
+
+/// Whether a cell is inside an area. The tables ask `input::hit` for this; the page keeps its own
+/// one-line version rather than reaching back into the input layer.
+fn inside(area: Rect, col: u16, row: u16) -> bool {
+    col >= area.x && col < area.right() && row >= area.y && row < area.bottom()
+}
+
+/// A click on the page.
+///
+/// A section picks that section out; a row picks it — and a second click on the row that is already
+/// picked changes it, which is the same "click the thing you are looking at" the tables have. The
+/// page is the only place that knows where its rows are, so it is the page that answers.
+pub(crate) fn handle_settings_click(app: &mut App, col: u16, row: u16) -> bool {
+    let sections = app.state.settings.section_hits.clone();
+    if let Some(index) = sections.iter().position(|area| inside(*area, col, row)) {
+        app.state.settings.select_section(index);
+        return true;
+    }
+
+    let rows = app.state.settings.row_hits.clone();
+    let Some(offset) = rows.iter().position(|area| inside(*area, col, row)) else {
+        return false;
+    };
+
+    // The hit areas are the rows of the section on screen, so the position in them is not the
+    // position in the table: it has to be read back through the section that was drawn.
+    let group = SETTINGS[app.state.settings.selected.min(SETTINGS.len() - 1)].group;
+    let Some(index) = rows_in(group)
+        .nth(offset)
+        .map(|(index, _)| index)
+    else {
+        return false;
+    };
+
+    let already = app.state.settings.selected == index && app.state.settings.focus == Focus::Rows;
+    if already && let Some(setting) = SETTINGS.get(index) {
+        if let Err(error) = change(app, setting, true) {
+            app.notice(crate::state::notices::Level::Error, error);
+        }
+    } else {
+        app.state.settings.select_row(index);
+    }
+
+    true
+}
+
+/// The wheel over the page walks the rows (or the sections), exactly as `↑↓` does.
+pub(crate) fn handle_settings_scroll(app: &mut App, up: bool) -> bool {
+    let step = if up { -1 } else { 1 };
+    match app.state.settings.focus {
+        Focus::Sections => app.state.settings.move_section(step),
+        Focus::Rows => app.state.settings.move_by(step),
+    }
+
+    true
 }
 
 /// The page's own key layer, consulted before the global key map — see [`crate::state::page::PageKeys`].
@@ -396,16 +532,41 @@ pub(crate) fn keys(app: &mut App, key_event: crossterm::event::KeyEvent) -> bool
     let setting = &SETTINGS[selected];
 
     let outcome = match key {
+        // The settings page is not part of the content breadcrumb stack — its key opens it from
+        // anywhere — so `Esc` is a page change rather than a restore. Without this the key fell
+        // through to the restore the main map sends, which has no breadcrumb to pop here.
+        KeyCode::Esc => {
+            app.state
+                .events
+                .send(crate::event::NavigationEvent::Navigate(crate::state::Page::Main));
+            return true;
+        }
+        KeyCode::BackTab | KeyCode::Tab => {
+            app.state.settings.toggle_focus();
+            return true;
+        }
         KeyCode::Up | KeyCode::Char('k') => {
-            app.state.settings.move_by(-1);
+            match app.state.settings.focus {
+                Focus::Sections => app.state.settings.move_section(-1),
+                Focus::Rows => app.state.settings.move_by(-1),
+            }
             return true;
         }
         KeyCode::Down | KeyCode::Char('j') => {
-            app.state.settings.move_by(1);
+            match app.state.settings.focus {
+                Focus::Sections => app.state.settings.move_section(1),
+                Focus::Rows => app.state.settings.move_by(1),
+            }
             return true;
         }
         // Space and Enter flip a switch; the arrows are for the rows that have more than two
         // values, and they flip a switch too rather than doing nothing on it.
+        // On the sections, `→` and `Enter` step into the rows the section holds; on a row they
+        // change it.
+        KeyCode::Right | KeyCode::Enter if app.state.settings.focus == Focus::Sections => {
+            app.state.settings.focus = Focus::Rows;
+            return true;
+        }
         KeyCode::Right | KeyCode::Char('l') | KeyCode::Enter | KeyCode::Char(' ') => {
             change(app, setting, true)
         }
@@ -548,9 +709,13 @@ mod tests {
                 .iter()
                 .position(|setting| setting.group == group)
                 .expect("the group has a row");
+            let mut state = SettingsState {
+                selected,
+                ..SettingsState::default()
+            };
             let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("backend");
             terminal
-                .draw(|f| draw(f, &config, selected, &bs, f.area()))
+                .draw(|f| draw(f, &config, &mut state, &bs, f.area()))
                 .expect("draw");
 
             let buffer = terminal.backend().buffer();

@@ -321,6 +321,13 @@ pub(super) fn handle_main_mouse(app: &mut App, kind: MouseEventKind, col: u16, r
                 playlist_select_next(app);
             }
         }
+        Page::Settings => {
+            if kind == MouseEventKind::ScrollUp {
+                crate::ui::settings::handle_settings_scroll(app, true);
+            } else if kind == MouseEventKind::ScrollDown {
+                crate::ui::settings::handle_settings_scroll(app, false);
+            }
+        }
         Page::Artist => {
             if kind == MouseEventKind::ScrollUp {
                 app.state.navigation.artist.select_prev();
@@ -433,6 +440,9 @@ fn handle_click(app: &mut App, col: u16, row: u16) {
     match app.state.navigation.page {
         Page::Playlist => click_queue_page(app, col, row),
         Page::Main => click_content(app, col, row),
+        Page::Settings => {
+            crate::ui::settings::handle_settings_click(app, col, row);
+        }
         _ => {}
     }
 }
@@ -734,6 +744,101 @@ mod tests {
         );
     }
 
+    /// The settings page has three ways in — keys, `Tab`, and the mouse — and they agree about
+    /// where the cursor is. The `Tab` pane switch and the click handling are the two the page grew
+    /// after it was first drawn.
+    #[tokio::test]
+    async fn the_settings_page_answers_keys_tab_and_mouse() {
+        use crossterm::event::{MouseButton, MouseEventKind};
+        use crate::ui::settings::{Focus, SETTINGS};
+
+        let mut app = app();
+        press(&mut app, ',');
+        app.handle_events().await.expect("events");
+        assert_eq!(app.state.navigation.page, Page::Settings);
+        assert_eq!(app.state.settings.focus, Focus::Rows, "the rows are what a page is for");
+
+        // `Tab` moves to the sections, and `↑↓` walks them there.
+        press_key(&mut app, KeyCode::Tab);
+        assert_eq!(app.state.settings.focus, Focus::Sections);
+        let before = SETTINGS[app.state.settings.selected].group;
+        press(&mut app, 'j');
+        let after = SETTINGS[app.state.settings.selected].group;
+        assert_ne!(before, after, "`j` walked a section, not a row");
+        assert_eq!(
+            app.state.settings.selected,
+            SETTINGS
+                .iter()
+                .position(|setting| setting.group == after)
+                .expect("the section has a row"),
+            "the page follows to the section's first row"
+        );
+
+        // `Tab` back: the rows walk again.
+        press_key(&mut app, KeyCode::Tab);
+        assert_eq!(app.state.settings.focus, Focus::Rows);
+
+        // The hit areas come from a frame, so draw one the way the page does — and the page only
+        // draws the rows of the section the cursor is in, so put the cursor in that section first.
+        let target = SETTINGS
+            .iter()
+            .position(|setting| setting.label == "边听边存")
+            .expect("the cache switch is a row");
+        app.state.settings.select_row(target);
+
+        let config = app.config.clone();
+        let theme = app.current_theme().clone();
+        let style = crate::ui::block::BlockStyle {
+            colors: &theme,
+            base: theme.bg,
+            border: &config.border,
+            tick: 0,
+        };
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(90, 24)).expect("backend");
+        terminal
+            .draw(|f| {
+                crate::ui::settings::draw(f, &config, &mut app.state.settings, &style, f.area())
+            })
+            .expect("draw");
+
+        // A click picks the row it lands on — the row whose hit area is under the cell — and the
+        // second click on that row changes what it names.
+        let area = app
+            .state
+            .settings
+            .row_hits
+            .last()
+            .copied()
+            .expect("the frame drew the section's rows");
+        assert_eq!(app.state.settings.row_hits.len(), 1, "one row in this section");
+        crate::input::handle_mouse_event(
+            &mut app,
+            MouseEventKind::Down(MouseButton::Left),
+            area.x + 1,
+            area.y,
+        );
+        assert_eq!(app.state.settings.selected, target, "the click picked the row");
+
+        let before = app.config.cache.save_on_play;
+        crate::input::handle_mouse_event(
+            &mut app,
+            MouseEventKind::Down(MouseButton::Left),
+            area.x + 1,
+            area.y,
+        );
+        assert_ne!(
+            app.config.cache.save_on_play, before,
+            "clicking the picked row changed it"
+        );
+
+        // The wheel walks the rows — through the whole table, wrapping at the end, which is what
+        // the cursor does on every other list in the app.
+        let before = app.state.settings.selected;
+        crate::input::handle_mouse_event(&mut app, MouseEventKind::ScrollDown, area.x + 1, area.y);
+        assert_ne!(app.state.settings.selected, before, "the wheel moved the cursor");
+    }
+
     /// A key sequence, typed through the real entry point: the first key is held, the second runs
     /// the command, and `Esc` gives up on a half-typed one instead of running it later.
     #[tokio::test]
@@ -836,6 +941,17 @@ mod tests {
         assert_eq!(
             app.config.cache.save_on_play, !before,
             "space on the row flips the key the row names"
+        );
+
+        // `Esc` leaves the page. It is the page's own key: the settings page is not in the content
+        // breadcrumb stack, so the restore the main map sends has no breadcrumb to pop here — the
+        // page used to stay up.
+        press_key(&mut app, KeyCode::Esc);
+        app.handle_events().await.expect("events");
+        assert_eq!(
+            app.state.navigation.page,
+            Page::Main,
+            "`Esc` closed the settings page"
         );
     }
 
