@@ -242,6 +242,23 @@ log_level = "debug"
 # error = "#b000ff"
 #
 # 然后 default_theme = "my_theme", 或在应用里 `:theme my_theme` (Tab 可补全)
+#
+# 除了一组基础色, 还能按**组件**细化: 每个节里的一项是一个「样式」——{ fg, bg, bold, italic,
+# underline, reversed, dim }, fg/bg 可以写主题字段名(bg/surface/text/accent/muted/border/
+# error/warn) 或颜色本身。没写的部分沿用该组件的默认样式(由基础色推出), 所以只写想改的一项。
+#
+# [themes.my_theme.table]
+# header    = { fg = "accent", bold = true }          # 表头
+# row       = { fg = "text" }                          # 普通行
+# selected  = { fg = "on_accent", bg = "accent" }      # 选中行(on_accent = 压在强调色上可读的前景)
+# secondary = { fg = "muted", dim = true }             # 次要列(专辑/时长)
+# playing   = { fg = "accent", bold = true }           # 正在播放的那一行
+#
+# [themes.my_theme.tabs]      # 队列标签: active / inactive
+# [themes.my_theme.lyrics]    # 歌词: line / sung / translation
+# [themes.my_theme.popup]     # 弹层: border / title / footer
+# [themes.my_theme.notify]    # 通知分级: info / warn / error
+# 顶层还可写 warn = "#e5c07b"(警示色, 通知的 warn 级用它)
 
 # =============================================================================
 # 自定义列定义

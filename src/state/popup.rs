@@ -58,8 +58,10 @@ mod tests {
     /// empty space before the view moved again.
     #[test]
     fn opening_starts_at_the_top_and_scrolling_stops_at_the_bottom() {
-        let mut popup = PopupState::default();
-        popup.scroll = 5;
+        let mut popup = PopupState {
+            scroll: 5,
+            ..PopupState::default()
+        };
         popup.open();
         assert!(popup.open);
         assert_eq!(popup.scroll, 0);

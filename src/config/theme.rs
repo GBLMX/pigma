@@ -5,7 +5,7 @@ use std::{
 };
 
 use palette::{LinLuma, Srgb, color_difference::Wcag21RelativeContrast, white_point::D65};
-use ratatui::style::Color;
+use ratatui::style::{Color, Modifier, Style};
 use serde::{Deserialize, Serialize};
 
 use crate::utils::terminal::{
@@ -24,6 +24,17 @@ pub struct Theme {
     pub muted: Color,
     pub border: Color,
     pub error: Color,
+    /// Amber: a warning is not a failure, and the app had no colour for one until the notices
+    /// needed it.
+    pub warn: Color,
+    /// A section per kind of thing rather than one flat list of hues, so a theme file says "the
+    /// selected row" or "the line being sung" instead of guessing which of seven colours a widget
+    /// meant — the shape Yazi's theme has, and the reason a flavor can retheme one surface.
+    pub table: TableLooks,
+    pub tabs: TabLooks,
+    pub lyrics: LyricLooks,
+    pub popup: PopupLooks,
+    pub notify: NotifyLooks,
 }
 
 fn cstr(s: &str) -> Color {
@@ -49,6 +60,424 @@ fn downsample_color(color: Color, mode: ColorMode) -> Color {
     }
 }
 
+/// A style a theme file writes: colours by name or literal, and the modifiers.
+///
+/// The shape Yazi and Helix both use — a component's look is `{ fg, bg, bold, italic, … }` rather
+/// than one colour — which is what lets a theme say "the selected row is the accent as a
+/// background" instead of only which hue to use.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PaintSpec {
+    pub fg: Option<ColorSpec>,
+    pub bg: Option<ColorSpec>,
+    pub bold: bool,
+    pub italic: bool,
+    pub underline: bool,
+    pub reversed: bool,
+    pub dim: bool,
+}
+
+impl PaintSpec {
+    /// The look this adds to `base`: a part left out is the base's.
+    fn over(&self, base: Look, theme: &Theme, name: &str) -> Look {
+        Look {
+            fg: resolve(self.fg.as_ref(), theme, name, "fg").or(base.fg),
+            bg: resolve(self.bg.as_ref(), theme, name, "bg").or(base.bg),
+            bold: self.bold || base.bold,
+            italic: self.italic || base.italic,
+            underline: self.underline || base.underline,
+            reversed: self.reversed || base.reversed,
+            dim: self.dim || base.dim,
+        }
+    }
+}
+
+/// A style the app draws with: the colours resolved, the modifiers decided.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Look {
+    pub fg: Option<Color>,
+    pub bg: Option<Color>,
+    pub bold: bool,
+    pub italic: bool,
+    pub underline: bool,
+    pub reversed: bool,
+    pub dim: bool,
+}
+
+impl Look {
+    /// The ratatui style for it.
+    pub fn style(self) -> Style {
+        let mut style = Style::default();
+        if let Some(fg) = self.fg {
+            style = style.fg(fg);
+        }
+        if let Some(bg) = self.bg {
+            style = style.bg(bg);
+        }
+        for (on, modifier) in [
+            (self.bold, Modifier::BOLD),
+            (self.italic, Modifier::ITALIC),
+            (self.underline, Modifier::UNDERLINED),
+            (self.reversed, Modifier::REVERSED),
+            (self.dim, Modifier::DIM),
+        ] {
+            if on {
+                style = style.add_modifier(modifier);
+            }
+        }
+
+        style
+    }
+}
+
+/// A colour named after a field of the theme (`accent`, `muted`, …): how a section's defaults are
+/// written, so a theme that names only its own colours still has a complete set of looks.
+fn named(name: &str) -> Option<ColorSpec> {
+    Some(ColorSpec::Text(name.to_string()))
+}
+
+/// The list-like surfaces: rows, their header, and the row that is picked out.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TableLooks {
+    pub header: PaintSpec,
+    pub row: PaintSpec,
+    pub selected: PaintSpec,
+    pub secondary: PaintSpec,
+    pub playing: PaintSpec,
+}
+
+impl Default for TableLooks {
+    fn default() -> Self {
+        Self {
+            header: PaintSpec {
+                fg: named("accent"),
+                bold: true,
+                ..PaintSpec::default()
+            },
+            row: PaintSpec::default(),
+            selected: PaintSpec {
+                fg: named("on_accent"),
+                bg: named("accent"),
+                bold: true,
+                ..PaintSpec::default()
+            },
+            secondary: PaintSpec {
+                dim: true,
+                ..PaintSpec::default()
+            },
+            playing: PaintSpec {
+                fg: named("accent"),
+                ..PaintSpec::default()
+            },
+        }
+    }
+}
+
+/// The queue's tabs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TabLooks {
+    pub active: PaintSpec,
+    pub inactive: PaintSpec,
+}
+
+impl Default for TabLooks {
+    fn default() -> Self {
+        Self {
+            active: PaintSpec {
+                fg: named("on_accent"),
+                bg: named("accent"),
+                bold: true,
+                ..PaintSpec::default()
+            },
+            inactive: PaintSpec {
+                fg: named("muted"),
+                ..PaintSpec::default()
+            },
+        }
+    }
+}
+
+/// The lyrics page: the line being sung, the ones around it, and the translation under them.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LyricLooks {
+    pub line: PaintSpec,
+    pub sung: PaintSpec,
+    pub translation: PaintSpec,
+}
+
+impl Default for LyricLooks {
+    fn default() -> Self {
+        Self {
+            line: PaintSpec {
+                fg: named("text"),
+                ..PaintSpec::default()
+            },
+            sung: PaintSpec {
+                fg: named("accent"),
+                bold: true,
+                ..PaintSpec::default()
+            },
+            translation: PaintSpec {
+                fg: named("muted"),
+                italic: true,
+                ..PaintSpec::default()
+            },
+        }
+    }
+}
+
+/// A popup: its frame, its title, and the line that says which keys work.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PopupLooks {
+    pub border: PaintSpec,
+    pub title: PaintSpec,
+    pub footer: PaintSpec,
+}
+
+impl Default for PopupLooks {
+    fn default() -> Self {
+        Self {
+            border: PaintSpec {
+                fg: named("accent"),
+                ..PaintSpec::default()
+            },
+            title: PaintSpec {
+                fg: named("accent"),
+                bold: true,
+                ..PaintSpec::default()
+            },
+            footer: PaintSpec {
+                fg: named("muted"),
+                ..PaintSpec::default()
+            },
+        }
+    }
+}
+
+/// How loudly a notice says itself.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NotifyLooks {
+    pub info: PaintSpec,
+    pub warn: PaintSpec,
+    pub error: PaintSpec,
+}
+
+impl Default for NotifyLooks {
+    fn default() -> Self {
+        Self {
+            info: PaintSpec::default(),
+            warn: PaintSpec {
+                fg: named("warn"),
+                ..PaintSpec::default()
+            },
+            error: PaintSpec {
+                fg: named("error"),
+                bold: true,
+                ..PaintSpec::default()
+            },
+        }
+    }
+}
+
+/// The looks a widget asks for, resolved once when the theme is built.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Looks {
+    pub table_header: Look,
+    pub table_row: Look,
+    pub table_selected: Look,
+    pub table_secondary: Look,
+    pub table_playing: Look,
+    pub tab_active: Look,
+    pub tab_inactive: Look,
+    pub lyric_line: Look,
+    pub lyric_sung: Look,
+    pub lyric_translation: Look,
+    pub popup_border: Look,
+    pub popup_title: Look,
+    pub popup_footer: Look,
+    pub notice_info: Look,
+    pub notice_warn: Look,
+    pub notice_error: Look,
+}
+
+impl Theme {
+    /// Resolve every section against this theme's own colours: what a spec leaves out comes from
+    /// the theme, so a file that sets only `text` and `accent` still has a complete set.
+    pub fn looks(&self) -> Looks {
+        Looks {
+            table_header: self.table.header.over(Look::default(), self, "table.header"),
+            table_row: self.table.row.over(
+                Look {
+                    fg: Some(self.text),
+                    ..Look::default()
+                },
+                self,
+                "table.row",
+            ),
+            table_selected: self.table.selected.over(
+                Look {
+                    fg: Some(self.on_accent()),
+                    bg: Some(self.accent),
+                    bold: true,
+                    ..Look::default()
+                },
+                self,
+                "table.selected",
+            ),
+            table_secondary: self.table.secondary.over(
+                Look {
+                    fg: Some(self.muted),
+                    ..Look::default()
+                },
+                self,
+                "table.secondary",
+            ),
+            table_playing: self.table.playing.over(
+                Look {
+                    fg: Some(self.accent),
+                    bold: true,
+                    ..Look::default()
+                },
+                self,
+                "table.playing",
+            ),
+            tab_active: self.tabs.active.over(
+                Look {
+                    fg: Some(self.on_accent()),
+                    bg: Some(self.accent),
+                    bold: true,
+                    ..Look::default()
+                },
+                self,
+                "tabs.active",
+            ),
+            tab_inactive: self.tabs.inactive.over(
+                Look {
+                    fg: Some(self.muted),
+                    ..Look::default()
+                },
+                self,
+                "tabs.inactive",
+            ),
+            lyric_line: self.lyrics.line.over(
+                Look {
+                    fg: Some(self.text),
+                    ..Look::default()
+                },
+                self,
+                "lyrics.line",
+            ),
+            lyric_sung: self.lyrics.sung.over(
+                Look {
+                    fg: Some(self.accent),
+                    bold: true,
+                    ..Look::default()
+                },
+                self,
+                "lyrics.sung",
+            ),
+            lyric_translation: self.lyrics.translation.over(
+                Look {
+                    fg: Some(self.muted),
+                    ..Look::default()
+                },
+                self,
+                "lyrics.translation",
+            ),
+            popup_border: self.popup.border.over(
+                Look {
+                    fg: Some(self.accent),
+                    ..Look::default()
+                },
+                self,
+                "popup.border",
+            ),
+            popup_title: self.popup.title.over(
+                Look {
+                    fg: Some(self.accent),
+                    bold: true,
+                    ..Look::default()
+                },
+                self,
+                "popup.title",
+            ),
+            popup_footer: self.popup.footer.over(
+                Look {
+                    fg: Some(self.muted),
+                    ..Look::default()
+                },
+                self,
+                "popup.footer",
+            ),
+            notice_info: self.notify.info.over(
+                Look {
+                    fg: Some(self.text),
+                    ..Look::default()
+                },
+                self,
+                "notify.info",
+            ),
+            notice_warn: self.notify.warn.over(
+                Look {
+                    fg: Some(self.warn),
+                    ..Look::default()
+                },
+                self,
+                "notify.warn",
+            ),
+            notice_error: self.notify.error.over(
+                Look {
+                    fg: Some(self.error),
+                    bold: true,
+                    ..Look::default()
+                },
+                self,
+                "notify.error",
+            ),
+        }
+    }
+}
+
+/// Resolve one colour spec: a field of this theme (`accent`), or a literal the terminal knows.
+/// A name this theme does not have is reported once per name, not once per frame.
+fn resolve(spec: Option<&ColorSpec>, theme: &Theme, section: &str, part: &str) -> Option<Color> {
+    let spec = spec?;
+    let ColorSpec::Text(name) = spec else {
+        // An index is a colour the terminal already knows.
+        return spec.resolve().ok();
+    };
+
+    match name.trim() {
+        "bg" => return Some(theme.bg),
+        "surface" => return Some(theme.surface),
+        "text" => return Some(theme.text),
+        "accent" => return Some(theme.accent),
+        "muted" => return Some(theme.muted),
+        "border" => return Some(theme.border),
+        "error" => return Some(theme.error),
+        "warn" => return Some(theme.warn),
+        // The readable foreground on the accent: what the selected row used before it could be
+        // themed, and still the right default for a palette the theme did not think about.
+        "on_accent" => return Some(theme.on_accent()),
+        _ => {}
+    }
+
+    match spec.resolve() {
+        Ok(color) => Some(color),
+        Err(_) => {
+            if report_unknown_field_once(&format!("{section}.{part}={name}")) {
+                log::warn!("[{section}] {part}: \"{name}\" is not a colour; ignored");
+            }
+            Some(Color::Reset)
+        }
+    }
+}
+
 impl Default for Theme {
     fn default() -> Self {
         Self {
@@ -60,6 +489,12 @@ impl Default for Theme {
             muted: cstr("#555555"),
             border: Color::Reset,
             error: cstr("#f4535a"),
+            warn: cstr("#e5c07b"),
+            table: TableLooks::default(),
+            tabs: TabLooks::default(),
+            lyrics: LyricLooks::default(),
+            popup: PopupLooks::default(),
+            notify: NotifyLooks::default(),
         }
     }
 }
@@ -75,6 +510,7 @@ impl Theme {
             border: Color::Indexed(1),
             error: Color::Indexed(9),
             surface: Color::Indexed(1),
+            ..Self::default()
         }
     }
 
@@ -88,6 +524,7 @@ impl Theme {
             muted: cstr("#6272a4"),
             border: cstr("#6272a4"),
             error: cstr("#ff5555"),
+            ..Self::default()
         }
     }
 
@@ -101,6 +538,7 @@ impl Theme {
             muted: cstr("#616e88"),
             border: cstr("#616e88"),
             error: cstr("#bf616a"),
+            ..Self::default()
         }
     }
 
@@ -114,6 +552,7 @@ impl Theme {
             muted: cstr("#928374"),
             border: cstr("#928374"),
             error: cstr("#fb4934"),
+            ..Self::default()
         }
     }
 
@@ -127,6 +566,7 @@ impl Theme {
             muted: cstr("#586e75"),
             border: cstr("#586e75"),
             error: cstr("#dc322f"),
+            ..Self::default()
         }
     }
 
@@ -140,6 +580,7 @@ impl Theme {
             muted: cstr("#565f89"),
             border: cstr("#565f89"),
             error: cstr("#f7768e"),
+            ..Self::default()
         }
     }
 
@@ -153,6 +594,7 @@ impl Theme {
             muted: cstr("#6c7086"),
             border: cstr("#6c7086"),
             error: cstr("#f38ba8"),
+            ..Self::default()
         }
     }
 
@@ -166,6 +608,7 @@ impl Theme {
             muted: cstr("#5c6370"),
             border: cstr("#5c6370"),
             error: cstr("#e06c75"),
+            ..Self::default()
         }
     }
 
@@ -179,6 +622,7 @@ impl Theme {
             muted: cstr("#75715e"),
             border: cstr("#75715e"),
             error: cstr("#f92672"),
+            ..Self::default()
         }
     }
 
@@ -192,6 +636,7 @@ impl Theme {
             muted: cstr("#6e6a86"),
             border: cstr("#6e6a86"),
             error: cstr("#eb6f92"),
+            ..Self::default()
         }
     }
 
@@ -205,6 +650,7 @@ impl Theme {
             muted: cstr("#727169"),
             border: cstr("#727169"),
             error: cstr("#c34043"),
+            ..Self::default()
         }
     }
 
@@ -219,6 +665,7 @@ impl Theme {
             muted: cstr("#93a1a1"),
             border: cstr("#93a1a1"),
             error: cstr("#dc322f"),
+            ..Self::default()
         }
     }
 
@@ -232,6 +679,7 @@ impl Theme {
             muted: cstr("#9ca0b0"),
             border: cstr("#9ca0b0"),
             error: cstr("#d20f39"),
+            ..Self::default()
         }
     }
 
@@ -245,6 +693,7 @@ impl Theme {
             muted: cstr("#a0a1a7"),
             border: cstr("#a0a1a7"),
             error: cstr("#e45649"),
+            ..Self::default()
         }
     }
 
@@ -258,6 +707,7 @@ impl Theme {
             muted: cstr("#57606a"),
             border: cstr("#57606a"),
             error: cstr("#cf222e"),
+            ..Self::default()
         }
     }
 
@@ -271,6 +721,7 @@ impl Theme {
             muted: cstr("#928374"),
             border: cstr("#928374"),
             error: cstr("#cc241d"),
+            ..Self::default()
         }
     }
 
@@ -284,6 +735,7 @@ impl Theme {
             muted: cstr("#00f0ff"),
             border: Color::Reset,
             error: cstr("#b000ff"),
+            ..Self::default()
         }
     }
 
@@ -297,6 +749,7 @@ impl Theme {
             muted: cstr("#00ccff"),
             border: Color::Reset,
             error: cstr("#ff3300"),
+            ..Self::default()
         }
     }
 
@@ -310,6 +763,7 @@ impl Theme {
             muted: cstr("#ccff00"),
             border: Color::Reset,
             error: cstr("#00ff66"),
+            ..Self::default()
         }
     }
 
@@ -362,6 +816,12 @@ impl Theme {
             accent: downsample_color(self.accent, mode),
             muted: downsample_color(self.muted, mode),
             border: downsample_color(self.border, mode),
+            warn: downsample_color(self.warn, mode),
+            table: self.table,
+            tabs: self.tabs,
+            lyrics: self.lyrics,
+            popup: self.popup,
+            notify: self.notify,
             error: downsample_color(self.error, mode),
         }
     }
@@ -538,6 +998,14 @@ pub struct UserTheme {
     pub muted: Option<ColorSpec>,
     pub border: Option<ColorSpec>,
     pub error: Option<ColorSpec>,
+    pub warn: Option<ColorSpec>,
+    /// The component sections: a theme file says "the selected row" or "the line being sung"
+    /// rather than only which of the flat colours a widget meant.
+    pub table: Option<TableLooks>,
+    pub tabs: Option<TabLooks>,
+    pub lyrics: Option<LyricLooks>,
+    pub popup: Option<PopupLooks>,
+    pub notify: Option<NotifyLooks>,
 }
 
 impl UserTheme {
@@ -553,6 +1021,27 @@ impl UserTheme {
         set(&mut theme.muted, self.muted.as_ref(), name, "muted");
         set(&mut theme.border, self.border.as_ref(), name, "border");
         set(&mut theme.error, self.error.as_ref(), name, "error");
+        set(&mut theme.warn, self.warn.as_ref(), name, "warn");
+
+        // A section a theme writes replaces the base's: what it leaves out of that section is
+        // filled from the theme's own colours when the looks are resolved (see `Theme::looks`), so
+        // `[table] selected = …` changes that one look and nothing else.
+        if let Some(table) = &self.table {
+            theme.table = table.clone();
+        }
+        if let Some(tabs) = &self.tabs {
+            theme.tabs = tabs.clone();
+        }
+        if let Some(lyrics) = &self.lyrics {
+            theme.lyrics = lyrics.clone();
+        }
+        if let Some(popup) = &self.popup {
+            theme.popup = popup.clone();
+        }
+        if let Some(notify) = &self.notify {
+            theme.notify = notify.clone();
+        }
+
         theme
     }
 }
@@ -884,5 +1373,86 @@ mod unknown_field_tests {
             report_unknown_field_once("__another_unknown_field__"),
             "不同的名字仍应各报一次"
         );
+    }
+}
+
+#[cfg(test)]
+mod look_tests {
+    use super::*;
+
+    /// With nothing written in a section, the looks are the theme's own colours: a theme that sets
+    /// only `text` and `accent` still has a complete set, which is what makes the sections
+    /// additive rather than something every theme has to write out in full.
+    #[test]
+    fn the_defaults_come_from_the_themes_own_colours() {
+        let theme = Theme::default();
+        let looks = theme.looks();
+
+        assert_eq!(looks.table_row.fg, Some(theme.text));
+        assert_eq!(looks.table_header.fg, Some(theme.accent));
+        assert_eq!(looks.table_selected.bg, Some(theme.accent));
+        assert_eq!(looks.table_secondary.fg, Some(theme.muted));
+        assert_eq!(looks.tab_active.bg, Some(theme.accent));
+        assert_eq!(looks.lyric_line.fg, Some(theme.text));
+        assert_eq!(looks.notice_error.fg, Some(theme.error));
+        assert_eq!(looks.notice_warn.fg, Some(theme.warn));
+        assert!(looks.notice_error.bold);
+    }
+
+    /// A section in a theme file is what a widget draws with: the part it names is taken, and the
+    /// parts it leaves out still come from the theme's colours — which is why a theme can write
+    /// one line about one row and nothing else.
+    #[test]
+    fn a_section_in_a_theme_file_is_what_a_widget_draws_with() {
+        let user: UserTheme = toml_edit::de::from_str(
+            r##"
+base = "terminal"
+[table]
+selected = { bg = "#123456", italic = true }
+[tabs]
+active = { fg = "accent" }
+"##,
+        )
+        .expect("a theme file");
+
+        let base = Theme::terminal();
+        let theme = user.resolve("mine", &base);
+        let looks = theme.looks();
+
+        assert_eq!(looks.table_selected.bg, Some(cstr("#123456")));
+        assert!(looks.table_selected.italic, "the modifier is the theme's");
+        assert_eq!(
+            looks.table_selected.fg,
+            Some(theme.on_accent()),
+            "what the section left out still comes from the theme"
+        );
+        assert_eq!(
+            looks.table_row.fg,
+            Some(theme.text),
+            "and the rest is untouched"
+        );
+        assert_eq!(looks.tab_active.fg, Some(theme.accent));
+        assert_eq!(
+            looks.table_header.fg,
+            Some(theme.accent),
+            "a section the theme did not write keeps its own defaults"
+        );
+    }
+
+    /// A colour name the theme does not have is not a reason to lose the row: it falls back, the
+    /// way every other unknown colour in the config does, and says so once.
+    #[test]
+    fn a_colour_name_the_theme_does_not_have_falls_back() {
+        let user: UserTheme = toml_edit::de::from_str(
+            r##"
+[table]
+row = { fg = "not_a_colour_name" }
+"##,
+        )
+        .expect("a theme file");
+
+        let theme = user.resolve("mine", &Theme::default());
+
+        assert_eq!(theme.looks().table_row.fg, Some(Color::Reset));
     }
 }

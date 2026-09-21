@@ -95,9 +95,9 @@ pub(super) fn draw_window(f: &mut Frame, view: &View<'_>, inner: Rect, fill: Fil
         }
 
         let t_style = if i == view.cur {
-            Style::default()
-                .fg(view.colors.text)
-                .add_modifier(Modifier::ITALIC)
+            // The theme's own translation look, so a palette can say how a translation reads
+            // rather than leaving it to the code that draws it.
+            view.colors.looks().lyric_translation.style()
         } else {
             let d = i.abs_diff(view.cur);
             if d <= 2 {

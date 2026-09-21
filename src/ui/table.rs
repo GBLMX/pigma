@@ -36,7 +36,7 @@ pub(super) fn render_table(
         .iter()
         .map(|h| {
             let spans = styled_text::parse_styled(&h.header, colors);
-            Cell::from(Line::from(spans)).style(Style::default().fg(colors.muted))
+            Cell::from(Line::from(spans)).style(colors.looks().table_header.style())
         })
         .collect();
     let header = Row::new(header_cells)
@@ -52,8 +52,7 @@ pub(super) fn render_table(
             // The highlight wins over the cells' own styles, so the readable colour has to
             // be named here: `bg` on `accent` is nearly invisible in the light palettes.
             let row_style = Style::default()
-                .fg(colors.on_accent())
-                .bg(colors.accent)
+                .patch(colors.looks().table_selected.style())
                 .add_modifier(Modifier::BOLD);
 
             let table = table.row_highlight_style(row_style).highlight_symbol("");

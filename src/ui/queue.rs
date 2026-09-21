@@ -22,17 +22,16 @@ use crate::{
 };
 
 fn tab_style(colors: &Theme, selected: bool, playing: bool) -> Style {
+    let looks = colors.looks();
     if !selected && !playing {
-        return Style::default().fg(colors.muted);
+        return looks.tab_inactive.style();
     }
-    let mut modifier = Modifier::BOLD;
+    let mut style = looks.tab_active.style();
     if playing {
-        modifier |= Modifier::SLOW_BLINK;
+        style = style.add_modifier(Modifier::SLOW_BLINK);
     }
-    Style::default()
-        .fg(colors.bg)
-        .bg(colors.accent)
-        .add_modifier(Modifier::BOLD)
+
+    style
 }
 
 #[allow(clippy::too_many_arguments)]

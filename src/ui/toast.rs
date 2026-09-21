@@ -35,19 +35,22 @@ pub(super) fn draw_toast(f: &mut Frame, app: &App, colors: &Theme) {
 
     f.render_widget(Clear, toast_area);
 
-    let (border, text) = match notice.level {
-        Level::Info => (colors.muted, colors.text),
-        Level::Warn => (colors.accent, colors.text),
-        Level::Error => (colors.error, colors.error),
+    // A theme colours the levels, so a palette can make a warning loud and a confirmation quiet
+    // without the code that raises them knowing anything about it.
+    let looks = colors.looks();
+    let text_look = match notice.level {
+        Level::Info => looks.notice_info,
+        Level::Warn => looks.notice_warn,
+        Level::Error => looks.notice_error,
     };
+    let text = text_look.fg.unwrap_or(colors.text);
     let block = Block::default()
         .borders(Borders::TOP)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(border))
+        .border_style(Style::default().fg(text))
         .style(Style::default().bg(colors.surface));
 
-    let p = Paragraph::new(format!(" {} ", notice.text))
-        .style(Style::default().fg(text))
+    let p = Paragraph::new(format!(" {} ", notice.text)).style(text_look.style())
         .block(block)
         .alignment(Alignment::Center);
     f.render_widget(p, toast_area);

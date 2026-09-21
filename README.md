@@ -515,6 +515,7 @@ Send-boxpigma '{"cmd":"msg","action":{"action":"volume","absolute":0.75}}'  # �
 | `lyric_ktv_color` | `ktv` 样式的填充色：主题字段（`accent` / `text` …）或颜色本身（`blue` / `#4da6ff` / ANSI 序号） |
 | `lyric_translation` | 原文下面是否画译文（同 `y` ／`:translation on\|off`） |
 | `[symbols]` | 字形预设与逐键覆盖（`translation` 是译文行前的标记，默认 `>`） |
+| 主题 `[themes.*]` | 基础色之外可按**组件**细化：`[table]`（`header`/`row`/`selected`/`secondary`/`playing`）、`[tabs]`（`active`/`inactive`）、`[lyrics]`（`line`/`sung`/`translation`）、`[popup]`（`border`/`title`/`footer`）、`[notify]`（`info`/`warn`/`error`）；每一项是样式 `{ fg, bg, bold, italic, underline, reversed, dim }`，`fg`/`bg` 可写主题字段名或颜色，未写部分沿用该组件的默认样式 |
 | `[keys]` | 键位重绑：`命令名 = "键序列"`（单键或空格分隔的多键，可带 `ctrl+`/`alt+`），`""` 为解绑；不写＝用命令表自带的键 |
 | `[terminal]` | 鼠标捕获与光标形状 |
 | `[notify]` | 桌面通知开关（切歌 / 出错） |
