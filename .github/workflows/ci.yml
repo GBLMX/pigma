@@ -149,6 +149,7 @@ jobs:
       - name: cargo test --locked
         # `--workspace` also runs the tests of the `crates/*` members, which a
         # package-only invocation silently skipped.
+        shell: bash
         run: |
           set -o pipefail
           cargo test --locked --workspace --all-features 2>&1 | tee test-output.log
@@ -157,6 +158,7 @@ jobs:
       # failure it was added for is understood.
       - name: Report the test output
         if: failure()
+        shell: bash
         run: |
           {
             echo '### 测试输出（失败段）'
@@ -165,5 +167,9 @@ jobs:
               | tail -n 120 || tail -n 60 test-output.log
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+          # An annotation only reaches the public API when it names a file and a line.
+          grep -E '^(error|test result: FAILED|failures:|---- |thread |  left|  right)' -A4 test-output.log \
+            | tail -n 60 \
+            | while IFS= read -r line; do echo "::error file=CHANGELOG.md,line=1::$line"; done
       - name: Cache Cargo dependencies
         uses: Swatinem/rust-cache@v2
