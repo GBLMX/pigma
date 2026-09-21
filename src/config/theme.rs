@@ -9,7 +9,7 @@ use ratatui::style::{Color, Modifier, Style};
 use serde::{Deserialize, Serialize};
 
 use crate::utils::terminal::{
-    Background, COLOR_MODE, ColorMode, background_from_luminance, rgb_luminance, rgb_to_16,
+    Background, COLOR_MODE, ColorMode, background_from_luminance, color_luminance, rgb_to_16,
     rgb_to_256,
 };
 
@@ -836,16 +836,11 @@ impl Theme {
     /// terminal's (see [`BackgroundFill`](crate::utils::terminal::BackgroundFill)). The threshold
     /// is the terminal probe's, so the two answers are comparable.
     pub fn background(&self) -> Background {
-        match self.bg {
-            Color::Rgb(r, g, b) => background_from_luminance(rgb_luminance(
-                f64::from(r) / 255.0,
-                f64::from(g) / 255.0,
-                f64::from(b) / 255.0,
-            )),
-            // A palette colour or `Reset` says nothing measurable about the screen it lands on;
-            // the probe's own fallback is the same assumption.
-            _ => Background::Dark,
-        }
+        // A theme down-sampled for a palette terminal keeps its meaning: the index is looked up
+        // in the table it came from, so a light theme is still light there. Only `Reset` — the
+        // terminal's own background, which says nothing about itself — falls back, and it falls
+        // back to the same assumption the probe makes.
+        color_luminance(self.bg).map_or(Background::Dark, background_from_luminance)
     }
 
     /// Resolve a colour written in the config: a theme field, or a colour of its own.

@@ -8,6 +8,7 @@ use crossterm::{
     execute,
     terminal::{BeginSynchronizedUpdate, EndSynchronizedUpdate},
 };
+use ratatui::style::Color;
 use serde::{Deserialize, Serialize};
 
 /// A graphics protocol a terminal can draw cover art with.
@@ -514,30 +515,93 @@ pub fn rgb_to_256(r: u8, g: u8, b: u8) -> u8 {
     16 + (36 * level(r) + 6 * level(g) + level(b)) as u8
 }
 
+/// The sixteen ANSI colors, in palette order. Terminals disagree about the exact values; these
+/// are the ones [`rgb_to_16`] maps to, so the two directions agree with each other.
+pub(crate) const ANSI_16: [(u8, u8, u8); 16] = [
+    (0, 0, 0),
+    (128, 0, 0),
+    (0, 128, 0),
+    (128, 128, 0),
+    (0, 0, 128),
+    (128, 0, 128),
+    (0, 128, 128),
+    (192, 192, 192),
+    (128, 128, 128),
+    (255, 0, 0),
+    (0, 255, 0),
+    (255, 255, 0),
+    (0, 0, 255),
+    (255, 0, 255),
+    (0, 255, 255),
+    (255, 255, 255),
+];
+
+/// The xterm 256-color palette's value for an index: the sixteen ANSI colors, then a 6×6×6
+/// cube, then a 24-step grey ramp with a 10-per-step gap from 8.
+///
+/// The inverse of [`rgb_to_256`] in the direction a classifier needs: given the index a theme
+/// was down-sampled to, what colour is the screen actually showing.
+pub(crate) fn palette_rgb(index: u8) -> (u8, u8, u8) {
+    const CUBE: [u8; 6] = [0, 95, 135, 175, 215, 255];
+    match index {
+        0..=15 => ANSI_16[usize::from(index)],
+        16..=231 => {
+            let i = u16::from(index) - 16;
+            (
+                CUBE[(i / 36) as usize],
+                CUBE[((i % 36) / 6) as usize],
+                CUBE[(i % 6) as usize],
+            )
+        }
+        // 232..=255: the grey ramp.
+        _ => {
+            let level = 8 + 10 * (u16::from(index) - 232);
+            (level as u8, level as u8, level as u8)
+        }
+    }
+}
+
+/// What a colour says about the screen it is drawn on, when it says anything.
+///
+/// `Rgb` is exact. A palette index is looked up in the table it comes from — a theme that was
+/// down-sampled for a 256-color terminal is still a light theme, and this is what keeps it from
+/// being classified as a dark one. The sixteen names are the ANSI colors they stand for.
+/// `Reset` is whatever the terminal already had on screen, so it has no answer of its own; the
+/// caller's fallback is then the same assumption [`Background::default`] makes.
+pub(crate) fn color_luminance(color: Color) -> Option<f64> {
+    let (r, g, b) = match color {
+        Color::Rgb(r, g, b) => (r, g, b),
+        Color::Indexed(index) => palette_rgb(index),
+        Color::Black => ANSI_16[0],
+        Color::Red => ANSI_16[1],
+        Color::Green => ANSI_16[2],
+        Color::Yellow => ANSI_16[3],
+        Color::Blue => ANSI_16[4],
+        Color::Magenta => ANSI_16[5],
+        Color::Cyan => ANSI_16[6],
+        Color::Gray => ANSI_16[7],
+        Color::DarkGray => ANSI_16[8],
+        Color::LightRed => ANSI_16[9],
+        Color::LightGreen => ANSI_16[10],
+        Color::LightYellow => ANSI_16[11],
+        Color::LightBlue => ANSI_16[12],
+        Color::LightMagenta => ANSI_16[13],
+        Color::LightCyan => ANSI_16[14],
+        Color::White => ANSI_16[15],
+        Color::Reset => return None,
+    };
+    Some(rgb_luminance(
+        f64::from(r) / 255.0,
+        f64::from(g) / 255.0,
+        f64::from(b) / 255.0,
+    ))
+}
+
 /// Nearest index into the 16 ANSI colors, for terminals without a 256-color palette.
 pub fn rgb_to_16(r: u8, g: u8, b: u8) -> u8 {
-    const PALETTE: [(u8, u8, u8); 16] = [
-        (0, 0, 0),
-        (128, 0, 0),
-        (0, 128, 0),
-        (128, 128, 0),
-        (0, 0, 128),
-        (128, 0, 128),
-        (0, 128, 128),
-        (192, 192, 192),
-        (128, 128, 128),
-        (255, 0, 0),
-        (0, 255, 0),
-        (255, 255, 0),
-        (0, 0, 255),
-        (255, 0, 255),
-        (0, 255, 255),
-        (255, 255, 255),
-    ];
-
     let mut best = 0u8;
     let mut best_distance = u32::MAX;
-    for (index, (pr, pg, pb)) in PALETTE.iter().enumerate() {
+    for (index, (pr, pg, pb)) in ANSI_16.iter().enumerate() {
         let distance = i32::from(r).abs_diff(i32::from(*pr)).pow(2)
             + i32::from(g).abs_diff(i32::from(*pg)).pow(2)
             + i32::from(b).abs_diff(i32::from(*pb)).pow(2);
@@ -974,6 +1038,35 @@ mod tests {
         assert_eq!(rgb_to_256(0, 0, 255), 21);
         // grays take the ramp, not the cube
         assert!(rgb_to_256(128, 128, 128) >= 232);
+    }
+
+    /// Down-sampling a colour for a palette terminal must not change what it *means*: this is
+    /// what keeps a light theme reading as light in a 256-colour terminal (CI caught the
+    /// absence of it, where the terminal reports no true-colour support).
+    #[test]
+    fn a_palette_colour_still_says_what_the_screen_shows() {
+        assert_eq!(palette_rgb(16), (0, 0, 0), "the cube's corner");
+        assert_eq!(palette_rgb(231), (255, 255, 255), "the cube's other corner");
+        assert_eq!(palette_rgb(255), (238, 238, 238), "the grey ramp's end");
+        assert_eq!(palette_rgb(15), ANSI_16[15], "the ANSI colours come first");
+
+        let classify = |color| {
+            background_from_luminance(color_luminance(color).expect("a measurable colour"))
+        };
+        assert_eq!(classify(Color::Indexed(231)), Background::Light);
+        assert_eq!(classify(Color::Indexed(232)), Background::Dark);
+        assert_eq!(classify(Color::White), Background::Light);
+        assert_eq!(color_luminance(Color::Reset), None);
+
+        // The contract that matters: whatever `rgb_to_256` picks for a colour classifies the
+        // way the colour itself does.
+        for (r, g, b) in [(255, 255, 255), (250, 250, 250), (0, 0, 0), (20, 20, 20)] {
+            assert_eq!(
+                classify(Color::Indexed(rgb_to_256(r, g, b))),
+                classify(Color::Rgb(r, g, b)),
+                "({r},{g},{b}) must survive the trip through the palette"
+            );
+        }
     }
 
     #[test]
