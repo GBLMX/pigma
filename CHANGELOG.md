@@ -2,11 +2,26 @@
 
 ### 🚀 Features
 
+- *(windows)* **Windows Terminal 适配**：启动路径不再依赖 Windows 上不存在或在 ConPTY 下不可用的东西 —— 终端模式（括号粘贴 `CSI ? 2004 h`、kitty 键盘协议 `CSI > 1 u`）改为**直接写字节**（crossterm 的 `PushKeyboardEnhancementFlags` 在 Windows 是**无条件返回 Err**，而上游分支用 `?` 传播 ⇒ 1.2.0 在 Windows 上启动即失败）；鼠标捕获与光标形状改为**尽力而为**（缺控制台时只告警，不再中断启动）；`background = auto` 改用控制台的背景色与调色板（`GetConsoleScreenBufferInfoEx`，跟随当前配色方案）；封面协议按环境判定（`WT_SESSION` → sixel），因为 ConPTY 不会回答图形查询
 - *(ui)* **`:spin` 开关封面旋转（同 `t` 键）**：`[playerbar] spinning_cover` 此前只能改配置文件，而同类可见性开关（`:visualizer` `:pitch` `:border` `:navpos`）都有命令与按键 —— 补上这块不一致。**裸调用即取反**（与 `:visualizer` 同），`on` / `off` 显式设置，`Tab` 补全 `off` / `on`。帧每次重绘都从配置读这一项，所以翻转**当场生效**；同时写回 `config.toml`，下次启动沿用
 
 ### 🐛 Bug Fixes
 
+- *(startup)* **Windows 上不再挂死在启动路径**：`Picker::from_query_stdio()` 自己的超时只覆盖两次 read 之间、且每次 read 后就被重置，因此 stdin 处于 EOF（`-d`、CLI 子命令、测试、`boxpigma > file`）时它**永不返回**。实测后果：任何构造 `App::new` 的测试在 Windows 上全部挂死，CI 的 `test windows-latest` 作业挂了 **6 小时 5 分**后被取消（同日 ubuntu/macOS 各 2 分钟通过），最近 25 次运行里 22 次以 `cancelled` 收场。现在只在「有终端」且非 Windows 时询问，并且在工作线程里给 2 秒预算 —— 终端不回答就退回半块并继续启动
+- *(ui)* **明暗主题探测在 Linux/macOS 上从未生效**：OSC 11 的回包 `ESC ] 11 ; rgb:… ESC \` **没有换行**，而探测跑在 `App::new` 里、早于 raw mode，行规缓冲区把回包扣住 ⇒ 120 ms 的 poll 必然超时 ⇒ 永远落到「深色」默认值。现在探测期间把 tty 置为非规范模式（并屏蔽 `SIGTTIN`/`SIGTTOU`：默认动作是**停止进程**，一个被停住的启动是「无错误的挂死」），扩展到全 unix，并用一个 pty 假终端测试钉住（canonical 拿不到回包、非 canonical 立刻拿到）
+- *(audio)* **ALSA 静音从未生效，还可能挡住音频**：`let _ = StderrGuard::new()…?` 让 guard 在语句结束即析构（要覆盖的那段正是 `open_sink_impl`），且创建失败会经 `?` 变成 `DeviceSinkError::NoDevice`。现在 guard 绑定到变量跨过打开过程，创建失败只记一条告警
+- *(audio)* **没有音频设备时此前完全静默**：`ensure_sink!` 丢掉 `create_sink` 的 Err，UI 已经收到 `Started` 并显示在播放、进度冻住、看门狗因 `player == None` 不介入，用户看不到任何提示。现在每次失败弹一次 toast 并写一条 error（刻意**不**走 `PlaybackEvent::Error`：那条路会进「重试/跳歌」状态机，而「没有声卡」不该导致跳歌）
+- *(ncm-api,sonar)* **4 处 UTF-8 字节切片可能 panic**：DEBUG 日志对响应体做 `&result[..len.min(N)]`（智能推荐、创建/收藏歌单）与 WBI mixin key 的 `[..32]` —— 只要切点落在多字节字符中间就会 panic（key 来自 B 站接口，歌名里全是中文）。新增 `ncm-api::text::preview()` 按字符边界截断，mixin key 改为取 32 个**字符**
+- *(terminal)* **panic 后终端不再残留**：release 档 `panic = "abort"` 让 `Drop` 永不执行，`TerminalGuard` 那段「panic 路径也要关鼠标、弹掉键盘协议」的清理**在发布的二进制里是死代码**（与它自己的注释相反）。改为装 panic hook（并链到 ratatui 的 hook），abort 前照样执行
+- *(input)* **鼠标移动不再让整帧重绘**：`?1003h` 下每次移动都上报，而全仓没有任何 hover 逻辑消费 `Moved`，旧循环却「一个事件一帧」。现在丢弃 `Moved`，并在每帧前先排空已入队事件（上限 256），拖动 seek/音量仍走 `Drag`
+- *(bench)* **曲库扫描基准不再让整条命令失败**：它硬编码了作者机器上的 `/tmp/localmusic/带标签的歌.flac`，任何别的机器上都是 `assert!` 直接 fail（README 却写着「可复现」）。现在默认扫 `~/Music`、可用 `BOXPIGMA_BENCH_MUSIC` 覆盖，缺素材时打印提示并跳过；封面两项同样如此
+- *(deps)* 仓库里被 tracked 的 `.cargo/config.toml.bak` 出库（并把 `*.bak` 加进 `.gitignore`）；MSVC 下 `link.exe` 只回一句 `LNK4044: 无法识别的选项` 的 `-fuse-ld=lld` 从 Windows 条目移除；`BufReader` 的平台化 import（此前 Windows 构建多一个 unused 告警）
 - *(ui)* **专辑发行日不再跟随运行机器的时区**：`release_date` 此前把毫秒时间戳读成**读者所在偏移**再取日期，于是同一张专辑在不同时区会显示不同的一天。API 发的是**中国时间的零点** —— `1657814400000`（2022-07-14T16:00Z）在北京是 **2022-07-15**，在 UTC 下却显示成 07-14（**早一天**）。现改为固定按 `+08:00` 读取，与服务的日历一致；另加一条与时区无关的回归测试钉住这个边界。CI 跑在 UTC，正是它把这个既有缺陷暴露出来（此前 main 上的运行长期积压未完成，所以一直没被发现）
+
+### 🧪 Testing
+
+- Windows 与 Linux 现在跑同一套结果：Windows `cargo test --workspace --all-features` **342 passed / 0 failed**（修复前：5 个测试活锁、整套跑不完），Linux(WSL Ubuntu 26.04) 同套通过，`cargo +nightly fmt -- --check` 与 `cargo clippy --workspace --all-targets` 干净
+- 新增回归测试：pty 假终端验证 OSC 11 回包在非规范模式下才读得到；`ncm-api::text::preview()` 的字符边界；WBI mixin key 的多字节与短 key
 
 ## [1.2.0] - 2026-09-21
 

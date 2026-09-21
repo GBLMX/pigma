@@ -1,8 +1,12 @@
+# Both entries raise the baseline to x86-64-v3 (AVX2, Haswell 2013+) — the release binaries
+# therefore need AVX2, which the AUR package's `arch=('x86_64')` does not say. It is a
+# deliberate trade (the audio analysis runs on every frame), just one worth knowing.
+#
+# `-fuse-ld=lld` is a Unix knob: rustc resolves it to the rust-lld it ships with, so a Linux
+# build needs no system lld. MSVC's link.exe does not understand the flag at all, it only
+# prints `LNK4044: unrecognized option` on every link, so the Windows entry does not carry it.
 [target.x86_64-unknown-linux-gnu]
 rustflags = ["-C", "link-arg=-fuse-ld=lld", "-C", "target-cpu=x86-64-v3"]
-# [target.x86_64-unknown-linux-gnu]
-# linker = "clang"
-# rustflags = ["-Clink-arg=--ld-path=wild"]
 
 [target.x86_64-pc-windows-msvc]
-rustflags = ["-C", "link-arg=-fuse-ld=lld", "-C", "target-cpu=x86-64-v3"]
+rustflags = ["-C", "target-cpu=x86-64-v3"]

@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use crossterm::event::Event as CrosstermEvent;
+use crossterm::event::{Event as CrosstermEvent, MouseEventKind};
 use tokio::time::sleep;
 
 use super::App;
@@ -19,6 +19,11 @@ const LISTEN_THRESHOLD: Duration = Duration::from_secs(30);
 
 /// A tick that advances more than this did not play — the position was seeked.
 const SEEK_JUMP: Duration = Duration::from_secs(1);
+
+/// How many already-queued events one frame may consume. Bounded so a producer that never
+/// stops (a mouse that keeps moving, a paste storm) cannot starve the draw: whatever is
+/// left waits for the next frame, which is a millisecond away.
+const MAX_EVENTS_PER_FRAME: usize = 256;
 
 /// What one progress tick adds to the played total. Progress reports the player position,
 /// so a jump means the bar was dragged: seeking past the threshold is not listening to it.
@@ -81,6 +86,19 @@ impl App {
             let event = self.state.events.next().await?;
             self.dispatch_event(event).await?;
         }
+
+        // The caller draws exactly one frame per iteration, so an event that is already
+        // queued would buy another whole frame of its own. That matters most for the one
+        // event a terminal produces fastest: with `?1003h` in effect every mouse movement
+        // is reported, hundreds per second, and each one used to cost a full redraw of a
+        // frame that could not have changed. Handle what has already arrived, then let the
+        // caller draw once for all of it.
+        for _ in 0..MAX_EVENTS_PER_FRAME {
+            let Some(event) = self.state.events.try_next() else {
+                break;
+            };
+            self.dispatch_event(event).await?;
+        }
         Ok(())
     }
 
@@ -93,7 +111,11 @@ impl App {
                 // Bracketed paste (`enable_terminal_modes`): the block is a paste, not
                 // typing, so its newlines must not press Enter.
                 CrosstermEvent::Paste(text) => input::handle_paste(self, &text),
-                CrosstermEvent::Mouse(mouse) => {
+                // `?1003h` reports every movement of the mouse, and nothing in the UI reacts
+                // to one (there is no hover state to update) — while the frame after it is
+                // redrawn in full regardless. Motion therefore falls through to the arm below.
+                // Dragging is different: that is how the seek bar and the volume are scrubbed.
+                CrosstermEvent::Mouse(mouse) if mouse.kind != MouseEventKind::Moved => {
                     input::handle_mouse_event(self, mouse.kind, mouse.column, mouse.row);
                 }
                 _ => {}

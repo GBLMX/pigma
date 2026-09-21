@@ -3,6 +3,7 @@ mod cookie;
 pub mod encrypt;
 mod error;
 mod model;
+mod text;
 
 pub use client::{NcmClient, NcmClientBuilder};
 pub use error::NcmError;

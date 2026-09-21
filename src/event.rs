@@ -214,6 +214,17 @@ impl EventHandler {
             .ok_or_eyre("Failed to receive event")
     }
 
+    /// Take the next event if one is already queued, without waiting for one.
+    ///
+    /// The main loop draws one frame per iteration, so every event that is already waiting
+    /// would otherwise buy another whole frame — see [`App::handle_events`] for the case
+    /// that made this necessary.
+    ///
+    /// [`App::handle_events`]: crate::app::App
+    pub fn try_next(&mut self) -> Option<Event> {
+        self.receiver.try_recv().ok()
+    }
+
     pub fn send<E: Into<Event>>(&mut self, event: E) {
         if let Err(e) = self.sender.send(event.into()) {
             log::error!("Failed to send event: {}", e);

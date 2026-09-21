@@ -1,5 +1,5 @@
 use super::NcmClient;
-use crate::{error::NcmError, model::*};
+use crate::{error::NcmError, model::*, text::preview};
 use serde_json::Value;
 
 impl NcmClient {
@@ -172,10 +172,7 @@ impl NcmClient {
         let result = self
             .request_weapi("/api/user/playlist/create", &params)
             .await?;
-        log::debug!(
-            "user_created_playlist response: {}",
-            &result[..result.len().min(500)]
-        );
+        log::debug!("user_created_playlist response: {}", preview(&result, 500));
         let value: Value = serde_json::from_str(&result)?;
         Self::check_api_code(&value)?;
         parse_song_list(&value, &["data", "playlist"]).map_err(|e| NcmError::parse(e, &value))
@@ -204,7 +201,7 @@ impl NcmClient {
             .await?;
         log::debug!(
             "user_collected_playlist response: {}",
-            &result[..result.len().min(500)]
+            preview(&result, 500)
         );
         let value: Value = serde_json::from_str(&result)?;
         Self::check_api_code(&value)?;

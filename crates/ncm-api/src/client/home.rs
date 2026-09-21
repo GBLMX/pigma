@@ -1,5 +1,5 @@
 use super::NcmClient;
-use crate::{error::NcmError, model::*};
+use crate::{error::NcmError, model::*, text::preview};
 use serde_json::Value;
 
 impl NcmClient {
@@ -70,7 +70,7 @@ impl NcmClient {
             "intelligence list response: song_id={}, playlist_id={}, response={}",
             song_id,
             playlist_id,
-            &result[..result.len().min(2000)]
+            preview(&result, 2000)
         );
         let value: Value = serde_json::from_str(&result)?;
         Self::check_api_code(&value)?;

@@ -303,8 +303,10 @@ fn get_mixin_key(orig: &str) -> String {
     MIXIN_KEY_ENC_TAB
         .iter()
         .map(|&i| orig.chars().nth(i).unwrap_or('0'))
-        .collect::<String>()[..32]
-        .to_string()
+        // 32 characters, not 32 bytes: the keys come from Bilibili's API, so a character
+        // outside ASCII used to land the cut inside a character and panic the signer.
+        .take(32)
+        .collect()
 }
 
 /// Sign a Bilibili request: appends `wts`, sorts params, mixes in the cached
@@ -339,7 +341,33 @@ pub async fn wbi_sign(client: &Client, params: &mut Vec<(String, String)>) -> Re
 
 #[cfg(test)]
 mod tests {
-    use super::kuwo_des_encrypt;
+    use super::{MIXIN_KEY_ENC_TAB, get_mixin_key, kuwo_des_encrypt};
+
+    /// The mixin key is the first 32 entries of the table applied to `img_key + sub_key`, in
+    /// table order — not the first 32 bytes of that result, which is how it was written and
+    /// which panics as soon as a character outside ASCII lands on the cut.
+    #[test]
+    fn the_mixin_key_takes_thirty_two_characters_in_table_order() {
+        let key: String = (0..64)
+            .map(|i| char::from(b'a' + (i % 26) as u8))
+            .collect::<String>();
+        let expected: String = MIXIN_KEY_ENC_TAB
+            .iter()
+            .take(32)
+            .map(|&i| key.chars().nth(i).unwrap_or('0'))
+            .collect();
+        assert_eq!(get_mixin_key(&key), expected);
+        assert_eq!(get_mixin_key(&key).chars().count(), 32);
+    }
+
+    /// The keys come from Bilibili's API, so they are not ours to trust: multi-byte input must
+    /// not panic the signer, and a short key must still produce a key rather than an empty one.
+    #[test]
+    fn a_non_ascii_or_short_key_does_not_panic() {
+        let chinese = "中文键中文键中文键中文键中文键中文键中文键中文键中文键中文键中文键中文键中文键中文键中文键中文键中文键";
+        assert_eq!(get_mixin_key(chinese).chars().count(), 32);
+        assert_eq!(get_mixin_key("abc").chars().count(), 32, "padded with 0");
+    }
 
     // Expected values generated from the reference UnblockNeteaseMusic kwDES.js.
     #[test]

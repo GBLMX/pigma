@@ -16,7 +16,7 @@ use tokio::sync::mpsc;
 #[cfg(all(target_os = "linux", target_env = "gnu"))]
 use super::engine::mem_rss_kb;
 use super::spectrum::{self, SpectrumTap};
-use crate::event::{Event, PlaybackEvent};
+use crate::event::{AppEvent, Event, PlaybackEvent};
 
 /// Progress ticks (~200ms each) the position may stay frozen while playing
 /// before we assume the audio stream is dead (e.g. Bluetooth device removed on
@@ -125,6 +125,11 @@ pub(super) fn run(
         let mut sink_dev_id: Option<String> = None;
         let mut follow_poll: u32 = 0;
         let mut follow_diff: u32 = 0;
+        // Set once the device could not be opened. Without it, `create_sink` failing was
+        // completely silent: the UI showed a track that had "started" and never advanced,
+        // and the only trace was a debug line in the log. Reported once per failure rather
+        // than on every command that retries.
+        let mut sink_failure_reported = false;
 
         macro_rules! ensure_sink {
             () => {{
@@ -134,6 +139,16 @@ pub(super) fn run(
                     s.log_on_drop(false);
                     sink = Some(s);
                     sink_dev_id = current_default_id();
+                    sink_failure_reported = false;
+                } else if sink.is_none() && !sink_failure_reported {
+                    sink_failure_reported = true;
+                    log::error!("no audio output device: playback cannot start");
+                    // A toast and not `PlaybackEvent::Error`: the error path walks the
+                    // per-song retry/skip state machine, and "no sound card" is not a
+                    // reason to skip the song or to stop the queue.
+                    let _ = event_tx.send(
+                        AppEvent::Toast("没有可用的音频输出设备，播放无法开始".into()).into(),
+                    );
                 }
                 sink.is_some()
             }};
@@ -477,10 +492,16 @@ fn create_sink(
 ) -> Result<rodio::MixerDeviceSink, rodio::DeviceSinkError> {
     #[cfg(target_os = "linux")]
     {
-        let _ = StderrGuard::new().map_err(|e| {
-            log::warn!("Failed to create stderr guard: {e}");
-            rodio::DeviceSinkError::NoDevice
-        })?;
+        // The guard has to live across `open_sink_impl`: `let _ = StderrGuard::new()?` would
+        // drop it at the end of that statement, which is exactly the window it exists for —
+        // so it was silencing nothing while the ALSA noise it was written for happened.
+        //
+        // Failing to silence stderr is also not a reason to refuse to open the device:
+        // ALSA chatter in the log beats no audio at all, and `?` here turned a cosmetic
+        // failure into `DeviceSinkError::NoDevice`.
+        let _silencer = StderrGuard::new().map_err(|e| {
+            log::warn!("failed to silence ALSA on stderr: {e}");
+        });
         open_sink_impl(health)
     }
     #[cfg(not(target_os = "linux"))]

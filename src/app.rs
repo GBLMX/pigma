@@ -16,6 +16,7 @@ pub use search_core::{SearchEngine, SearchResults};
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
+    io::IsTerminal,
     sync::{Arc, LazyLock, Mutex},
     time::{Duration, Instant},
 };
@@ -184,7 +185,13 @@ impl App {
 
         let service = ApiService::new(api.clone(), cache.clone());
 
-        let picker = Self::build_picker(&config.playerbar);
+        // Ask the terminal about its graphics support only when something is attached to
+        // answer: the headless daemon, the CLI subcommands, tests and `boxpigma > file`
+        // all reach here with stdin at end-of-file, where the query can only spin.
+        let picker = Self::build_picker(
+            &config.playerbar,
+            with_terminal && std::io::stdin().is_terminal(),
+        );
 
         let stream_client = Self::build_stream_client(stream_proxy)?;
         let cover_http = Self::build_cover_client(search_proxy)?;

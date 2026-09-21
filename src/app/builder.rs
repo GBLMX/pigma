@@ -24,6 +24,11 @@ const READ_TIMEOUT: Duration = Duration::from_secs(30);
 /// length of a track, and a wall-clock deadline would cut playback short.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Budget for the terminal's answer to the graphics query. The query writes an escape
+/// sequence and reads the reply, so a terminal (or a pipe) that never answers must not be
+/// able to keep the app from starting.
+const PICKER_QUERY_BUDGET: Duration = Duration::from_secs(2);
+
 /// Used to decide whether a proxy is enabled based on `ProxyTarget`.
 pub(super) enum ProxyKind {
     /// Non-YouTube services (NetEase Cloud, sonar search, covers, streaming), proxied under `Reversed`/`Both`.
@@ -123,13 +128,24 @@ impl App {
     /// pixels — and that answer is what [`choose_image_protocol`] trusts first; the
     /// configuration can override the result. The decision is logged, because "the
     /// cover looks wrong" is otherwise impossible to answer from a bug report.
-    pub(super) fn build_picker(playerbar: &crate::config::PlayerbarConfig) -> Picker {
+    ///
+    /// `ask_the_terminal` is false when nothing is on the other end (the headless daemon,
+    /// the one-shot CLI subcommands, tests, `boxpigma > file`): there is no reply to read,
+    /// so asking would only block [`query_picker`] for its whole budget.
+    pub(super) fn build_picker(
+        playerbar: &crate::config::PlayerbarConfig,
+        ask_the_terminal: bool,
+    ) -> Picker {
         use ratatui_image::picker::{Picker, ProtocolType};
 
         // A terminal that does not answer falls back to half blocks, which is what
         // upstream recommends: the fixed-cell-size constructors are deprecated, and a
         // guessed cell size would scale every cover wrongly anyway.
-        let mut picker = Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks());
+        let mut picker = if ask_the_terminal {
+            query_picker().unwrap_or_else(Picker::halfblocks)
+        } else {
+            Picker::halfblocks()
+        };
 
         let queried = match picker.protocol_type() {
             ProtocolType::Kitty => Some(ImageProtocol::Kitty),
@@ -192,6 +208,57 @@ impl App {
             builder = builder.proxy(reqwest::Proxy::all(proxy).map_err(color_eyre::Report::msg)?);
         }
         Ok(builder)
+    }
+}
+
+/// Ask the terminal for its graphics protocol and cell size, but never wait forever.
+///
+/// `Picker::from_query_stdio()` writes a query and reads the answer from stdin. Its own
+/// timeout only covers the gap *between* reads — the reader restarts it after every read —
+/// so a stdin at end-of-file, or a terminal that answers nothing at all (ConPTY, a pipe),
+/// leaves the loop spinning and the call never returns. That is what hung `App::new`, and
+/// with it every test that builds an app, on Windows; the CI job had to be cancelled after
+/// six hours.
+///
+/// So the query runs on its own thread and the caller waits with a deadline. On a timeout
+/// the picker is built without asking (half blocks, or whatever the config forces) and the
+/// app starts.
+///
+/// The worker cannot be cancelled: if the terminal never answers, it stays parked in its
+/// read until the process exits. That is the price of asking at all — the alternatives are
+/// a startup that never finishes, or never asking and losing graphics on the terminals
+/// that do answer. Callers that know no terminal is attached must pass
+/// `ask_the_terminal = false` instead of paying this.
+fn query_picker() -> Option<Picker> {
+    // Windows is asked nothing. Its terminals are all reached through ConPTY, which
+    // ratatui-image documents as not reliably delivering the answer — and a query that is
+    // never answered is worse than no query here: the worker thread below cannot be
+    // cancelled, so it stays parked in a read of the console input and swallows whatever
+    // the user types next. The environment table in `choose_image_protocol` still places
+    // Windows Terminal (sixels) and mintty (sixels) without asking, and
+    // `[playerbar] image_protocol` overrides everything.
+    if cfg!(windows) {
+        return None;
+    }
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::Builder::new()
+        .name("picker-query".into())
+        .spawn(move || {
+            let _ = tx.send(Picker::from_query_stdio().ok());
+        })
+        .ok()?;
+
+    match rx.recv_timeout(PICKER_QUERY_BUDGET) {
+        Ok(answer) => answer,
+        Err(_) => {
+            log::warn!(
+                "covers: the terminal did not answer the graphics query within {:?} \
+                 (stdin may be at end-of-file); using half blocks",
+                PICKER_QUERY_BUDGET
+            );
+            None
+        }
     }
 }
 

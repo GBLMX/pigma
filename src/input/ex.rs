@@ -940,32 +940,54 @@ mod tests {
 
     /// The bytes crossterm sends for the two terminal modes, spelled out rather than asked of
     /// crossterm: what has to hold is that the *terminal* was told, so the assertion is on the
-    /// sequence a terminal reads.
+    /// sequence a terminal reads. Only Unix emits them (see the test below).
+    #[cfg(unix)]
     const ENABLE_MOUSE: &[u8] = b"\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1015h\x1b[?1006h";
+    #[cfg(unix)]
     const DISABLE_MOUSE: &[u8] = b"\x1b[?1006l\x1b[?1015l\x1b[?1003l\x1b[?1002l\x1b[?1000l";
 
     /// The mouse switch is the one that has to act on the terminal, not only on the config: it
     /// is what gives the terminal's own text selection back while the app runs.
+    ///
+    /// On Windows the terminal half is not a write at all — `EnableMouseCapture` runs
+    /// `execute_winapi`, a console-mode call — so there are no bytes to compare, and a process
+    /// without a console cannot make the call. The config half is asserted everywhere; the
+    /// sequence is asserted where crossterm actually emits it.
     #[test]
     fn the_mouse_switch_reaches_the_config_and_the_terminal() {
         let mut config = Config::default();
         assert!(config.mouse, "the default captures the mouse");
 
-        let mut out = Vec::new();
-        assert!(
-            !set_mouse_capture(&mut config, &mut out, Some(false)).expect("write"),
-            "off means off"
-        );
-        assert!(!config.mouse);
-        assert_eq!(out, DISABLE_MOUSE);
+        #[cfg(unix)]
+        {
+            let mut out = Vec::new();
+            assert!(
+                !set_mouse_capture(&mut config, &mut out, Some(false)).expect("write"),
+                "off means off"
+            );
+            assert!(!config.mouse);
+            assert_eq!(out, DISABLE_MOUSE);
 
-        out.clear();
-        assert!(
-            set_mouse_capture(&mut config, &mut out, None).expect("write"),
-            "bare, it toggles"
-        );
-        assert!(config.mouse);
-        assert_eq!(out, ENABLE_MOUSE);
+            out.clear();
+            assert!(
+                set_mouse_capture(&mut config, &mut out, None).expect("write"),
+                "bare, it toggles"
+            );
+            assert!(config.mouse);
+            assert_eq!(out, ENABLE_MOUSE);
+        }
+
+        #[cfg(not(unix))]
+        {
+            let mut out = Vec::new();
+            let _ = set_mouse_capture(&mut config, &mut out, Some(false));
+            assert!(
+                !config.mouse,
+                "the config flips even if the terminal says no"
+            );
+            let _ = set_mouse_capture(&mut config, &mut out, None);
+            assert!(config.mouse, "and toggles back without the terminal");
+        }
     }
 
     /// Same for the cursor: the config keeps the shape, and the terminal is asked for it now.

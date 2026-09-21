@@ -1,14 +1,10 @@
 use std::{
     env,
-    io::{self, BufRead, BufReader, Write},
+    io::{self, BufRead, Write},
     sync::LazyLock,
 };
 
 use crossterm::{
-    event::{
-        DisableBracketedPaste, EnableBracketedPaste, KeyboardEnhancementFlags,
-        PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
-    },
     execute,
     terminal::{BeginSynchronizedUpdate, EndSynchronizedUpdate},
 };
@@ -307,30 +303,51 @@ fn wezterm_sixel_supported(version: &str) -> bool {
     false
 }
 
+/// `CSI ? 2004 h` / `CSI ? 2004 l` — bracketed paste on and off.
+const BRACKETED_PASTE_ON: &[u8] = b"\x1b[?2004h";
+const BRACKETED_PASTE_OFF: &[u8] = b"\x1b[?2004l";
+/// `CSI > 1 u` pushes kitty keyboard flag 1; `CSI < 1 u` pops it again.
+const PUSH_DISAMBIGUATE_ESCAPE_CODES: &[u8] = b"\x1b[>1u";
+const POP_KEYBOARD_ENHANCEMENT_FLAGS: &[u8] = b"\x1b[<1u";
+
 /// Put the terminal into the modes the UI relies on, and take them back out again.
 ///
-/// Both sequences are ignored by terminals that do not implement them, so neither
-/// needs a capability probe and neither can break a terminal that lacks them:
+/// The sequences are written directly rather than through `crossterm`'s command types,
+/// for one reason that matters on Windows: there those commands go through the legacy
+/// console API instead of writing bytes, and with no console attached they do not
+/// degrade — `PushKeyboardEnhancementFlags` returns
+/// "Keyboard progressive enhancement not implemented for the legacy Windows API". The
+/// rest of the frame already talks to the terminal this way (`OSC 11`, `OSC 99`,
+/// `DECSET 2026`), so this is the same mouth speaking, and the bytes are exactly what
+/// the Unix implementation emitted before.
 ///
+/// Neither sequence is probed for: a terminal that does not implement one ignores it,
+/// so there is nothing to break.
+///
+/// * `CSI ? 2004 h` — bracketed paste, so a paste arrives as one delimited block
+///   instead of a burst of keystrokes (see [`crate::input::handle_paste`]).
 /// * `CSI > 1 u` — the kitty keyboard protocol, flag 1 (disambiguate escape codes):
 ///   "pressing the Esc key generates the byte 0x1b which also is used to indicate the
 ///   start of an escape code", which is how an `Esc` press gets read as `Alt+<key>`
-///   when another key follows it. It is implemented by kitty, ghostty, foot, wezterm,
-///   alacritty, iTerm2, Windows Terminal and others. Only that one flag is pushed:
-///   the rest are for features boxpigma does not use.
-/// * `CSI ? 2004 h` — bracketed paste, so a paste arrives as one delimited block
-///   instead of a burst of keystrokes (see [`crate::input::handle_paste`]).
+///   when another key follows it. Kitty, ghostty, foot, wezterm, alacritty and iTerm2
+///   implement it; a terminal that does not simply ignores the sequence and `Esc` keeps
+///   the ambiguity it always had. Only that one flag is pushed: the rest are for
+///   features boxpigma does not use.
 pub fn enable_terminal_modes<W: Write>(out: &mut W) -> io::Result<()> {
-    execute!(
-        out,
-        EnableBracketedPaste,
-        PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
-    )
+    out.write_all(BRACKETED_PASTE_ON)?;
+    out.write_all(PUSH_DISAMBIGUATE_ESCAPE_CODES)?;
+    out.flush()
 }
 
 /// Undo [`enable_terminal_modes`]. Runs on the way out, including after a panic.
+///
+/// `CSI < 1 u` and not the defaulted `CSI < u`: the explicit form is the documented one,
+/// and it has to be written while still on the alternate screen, since the main and
+/// alternate screens keep separate stacks.
 pub fn disable_terminal_modes<W: Write>(out: &mut W) -> io::Result<()> {
-    execute!(out, DisableBracketedPaste, PopKeyboardEnhancementFlags)
+    out.write_all(BRACKETED_PASTE_OFF)?;
+    out.write_all(POP_KEYBOARD_ENHANCEMENT_FLAGS)?;
+    out.flush()
 }
 
 /// Open a synchronized update (`DECSET 2026`): the terminal buffers everything
@@ -518,7 +535,24 @@ pub fn parse_osc11_luminance(reply: &str) -> Option<f64> {
         let parsed = u32::from_str_radix(&digits, 16).ok()?;
         *value = f64::from(parsed) / f64::from(max);
     }
-    Some(0.2126 * values[0] + 0.7152 * values[1] + 0.0722 * values[2])
+    Some(rgb_luminance(values[0], values[1], values[2]))
+}
+
+/// WCAG relative luminance of an sRGB colour with channels in `0.0..=1.0`.
+///
+/// One implementation for the two ways a background arrives — the terminal's OSC 11 answer
+/// and, on Windows, the console's colour table.
+fn rgb_luminance(r: f64, g: f64, b: f64) -> f64 {
+    0.2126 * r + 0.7152 * g + 0.0722 * b
+}
+
+/// What a luminance says about the background.
+fn background_from_luminance(luminance: f64) -> Background {
+    if luminance > 0.5 {
+        Background::Light
+    } else {
+        Background::Dark
+    }
 }
 
 /// Send the OSC 11 query and read the terminal's answer.
@@ -583,48 +617,255 @@ fn detect_background() -> Background {
         return background;
     }
 
-    #[cfg(all(unix, target_os = "linux"))]
+    #[cfg(unix)]
     if let Some(luminance) = probe_tty_background() {
-        return if luminance > 0.5 {
-            Background::Light
-        } else {
-            Background::Dark
-        };
+        return background_from_luminance(luminance);
+    }
+
+    #[cfg(windows)]
+    if let Some(luminance) = probe_console_background() {
+        return background_from_luminance(luminance);
     }
 
     Background::Dark
+}
+
+/// Ask the Windows console for its background colour.
+///
+/// There is no `/dev/tty` and no OSC 11 answer to wait for (ConPTY is in the way), but the
+/// console API knows the answer: the screen buffer's attributes carry the background palette
+/// index and `ColorTable` carries the palette, which Windows Terminal fills in from the color
+/// scheme the tab was started with. Best effort — a process without a console fails the call
+/// and the caller keeps the dark default.
+#[cfg(windows)]
+fn probe_console_background() -> Option<f64> {
+    use windows_sys::Win32::System::Console::{
+        CONSOLE_SCREEN_BUFFER_INFOEX, GetConsoleScreenBufferInfoEx, GetStdHandle, STD_OUTPUT_HANDLE,
+    };
+
+    let mut info = CONSOLE_SCREEN_BUFFER_INFOEX {
+        cbSize: std::mem::size_of::<CONSOLE_SCREEN_BUFFER_INFOEX>() as u32,
+        ..Default::default()
+    };
+    // SAFETY: `info` is an initialised CONSOLE_SCREEN_BUFFER_INFOEX whose `cbSize` the API
+    // requires; the handle is stdout, and the call reports failure instead of faulting when
+    // that is not a console.
+    if unsafe { GetConsoleScreenBufferInfoEx(GetStdHandle(STD_OUTPUT_HANDLE), &mut info) } == 0 {
+        return None;
+    }
+
+    // The low nibble of the attributes is the background: 0-15, an index into `ColorTable`.
+    let index = usize::from(info.wAttributes & 0x000F);
+    let color = *info.ColorTable.get(index)?;
+    Some(console_color_luminance(color))
+}
+
+/// `COLORREF` is `0x00BBGGRR` — green in the middle, which is the opposite of the web order.
+#[cfg(windows)]
+fn console_color_luminance(color: u32) -> f64 {
+    let channel = |shift: u32| f64::from((color >> shift) & 0xFF) / 255.0;
+    rgb_luminance(channel(0), channel(8), channel(16))
 }
 
 /// Ask the controlling terminal for its background color with a bounded wait.
 ///
 /// A terminal that does not implement OSC 11 simply never answers, so poll first and
 /// give up after a frame instead of blocking startup.
-#[cfg(all(unix, target_os = "linux"))]
+#[cfg(unix)]
 fn probe_tty_background() -> Option<f64> {
-    use std::{fs::OpenOptions, os::fd::AsRawFd};
-
-    const REPLY_TIMEOUT_MS: libc::c_int = 120;
+    use std::fs::OpenOptions;
 
     let tty = OpenOptions::new()
         .read(true)
         .write(true)
         .open("/dev/tty")
         .ok()?;
+    query_background_on_tty(&tty)
+}
+
+/// The probe itself, against an already-open tty.
+///
+/// Split out so a test can hand it a pty whose other end plays the terminal
+/// (`the_background_probe_reads_a_reply_without_a_newline`).
+///
+/// The reply — `ESC ] 11 ; rgb:… ESC \` — carries **no newline**, so in the canonical mode
+/// a tty starts in, the line discipline holds it back and the poll below times out on
+/// every terminal that does answer. The probe therefore reads the tty the way the event
+/// loop later will: non-canonical, no echo, byte-at-a-time, under one overall deadline.
+/// Measured on a pty: canonical never delivers the reply, non-canonical delivers it at once.
+#[cfg(unix)]
+fn query_background_on_tty(tty: &std::fs::File) -> Option<f64> {
+    use std::{io::BufReader, os::fd::AsRawFd};
+
+    let _no_stop = NoTtyStopSignals::block();
+
+    let fd = tty.as_raw_fd();
+    let _raw = RawTty::new(fd);
+
     let mut writer = tty.try_clone().ok()?;
     write_osc11_query(&mut writer)?;
 
-    let mut poll_fd = libc::pollfd {
-        fd: tty.as_raw_fd(),
-        events: libc::POLLIN,
-        revents: 0,
-    };
-    // SAFETY: `poll_fd` is a valid, initialised pollfd for the duration of the call.
-    if unsafe { libc::poll(&mut poll_fd, 1, REPLY_TIMEOUT_MS) } <= 0 {
-        return None;
-    }
-
-    let mut reader = BufReader::new(tty);
+    let mut reader = BufReader::new(TtyReaderWithDeadline::new(fd, REPLY_BUDGET));
     read_osc11_reply(&mut reader).and_then(|reply| parse_osc11_luminance(&reply))
+}
+
+/// Blocks `SIGTTIN`/`SIGTTOU` for the calling thread, and restores the mask on drop.
+///
+/// Both are raised by exactly the two things this probe does to a terminal it is not the
+/// foreground process group of — reading from it, and changing its modes — and the default
+/// action of both is to **stop** the process. A stopped process is a hang with no error,
+/// which is the worst outcome a startup probe can produce: it is what stopped the whole test
+/// suite the first time this probe ran against a pty it did not own.
+///
+/// POSIX lets the read and the `tcsetattr` through when the signal is blocked (or ignored) in
+/// the calling thread, so blocking is enough — and unlike a process-wide `SIG_IGN` it cannot
+/// race with another thread's handler.
+#[cfg(unix)]
+struct NoTtyStopSignals {
+    previous: libc::sigset_t,
+}
+
+#[cfg(unix)]
+impl NoTtyStopSignals {
+    fn block() -> Option<Self> {
+        let mut set = std::mem::MaybeUninit::<libc::sigset_t>::uninit();
+        let mut previous = std::mem::MaybeUninit::<libc::sigset_t>::uninit();
+        // SAFETY: both are valid, writable `sigset_t`s; `sigemptyset`/`sigaddset` initialise
+        // `set` before it is read, and `pthread_sigmask` writes `previous` when it returns 0.
+        unsafe {
+            if libc::sigemptyset(set.as_mut_ptr()) != 0 {
+                return None;
+            }
+            let mut set = set.assume_init();
+            if libc::sigaddset(&mut set, libc::SIGTTIN) != 0
+                || libc::sigaddset(&mut set, libc::SIGTTOU) != 0
+            {
+                return None;
+            }
+            if libc::pthread_sigmask(libc::SIG_BLOCK, &set, previous.as_mut_ptr()) != 0 {
+                return None;
+            }
+            Some(Self {
+                previous: previous.assume_init(),
+            })
+        }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for NoTtyStopSignals {
+    fn drop(&mut self) {
+        // SAFETY: `self.previous` is the mask `pthread_sigmask` filled in on creation.
+        unsafe {
+            libc::pthread_sigmask(libc::SIG_SETMASK, &self.previous, std::ptr::null_mut());
+        }
+    }
+}
+
+/// Overall budget for reading the terminal's answer to the OSC 11 query.
+#[cfg(unix)]
+const REPLY_BUDGET: std::time::Duration = std::time::Duration::from_millis(200);
+
+/// A tty reader that gives up once `deadline` passes.
+///
+/// `read_osc11_reply` reads byte by byte, so the wait has to be bounded per byte *and* in
+/// total: the poll before each read waits for the time that is left, and once nothing is
+/// left the read fails — which the reply parser turns into "no answer".
+#[cfg(unix)]
+struct TtyReaderWithDeadline {
+    fd: std::os::fd::RawFd,
+    deadline: std::time::Instant,
+}
+
+#[cfg(unix)]
+impl TtyReaderWithDeadline {
+    fn new(fd: std::os::fd::RawFd, budget: std::time::Duration) -> Self {
+        Self {
+            fd,
+            deadline: std::time::Instant::now() + budget,
+        }
+    }
+}
+
+#[cfg(unix)]
+impl std::io::Read for TtyReaderWithDeadline {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let remaining = self
+            .deadline
+            .saturating_duration_since(std::time::Instant::now());
+        if remaining.is_zero() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "no OSC 11 reply within the budget",
+            ));
+        }
+
+        let mut poll_fd = libc::pollfd {
+            fd: self.fd,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        // SAFETY: `poll_fd` is a valid, initialised pollfd for the duration of the call.
+        let ready = unsafe { libc::poll(&mut poll_fd, 1, remaining.as_millis() as libc::c_int) };
+        if ready <= 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "no OSC 11 reply within the budget",
+            ));
+        }
+
+        // SAFETY: `buf` is a valid, writable slice of `buf.len()` bytes and `self.fd` is an
+        // open tty for as long as the caller holds it.
+        let count = unsafe { libc::read(self.fd, buf.as_mut_ptr().cast(), buf.len()) };
+        if count < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(count as usize)
+    }
+}
+
+/// Put the controlling terminal into the mode the probe needs, and put it back on drop.
+///
+/// Only canonical input buffering and echo change: the probe runs before the UI takes the
+/// terminal over, so everything else is left exactly as the user had it, and the previous
+/// settings are restored even when the probe gives up early.
+#[cfg(unix)]
+struct RawTty {
+    fd: std::os::fd::RawFd,
+    saved: libc::termios,
+}
+
+#[cfg(unix)]
+impl RawTty {
+    fn new(fd: std::os::fd::RawFd) -> Option<Self> {
+        let mut saved = std::mem::MaybeUninit::<libc::termios>::uninit();
+        // SAFETY: `saved` is a valid pointer to writable memory for one `termios`.
+        if unsafe { libc::tcgetattr(fd, saved.as_mut_ptr()) } != 0 {
+            return None;
+        }
+        // SAFETY: `tcgetattr` returned 0, so it initialised `saved`.
+        let saved = unsafe { saved.assume_init() };
+
+        let mut raw = saved;
+        raw.c_lflag &= !(libc::ICANON | libc::ECHO);
+        raw.c_cc[libc::VMIN] = 1;
+        raw.c_cc[libc::VTIME] = 0;
+        // SAFETY: `fd` is an open tty and `raw` is an initialised `termios`.
+        if unsafe { libc::tcsetattr(fd, libc::TCSANOW, &raw) } != 0 {
+            return None;
+        }
+
+        Some(Self { fd, saved })
+    }
+}
+
+#[cfg(unix)]
+impl Drop for RawTty {
+    fn drop(&mut self) {
+        // SAFETY: `self.fd` is the tty this guard was created for and `self.saved` is the
+        // `termios` it had at that moment.
+        unsafe { libc::tcsetattr(self.fd, libc::TCSANOW, &self.saved) };
+    }
 }
 
 #[cfg(test)]
@@ -709,6 +950,29 @@ mod tests {
     }
 
     #[test]
+    fn background_thresholds_at_half_luminance() {
+        assert_eq!(background_from_luminance(0.0), Background::Dark);
+        assert_eq!(background_from_luminance(0.5), Background::Dark);
+        assert_eq!(background_from_luminance(0.51), Background::Light);
+        assert_eq!(background_from_luminance(1.0), Background::Light);
+    }
+
+    /// `COLORREF` packs `0x00BBGGRR`, so the byte order has to be read backwards: blue is the
+    /// high byte and the darkest of the three primaries by weight, which is what makes the
+    /// usual `#282c34`-style background come out dark instead of bright red.
+    #[cfg(windows)]
+    #[test]
+    fn a_console_colour_is_read_as_bgr() {
+        assert!(console_color_luminance(0x0000_0000) < 0.01, "black");
+        assert!(console_color_luminance(0x00FF_FFFF) > 0.99, "white");
+        let blue = console_color_luminance(0x00FF_0000);
+        let green = console_color_luminance(0x0000_FF00);
+        let red = console_color_luminance(0x0000_00FF);
+        assert!(blue < red && red < green, "{blue} {red} {green}");
+        assert_eq!(background_from_luminance(blue), Background::Dark);
+    }
+
+    #[test]
     fn osc11_replies_map_to_luminance() {
         let dark = parse_osc11_luminance("\x1b]11;rgb:1e1e/1e1e/1e1e\x07").unwrap();
         assert!(dark < 0.2, "dark background luminance was {dark}");
@@ -737,6 +1001,64 @@ mod tests {
         let mut silent = std::io::Cursor::new(Vec::new());
         let mut sent = Vec::new();
         assert_eq!(query_background_luminance(&mut silent, &mut sent), None);
+    }
+
+    /// The reply to OSC 11 has no newline, so a tty in canonical mode withholds it: the
+    /// poll always timed out and `BACKGROUND` fell back to "dark" on every terminal that
+    /// does answer (kitty does not export `COLORFGBG`). The probe now reads the tty in the
+    /// mode the event loop later uses, and this test is what pins that: a pty plays the
+    /// terminal, the probe runs against the pty's other end.
+    #[cfg(unix)]
+    #[test]
+    fn the_background_probe_reads_a_reply_without_a_newline() {
+        use std::os::fd::FromRawFd;
+
+        let mut master: libc::c_int = 0;
+        let mut slave: libc::c_int = 0;
+        // SAFETY: both out-parameters point to valid, writable `c_int`s; the optional
+        // name/termios/winsize arguments are genuinely optional and passed as null.
+        let created = unsafe {
+            libc::openpty(
+                &mut master,
+                &mut slave,
+                std::ptr::null_mut(),
+                std::ptr::null(),
+                std::ptr::null(),
+            )
+        };
+        assert_eq!(
+            created,
+            0,
+            "openpty failed: {}",
+            std::io::Error::last_os_error()
+        );
+
+        let terminal = std::thread::spawn(move || {
+            let mut query = [0u8; 64];
+            // SAFETY: `query` is a valid, writable buffer of `query.len()` bytes.
+            let read = unsafe { libc::read(master, query.as_mut_ptr().cast(), query.len()) };
+            assert!(read > 0, "the probe sent no query");
+            assert!(
+                query[..read as usize].starts_with(b"\x1b]11;?"),
+                "unexpected query: {:?}",
+                &query[..read as usize]
+            );
+
+            let reply = b"\x1b]11;rgb:ffff/ffff/ffff\x1b\\";
+            // SAFETY: `reply` is a valid, readable buffer of `reply.len()` bytes.
+            let written = unsafe { libc::write(master, reply.as_ptr().cast(), reply.len()) };
+            assert_eq!(written, reply.len() as isize, "the reply was not delivered");
+        });
+
+        // SAFETY: `slave` came from `openpty` above and is not owned by anything else.
+        let tty = unsafe { std::fs::File::from_raw_fd(slave) };
+        let luminance = query_background_on_tty(&tty).expect("the white reply must be parsed");
+        terminal.join().expect("the terminal thread");
+
+        assert!(
+            luminance > 0.9,
+            "a white background reads as light: {luminance}"
+        );
     }
 }
 

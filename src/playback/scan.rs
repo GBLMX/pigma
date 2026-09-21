@@ -287,19 +287,39 @@ mod tests {
 mod scan_bench {
     use std::{fs, path::PathBuf};
 
-    fn fixture_library(count: usize) -> PathBuf {
+    /// Where the bench looks for its source audio: `BOXPIGMA_BENCH_MUSIC` when set, else the
+    /// platform's music directory. The fixtures have to be real files because the point is
+    /// tag parsing, and tag parsing needs tags.
+    fn source_dir() -> PathBuf {
+        if let Some(dir) = std::env::var_os("BOXPIGMA_BENCH_MUSIC") {
+            return PathBuf::from(dir);
+        }
+        dirs::audio_dir().unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join("Music"))
+    }
+
+    /// Hard links `count` files out of [`source_dir`], or `None` when there is no audio to
+    /// link — a bench that fails on every machine but the author's is a bench nobody runs.
+    fn fixture_library(count: usize) -> Option<PathBuf> {
+        let sources: Vec<PathBuf> = fs::read_dir(source_dir())
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.is_file()
+                    && matches!(
+                        path.extension().and_then(|e| e.to_str()),
+                        Some("mp3" | "flac" | "m4a" | "wav" | "ogg" | "opus")
+                    )
+            })
+            .collect();
+        if sources.is_empty() {
+            return None;
+        }
+
         let dir = std::env::temp_dir().join("boxpigma-scan-bench");
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("create fixture dir");
-        let sources: Vec<PathBuf> = [
-            "/tmp/localmusic/带标签的歌.flac",
-            "/tmp/localmusic/无标签的歌.mp3",
-        ]
-        .iter()
-        .map(PathBuf::from)
-        .filter(|p| p.is_file())
-        .collect();
-        assert!(!sources.is_empty(), "需要 /tmp/localmusic 下的素材");
         for i in 0..count {
             let src = &sources[i % sources.len()];
             let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("bin");
@@ -308,16 +328,26 @@ mod scan_bench {
                 fs::copy(src, &dst).expect("copy fallback");
             }
         }
-        dir
+        Some(dir)
     }
 
     #[test]
     #[ignore]
     fn scanning_a_library_costs() {
-        let dir = fixture_library(300);
+        let Some(dir) = fixture_library(300) else {
+            println!(
+                "  没有可用的素材，跳过：把音频放进 {} 或设置 BOXPIGMA_BENCH_MUSIC",
+                source_dir().display()
+            );
+            return;
+        };
         let songs = super::scan_local_music(&dir);
         assert!(!songs.is_empty(), "扫描应当找到文件");
-        println!("  素材: {} 首（其中带标签/无标签交替）", songs.len());
+        println!(
+            "  素材: {} 首，来自 {}",
+            songs.len(),
+            source_dir().display()
+        );
 
         let per_scan = crate::bench_util::time("扫描整个曲库（300 首）", 3, || {
             std::hint::black_box(super::scan_local_music(&dir));

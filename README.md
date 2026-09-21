@@ -72,6 +72,8 @@ boxpigma 把网易云音乐与本地音频播放带进终端：流式播放、�
 
 本仓库自带基准，`cargo test --release --lib -- --ignored --nocapture` 可复现：
 
+> 曲库扫描那一项需要一份真实的音乐目录（默认 `~/Music`，可用 `BOXPIGMA_BENCH_MUSIC` 指定），封面两项需要缓存里已经有封面（先播一首歌）。缺素材时它们打印一行说明并**跳过**，不会让整条命令失败。
+
 | 基准 | 1.0 实测 |
 | --- | --- |
 | fft 512 / 1024 / 2048 点 | 4.95 / 10.13 / **21.76 µs** |
@@ -119,9 +121,9 @@ RSS 大致是**二进制体积 + 约 3 MB**（1.0 的二进制 11.1 MB），换�
 
 - **修复**：下载缓存条目只在流完成后记录 · 默认日志级别改为 INFO · 清空的 `sections`/`columns` 序列化不再 panic · eapi 非 2xx 只告警 · IPC socket 权限收窄到属主 · `.gitignore` 忽略调试残留 · 搜索、封面、音频流补齐连接与读超时（音频流刻意**不加**总超时，否则会截断正在播放的下载）
 - **播放**：解析失败按类型分类（网络失败重试一次、无版权/无地址直接走兜底源），不再靠错误字符串前缀判断
-- **外观**：符号预设（`nerd`／`unicode`／`ascii`，不装 Nerd Font 也能用）· 按终端能力降级真彩色 · 依据终端背景自动选明/暗主题 · **背景也由主题绘制**（此前只给文字上色，浅色主题在深色终端上会变成零星灰字）· 内置 20 套主题 + `[themes.<名>]` 继承式自定义 · 高亮行的前景色按对比度自动选取，浅色主题下也读得出来
+- **外观**：符号预设（`nerd`／`unicode`／`ascii`，不装 Nerd Font 也能用）· 按终端能力降级真彩色 · 依据终端背景自动选明/暗主题（Linux/macOS 问终端 OSC 11，Windows 读控制台调色板）· **背景也由主题绘制**（此前只给文字上色，浅色主题在深色终端上会变成零星灰字）· 内置 20 套主题 + `[themes.<名>]` 继承式自定义 · 高亮行的前景色按对比度自动选取，浅色主题下也读得出来
 - **新增**：频谱可视化 · 音高读数（自实现 YIN，无新增依赖）· 鼠标交互（点击 seek／切区／播放控制／模式／喜欢／静音）· vim 风格 `:` 命令行与 Tab 补全（密码/短信登录、退出登录、签到）· 听歌打卡（播满约 30 秒即上报，与官方客户端口径一致；短于 30 秒的歌以播完为准）· **歌词四种显示样式**（`:lyrics window|one_line|flow|plain`）· 歌词严格按解码位置对轴 · 终端开关：`mouse`／`cursor_style`／`[notify]` 桌面通知 · 随仓库提供的性能基准
-- **终端协议**：kitty 图形协议封面（可用 `[playerbar] image_protocol` 强制）· 同步刷新（整帧一次性呈现，也是 kitty 放图的规范要求）· kitty 键盘协议（`Esc` 不再被读成 `Alt+<key>`）· 括号粘贴 · 封面协议以**终端的回答**为准，tmux 内自动回退 · kitty 的桌面通知用其自有的 `OSC 99`（标题与正文分开、Base64 负载、`f=` 声明应用名），其余终端保持 `OSC 9` 逐字节不变
+- **终端协议**：kitty 图形协议封面（可用 `[playerbar] image_protocol` 强制）· 同步刷新（整帧一次性呈现，也是 kitty 放图的规范要求）· kitty 键盘协议（`Esc` 不再被读成 `Alt+<key>`）· 括号粘贴 · 封面协议以**终端的回答**为准，tmux 内自动回退（Windows 的 ConPTY 不回答该查询，故按环境判定，见 [Windows](#windows)）· kitty 的桌面通知用其自有的 `OSC 99`（标题与正文分开、Base64 负载、`f=` 声明应用名），其余终端保持 `OSC 9` 逐字节不变
 
 **注意：**
 
@@ -210,6 +212,18 @@ bin install https://github.com/GBLMX/pigma
 ### Windows
 
 从 [releases](https://github.com/GBLMX/pigma/releases) 下载 `boxpigma-x86_64-pc-windows-msvc.zip`（或 `aarch64` 版），解包后把 `boxpigma.exe` 放进 `%PATH%`。
+
+**Windows Terminal 上的行为**（Windows 没有 `/dev/tty`，ConPTY 夹在程序与终端之间，所以两处探测走的是 Windows 自己的接口）：
+
+| 能力 | 在 Windows Terminal 上 |
+| :--- | :--- |
+| 鼠标（点击 seek／切区／播放控制／模式／喜欢／静音） | 正常：走控制台输入模式（`ENABLE_MOUSE_INPUT`），这也是回收终端自身文本选择的方式 |
+| 括号粘贴、`Esc` 歧义 | `CSI ? 2004 h` 与 `CSI > 1 u` 照常发出；**是否生效由终端决定**，不实现的终端忽略它们（`Esc` 保持原有歧义），启动不受影响 |
+| 桌面通知 | 走 `OSC 9`（Windows Terminal 支持该形式） |
+| 明/暗主题（`background = auto`） | 读控制台的背景色与调色板（`GetConsoleScreenBufferInfoEx`），跟随当前配色方案 |
+| 封面 | 图形查询在 ConPTY 下拿不到回答，因此按环境判定：`WT_SESSION` → sixel（需较新的 WT 且未被禁用）。**单元格像素尺寸因此未知**，若封面大小或位置不对，用 `[playerbar] image_protocol = "halfblocks"` 退回半块，或 `"sixel"` 强制 |
+
+> Windows 与 Linux 的发布产物都按 `target-cpu=x86-64-v3` 构建，即需要 **AVX2**（2013 年后的 CPU）。
 
 
 ### 从源码
