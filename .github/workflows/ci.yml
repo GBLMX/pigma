@@ -158,8 +158,12 @@ jobs:
       - name: Report the test output
         if: failure()
         run: |
-          grep -E '^(error|test result: FAILED|failures:|---- |thread )' -A3 test-output.log \
-            | tail -n 80 \
-            | while IFS= read -r line; do echo "::error::$line"; done
+          {
+            echo '### 测试输出（失败段）'
+            echo '```'
+            grep -E '^(error|test result: FAILED|failures:|---- |thread |  left|  right)' -A4 test-output.log \
+              | tail -n 120 || tail -n 60 test-output.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Cache Cargo dependencies
         uses: Swatinem/rust-cache@v2
