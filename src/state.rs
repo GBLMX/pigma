@@ -88,6 +88,10 @@ pub struct State {
     /// Layout rect of the player bar, cached by the draw pass (`ui::draw`) and
     /// consumed by mouse input to hit-test volume scrolling on the player bar.
     pub playerbar_area: Rect,
+    /// Rect the navigation occupies, in whichever position it is set to (empty while it is
+    /// not drawn at all — a narrow terminal hides the sidebar). Cached by the draw pass for
+    /// the same reason as `playerbar_area`: the wheel over it moves the navigation cursor.
+    pub nav_area: Rect,
     /// Inner rect of the content table, for click-to-select.
     pub content_inner: Rect,
     /// First list index shown in that table: the draw pass pre-scrolls the rows it

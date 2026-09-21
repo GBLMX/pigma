@@ -233,6 +233,7 @@ impl App {
             toast_msg: String::new(),
             toast_time: None,
             playerbar_area: Rect::default(),
+            nav_area: Rect::default(),
             content_inner: Rect::default(),
             content_offset: 0,
             gauge_area: Rect::default(),

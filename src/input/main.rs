@@ -298,6 +298,19 @@ pub(super) fn handle_main_mouse(app: &mut App, kind: MouseEventKind, col: u16, r
         return;
     }
 
+    // The wheel over the navigation moves its cursor, exactly as a wheel over the content
+    // moves the content cursor: an item the layout cannot show — scrolled out of the sidebar,
+    // or past the end of the row — is otherwise unreachable with the mouse, because the
+    // navigation only ever scrolls to follow the keyboard.
+    if hit::contains(app.state.nav_area, col, row) {
+        match kind {
+            MouseEventKind::ScrollUp => navigate_nav_up(app),
+            MouseEventKind::ScrollDown => navigate_nav_down(app),
+            _ => {}
+        }
+        return;
+    }
+
     match app.state.navigation.page {
         Page::Lyrics => {
             if kind == MouseEventKind::ScrollUp {
@@ -770,6 +783,153 @@ mod tests {
             playerbar_target(&none, Rect::default(), &[Rect::default(); 2], 30, 20),
             None,
             "empty space is not a button"
+        );
+    }
+}
+
+#[cfg(test)]
+mod nav_hit_area_lifetime_tests {
+    //! Hit areas belong to the frame that drew them.
+    use ratatui::{Terminal, backend::TestBackend};
+
+    use crate::{
+        config::{Config, NavPosition},
+        state::{ContentState, Page},
+    };
+
+    fn singer(name: &str) -> ncm_api::SingerInfo {
+        ncm_api::SingerInfo {
+            id: 1,
+            name: name.into(),
+            pic_url: String::new(),
+        }
+    }
+
+    fn left_click(col: u16, row: u16) -> crossterm::event::MouseEventKind {
+        let _ = (col, row);
+        crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left)
+    }
+
+    /// A terminal too narrow for the sidebar hides the navigation (`layout::main`), but the
+    /// previous frame's areas used to survive it. `handle_click` asks the navigation before
+    /// anything else, so the invisible items kept taking clicks that were meant for whatever
+    /// is drawn there now — and switching the navigation position moves those stale areas to
+    /// places the user would never connect to a navigation item.
+    #[tokio::test]
+    async fn a_navigation_that_is_not_drawn_takes_no_clicks() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+
+        let config = Config {
+            navigation_position: NavPosition::Left,
+            ..Config::default()
+        };
+        let mut app = crate::app::App::new(config, false).expect("app");
+        app.state.navigation.page = Page::Main;
+        app.state.navigation.content = ContentState::Singers(vec![singer("A"), singer("B")]).into();
+
+        // Wide enough for the sidebar: it is drawn, and its second item has an area.
+        let mut wide = Terminal::new(TestBackend::new(120, 40)).expect("backend");
+        wide.draw(|f| crate::ui::draw(f, &mut app)).expect("draw");
+        let second = app
+            .state
+            .navigation
+            .nav
+            .nav_hits
+            .get(1)
+            .map(|(_, _, rect)| *rect)
+            .expect("the sidebar draws its items");
+        let before = app
+            .state
+            .navigation
+            .nav
+            .selected_item()
+            .map(|item| item.name.clone());
+
+        // Narrow enough that the sidebar is not drawn at all.
+        let mut narrow = Terminal::new(TestBackend::new(50, 20)).expect("backend");
+        narrow.draw(|f| crate::ui::draw(f, &mut app)).expect("draw");
+        assert!(
+            app.state.navigation.nav.nav_hits.is_empty(),
+            "the frame that does not draw the navigation must not leave its areas behind"
+        );
+
+        // Click exactly where that navigation item used to be.
+        crate::input::handle_mouse_event(
+            &mut app,
+            left_click(second.x + 1, second.y),
+            second.x + 1,
+            second.y,
+        );
+        assert_eq!(
+            app.state
+                .navigation
+                .nav
+                .selected_item()
+                .map(|item| item.name.clone()),
+            before,
+            "the click must not reach a navigation item that is no longer on screen"
+        );
+    }
+
+    /// The wheel over the navigation moves its cursor, so every item stays reachable with the
+    /// mouse even when the layout cannot show all of them — the sidebar scrolls only to
+    /// follow the keyboard, and the row's offset is only ever changed by the selection.
+    #[tokio::test]
+    async fn the_wheel_over_the_navigation_reaches_every_item() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+
+        let config = Config {
+            navigation_position: NavPosition::Top,
+            ..Config::default()
+        };
+        let mut app = crate::app::App::new(config, false).expect("app");
+        app.state.navigation.page = Page::Main;
+        app.state.navigation.content = ContentState::Singers(vec![singer("A")]).into();
+
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).expect("backend");
+        terminal
+            .draw(|f| crate::ui::draw(f, &mut app))
+            .expect("draw");
+
+        let total: usize = app
+            .state
+            .navigation
+            .nav
+            .sections
+            .iter()
+            .map(|section| section.items.len())
+            .sum();
+        let visible = app.state.navigation.nav.nav_hits.len();
+        let area = app.state.nav_area;
+        assert!(area.width > 0, "the row mode draws its navigation");
+        assert!(
+            visible < total,
+            "this test needs a nav the row cannot fit: {visible} of {total}"
+        );
+
+        let mut reached = std::collections::HashSet::new();
+        for _ in 0..total {
+            crate::input::handle_mouse_event(
+                &mut app,
+                crossterm::event::MouseEventKind::ScrollDown,
+                area.x + 1,
+                area.y,
+            );
+            // One event, one frame: the navigation's scroll offset follows the draw.
+            terminal
+                .draw(|f| crate::ui::draw(f, &mut app))
+                .expect("draw");
+            let nav = &app.state.navigation.nav;
+            let selected = nav.section_states[nav.focus_section]
+                .selected()
+                .unwrap_or(0);
+            reached.insert((nav.focus_section, selected));
+        }
+
+        assert_eq!(
+            reached.len(),
+            total,
+            "the wheel must reach every item, including the ones the row had no room for"
         );
     }
 }

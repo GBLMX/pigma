@@ -52,6 +52,17 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
     let area = f.area();
 
+    // Mouse hit areas belong to the frame that drew them: the views that own one rebuild it,
+    // so anything that does not draw is cleared here first. The navigation is the one that
+    // needs this said out loud — a terminal too narrow for the sidebar hides it, and the
+    // lyrics/queue/artist pages never draw it at all, yet `handle_click` asks the navigation
+    // before anything else. The previous frame's areas therefore used to survive and take
+    // clicks meant for whatever is drawn there now: invisible nav items hijacking the
+    // content under them (measured: with the sidebar hidden, a click inside the content area
+    // still selected a navigation item).
+    app.state.navigation.nav.nav_hits.clear();
+    app.state.nav_area = Rect::default();
+
     let bs = style(
         &app.config,
         &app.theme_registry,
@@ -185,6 +196,7 @@ pub(crate) fn draw_main(f: &mut Frame, app: &mut App, areas: &layout::LayoutArea
     match app.config.navigation_position {
         NavPosition::Left | NavPosition::Right => {
             if areas.sidebar.width > 0 {
+                app.state.nav_area = areas.sidebar;
                 navigation::draw(
                     f,
                     &mut app.state.navigation.nav,
@@ -197,6 +209,7 @@ pub(crate) fn draw_main(f: &mut Frame, app: &mut App, areas: &layout::LayoutArea
             breadcrumb::render_breadcrumb(f, &app.state.navigation.nav, &bs, areas.breadcrumb);
         }
         NavPosition::Top | NavPosition::Bottom => {
+            app.state.nav_area = areas.nav;
             navigation::draw_top(f, &mut app.state.navigation.nav, &bs, areas.nav);
         }
     }
