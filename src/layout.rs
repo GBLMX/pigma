@@ -3,8 +3,10 @@
 
 use ratatui::layout::{Constraint, Flex, Layout, Rect};
 
-use crate::config::{NavPosition, Pane, PanesConfig};
-use crate::utils::Named;
+use crate::{
+    config::{NavPosition, Pane, PanesConfig},
+    utils::Named,
+};
 
 /// Which coordinate a divider moves along.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -258,8 +260,12 @@ pub fn main(area: Rect, panes: &PanesConfig, nav_position: NavPosition) -> Layou
             let (sidebar, right) = if area.width < 60 || !panes.visible(Pane::Navigation) {
                 (Rect::default(), middle)
             } else {
-                let nav_columns =
-                    clamp(Pane::Navigation, Axis::Columns, panes.navigation, area.width);
+                let nav_columns = clamp(
+                    Pane::Navigation,
+                    Axis::Columns,
+                    panes.navigation,
+                    area.width,
+                );
                 match nav_position {
                     NavPosition::Left => {
                         let [sidebar, right] = Layout::horizontal([

@@ -100,7 +100,10 @@ impl ProgressStyle {
     /// The next style, for the bare `:progress`: the cycle is `ALL`'s, so a style cannot be
     /// added and then silently skipped here.
     pub fn next(self) -> Self {
-        let at = Self::ALL.iter().position(|style| *style == self).unwrap_or(0);
+        let at = Self::ALL
+            .iter()
+            .position(|style| *style == self)
+            .unwrap_or(0);
         Self::ALL[(at + 1) % Self::ALL.len()]
     }
 
@@ -132,7 +135,6 @@ impl Named for ProgressStyle {
         self.spec().describe
     }
 }
-
 
 /// The progress bar's gradient setting, in the three states one key has to express.
 ///

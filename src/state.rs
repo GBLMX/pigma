@@ -9,13 +9,13 @@ pub mod lyrics;
 pub mod mv;
 pub mod navigation;
 pub mod notices;
-pub mod popup;
 pub mod page;
+pub mod popup;
 pub mod prompt;
 pub mod queue_page;
-pub mod tasks;
 pub mod search;
 pub mod splash;
+pub mod tasks;
 
 use std::time::Instant;
 
@@ -36,9 +36,9 @@ use crate::{config::BorderConfig, event::EventHandler};
 use lyrics::LyricsState;
 use notices::Notices;
 use popup::PopupState;
-use tasks::Tasks;
 use ratatui::layout::Rect;
 use serde::{Deserialize, Serialize};
+use tasks::Tasks;
 
 /// Pagination state for a lazily-loaded content view (e.g. a playlist or
 /// search results page). Drives "load more" and the loading indicator.

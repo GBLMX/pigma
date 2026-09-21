@@ -306,19 +306,20 @@ mod tests {
 
     use ratatui::{Terminal, backend::TestBackend, buffer::Buffer};
 
-    use super::super::{
-        draw,
-        lines::{lyrics, translated as translated_lyrics},
+    use super::{
+        super::{
+            draw,
+            lines::{lyrics, translated as translated_lyrics},
+        },
+        *,
     };
-    use super::*;
-    use crate::utils::Named;
     use crate::{
         config::{PanesConfig, Theme, lyrics::LyricsConfig},
         layout::Dividers,
         playback::{LyricLine, PlaybackState},
         state::lyrics::LyricsState,
         ui::BlockStyle,
-        utils::GradientPreset,
+        utils::{GradientPreset, Named},
     };
 
     /// A translation is drawn under its own line — and marked, because italic alone does not
@@ -446,7 +447,11 @@ mod tests {
         let start = Instant::now();
         state.flow(true, 5_000.0, start);
         if flow_ticks > 0 {
-            state.flow(true, 5_000.0, start + Duration::from_millis(500 * flow_ticks));
+            state.flow(
+                true,
+                5_000.0,
+                start + Duration::from_millis(500 * flow_ticks),
+            );
         }
 
         let mut terminal = Terminal::new(TestBackend::new(60, 12)).expect("backend");
@@ -606,4 +611,3 @@ mod tests {
         );
     }
 }
-

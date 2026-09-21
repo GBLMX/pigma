@@ -116,7 +116,10 @@ impl App {
     }
 
     pub(super) fn handle_login_error(&mut self, e: String) {
-        self.notice(crate::state::notices::Level::Error, format!("登录失败: {}", e));
+        self.notice(
+            crate::state::notices::Level::Error,
+            format!("登录失败: {}", e),
+        );
         self.state.login.loading = false;
         self.state.login.error = Some(e);
         self.state.login.notice = None;

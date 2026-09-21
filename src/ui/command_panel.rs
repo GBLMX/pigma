@@ -62,7 +62,9 @@ pub(super) fn draw(f: &mut Frame, app: &App, area: Rect) {
                     .unwrap_or_else(|| "   ".into());
                 Cow::Owned(format!("{name:<14}{key}{summary}"))
             }
-            CommandItem::SubMenu { name, .. } => Cow::Owned(format!("{name:<14}   {}", crate::config::symbols().submenu)),
+            CommandItem::SubMenu { name, .. } => {
+                Cow::Owned(format!("{name:<14}   {}", crate::config::symbols().submenu))
+            }
         };
 
         let prefix = if i == panel.selected {

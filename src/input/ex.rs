@@ -214,7 +214,10 @@ impl ExCommand {
             "tasks" => Ok(Self::Tasks),
             "clear" => Ok(Self::ClearQueue),
             "pane" => match args.as_slice() {
-                [] => Err(format!("`pane` 需要一个面板（{}）", Pane::names().join(" / "))),
+                [] => Err(format!(
+                    "`pane` 需要一个面板（{}）",
+                    Pane::names().join(" / ")
+                )),
                 [name, rest @ ..] => match rest {
                     [] => Ok(Self::Pane {
                         name: (*name).to_string(),
@@ -700,7 +703,10 @@ pub(crate) fn execute(app: &mut App, command: ExCommand) -> Result<(), String> {
         ExCommand::Tasks => app.state.tasks_popup.toggle(),
         ExCommand::ClearQueue => {
             app.playback.clear_queue();
-            app.toast(format!(" {}  已清空播放队列", crate::config::symbols().queue_clear));
+            app.toast(format!(
+                " {}  已清空播放队列",
+                crate::config::symbols().queue_clear
+            ));
 
             // The queue page is now showing tabs the queue no longer has: focus the one that is
             // left rather than a tab that has gone.
@@ -722,11 +728,7 @@ pub(crate) fn execute(app: &mut App, command: ExCommand) -> Result<(), String> {
             let next = app.config.playerbar.progress_style.next();
             app.config.playerbar.progress_style = next;
             app.config.save();
-            app.toast(format!(
-                "进度条样式: {} — {}",
-                next.name(),
-                next.describe()
-            ));
+            app.toast(format!("进度条样式: {} — {}", next.name(), next.describe()));
         }
         ExCommand::ProgressStyle(Some(name)) => {
             let Some(style) = ProgressStyle::parse(&name) else {
@@ -738,7 +740,11 @@ pub(crate) fn execute(app: &mut App, command: ExCommand) -> Result<(), String> {
             };
             app.config.playerbar.progress_style = style;
             app.config.save();
-            app.toast(format!("进度条样式: {} — {}", style.name(), style.describe()));
+            app.toast(format!(
+                "进度条样式: {} — {}",
+                style.name(),
+                style.describe()
+            ));
         }
         ExCommand::Volume(value) => match parse_volume(&value) {
             Err(error) => return Err(error.to_string()),

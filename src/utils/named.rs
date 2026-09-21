@@ -43,7 +43,10 @@ pub trait Named: Copy + PartialEq + Sized + 'static {
 
     /// The next value in [`Self::ALL`], wrapping around: what a bare `:command` cycles through.
     fn next(self) -> Self {
-        let at = Self::ALL.iter().position(|value| *value == self).unwrap_or(0);
+        let at = Self::ALL
+            .iter()
+            .position(|value| *value == self)
+            .unwrap_or(0);
         Self::ALL[(at + 1) % Self::ALL.len()]
     }
 

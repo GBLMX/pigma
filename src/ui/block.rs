@@ -135,9 +135,7 @@ impl<'a> CornerBlock<'a> {
     /// The frame's own colour, for a surface that is not the window's frame — a popup, whose
     /// border the theme names separately from the app's.
     pub(super) fn border_color(mut self, color: Color) -> Self {
-        self.block = self
-            .block
-            .border_style(Style::default().fg(color));
+        self.block = self.block.border_style(Style::default().fg(color));
 
         self
     }

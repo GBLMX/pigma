@@ -20,10 +20,7 @@ use ratatui::{
     widgets::{Padding, Paragraph},
 };
 
-use super::{
-    BlockStyle,
-    block::CornerBlock,
-};
+use super::{BlockStyle, block::CornerBlock};
 use crate::{
     app::App,
     input::ex::{self, ExCommand},
@@ -196,7 +193,10 @@ pub fn values(config: &crate::config::Config) -> Vec<String> {
         toml_edit::DocumentMut::new()
     });
 
-    SETTINGS.iter().map(|setting| value_at(&toml, setting.key)).collect()
+    SETTINGS
+        .iter()
+        .map(|setting| value_at(&toml, setting.key))
+        .collect()
 }
 
 /// The value at a dotted key, as the page writes it: arrays and tables are not values a row can
@@ -317,7 +317,10 @@ impl SettingsState {
     pub fn move_section(&mut self, step: i32) {
         let groups = groups();
         let current = SETTINGS[self.selected].group;
-        let at = groups.iter().position(|group| *group == current).unwrap_or(0) as i32;
+        let at = groups
+            .iter()
+            .position(|group| *group == current)
+            .unwrap_or(0) as i32;
         let next = (at + step).rem_euclid(groups.len() as i32) as usize;
         let group = groups[next];
 
@@ -491,10 +494,7 @@ pub(crate) fn handle_settings_click(app: &mut App, col: u16, row: u16) -> bool {
     // The hit areas are the rows of the section on screen, so the position in them is not the
     // position in the table: it has to be read back through the section that was drawn.
     let group = SETTINGS[app.state.settings.selected.min(SETTINGS.len() - 1)].group;
-    let Some(index) = rows_in(group)
-        .nth(offset)
-        .map(|(index, _)| index)
-    else {
+    let Some(index) = rows_in(group).nth(offset).map(|(index, _)| index) else {
         return false;
     };
 
@@ -538,7 +538,9 @@ pub(crate) fn keys(app: &mut App, key_event: crossterm::event::KeyEvent) -> bool
         KeyCode::Esc => {
             app.state
                 .events
-                .send(crate::event::NavigationEvent::Navigate(crate::state::Page::Main));
+                .send(crate::event::NavigationEvent::Navigate(
+                    crate::state::Page::Main,
+                ));
             return true;
         }
         KeyCode::BackTab | KeyCode::Tab => {
@@ -575,7 +577,10 @@ pub(crate) fn keys(app: &mut App, key_event: crossterm::event::KeyEvent) -> bool
     };
 
     if let Err(error) = outcome {
-        app.notice(crate::state::notices::Level::Error, format!("设置未改动: {error}"));
+        app.notice(
+            crate::state::notices::Level::Error,
+            format!("设置未改动: {error}"),
+        );
     }
     true
 }
@@ -666,7 +671,8 @@ mod tests {
                 setting.label, setting.ex, setting.key
             );
 
-            change(&mut app, setting, false).unwrap_or_else(|error| panic!("{}: {error}", setting.label));
+            change(&mut app, setting, false)
+                .unwrap_or_else(|error| panic!("{}: {error}", setting.label));
 
             if setting.kind == SettingKind::Cycle {
                 // `:navpos` and friends only cycle: there is no way back, so `←` leaves the row
@@ -741,9 +747,7 @@ mod tests {
                 let value = &values(&config)[index_of(setting)];
                 // A switch is shown as 开/关 rather than as the value its command takes.
                 let shown = match setting.kind {
-                    SettingKind::Toggle => {
-                        (if value == "on" { "开" } else { "关" }).to_string()
-                    }
+                    SettingKind::Toggle => (if value == "on" { "开" } else { "关" }).to_string(),
                     SettingKind::Cycle => format!("{value} ↻"),
                     SettingKind::Choice => format!("‹{value}›"),
                 };

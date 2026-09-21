@@ -60,7 +60,11 @@ const MIN_LYRICS_WIDTH: u16 = 30;
 /// Returns the lyrics area and `None` when there is no panel to draw, or no room for one: the
 /// lyrics then keep the whole page, which is what makes a page without a poster — and a page too
 /// small for one — exactly the page this drew before the panel existed.
-pub(super) fn panel_split(inner: Rect, panes: &PanesConfig, has_panel: bool) -> (Rect, Option<Rect>) {
+pub(super) fn panel_split(
+    inner: Rect,
+    panes: &PanesConfig,
+    has_panel: bool,
+) -> (Rect, Option<Rect>) {
     if !has_panel || !panes.visible(Pane::Mv) || inner.height < MIN_PANEL_HEIGHT {
         return (inner, None);
     }
@@ -155,17 +159,13 @@ mod panel_tests {
     use std::collections::HashSet;
 
     use ncm_api::SongInfo;
-    use ratatui::{
-        Terminal,
-        backend::TestBackend,
-        buffer::Buffer,
-        style::Color,
-    };
+    use ratatui::{Terminal, backend::TestBackend, buffer::Buffer, style::Color};
     use ratatui_image::picker::Picker;
 
-    use super::super::{draw, lines::lyrics};
-    use super::*;
-    use crate::utils::Named;
+    use super::{
+        super::{draw, lines::lyrics},
+        *,
+    };
     use crate::{
         config::{BorderConfig, LyricStyle, lyrics::LyricsConfig},
         layout::Dividers,
@@ -175,7 +175,7 @@ mod panel_tests {
             mv::{self, fixtures},
         },
         ui::{BlockStyle, block::CornerBlock},
-        utils::GradientPreset,
+        utils::{GradientPreset, Named},
     };
 
     /// The page's title, so the tests' `inner` is the one `draw` computes from the same block.
@@ -212,7 +212,8 @@ mod panel_tests {
         width: u16,
         height: u16,
     ) -> (Buffer, Rect) {
-        let (buffer, inner, _) = render_with(player, style, width, height, &mut Dividers::default());
+        let (buffer, inner, _) =
+            render_with(player, style, width, height, &mut Dividers::default());
 
         (buffer, inner)
     }
@@ -384,14 +385,20 @@ mod panel_tests {
             "a song with no poster is handed no column"
         );
         let short = Rect::new(0, 0, 100, MIN_PANEL_HEIGHT - 1);
-        assert_eq!(panel_split(short, &PanesConfig::default(), true), (short, None));
+        assert_eq!(
+            panel_split(short, &PanesConfig::default(), true),
+            (short, None)
+        );
         let narrow = Rect::new(
             0,
             0,
             MAX_POSTER_ROWS * 2 + PANEL_GAP + MIN_LYRICS_WIDTH - 1,
             40,
         );
-        assert_eq!(panel_split(narrow, &PanesConfig::default(), true), (narrow, None));
+        assert_eq!(
+            panel_split(narrow, &PanesConfig::default(), true),
+            (narrow, None)
+        );
         assert_eq!(
             panel_split(Rect::new(0, 0, 60, 12), &PanesConfig::default(), true),
             (Rect::new(0, 0, 60, 12), None),
@@ -467,7 +474,11 @@ mod panel_tests {
             .find(|divider| divider.pane == Pane::Mv)
             .expect("the page registers the MV's edge");
         assert_eq!(divider.axis, Axis::Columns);
-        assert_eq!(divider.rect.x, panel.x - 1, "the edge is the column beside it");
+        assert_eq!(
+            divider.rect.x,
+            panel.x - 1,
+            "the edge is the column beside it"
+        );
         assert_eq!(divider.rect.height, panel.height);
         assert_eq!(
             divider.size_for(30, -4),
@@ -685,4 +696,3 @@ mod panel_tests {
         );
     }
 }
-

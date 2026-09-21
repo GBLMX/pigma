@@ -1,5 +1,7 @@
-use crate::config::{LyricStyle, NotifySwitch, Pane, ProgressStyle};
-use crate::utils::{GradientPreset, Named, terminal::CursorStyle};
+use crate::{
+    config::{LyricStyle, NotifySwitch, Pane, ProgressStyle},
+    utils::{GradientPreset, Named, terminal::CursorStyle},
+};
 
 /// The values a command accepts after it: its completion pool, and — since the settings page asks
 /// the same question — the options a row of that page cycles through.
@@ -132,7 +134,12 @@ const fn setting(
 /// carrying a `group` are the settings, listed in the order their section first appears here.
 pub const COMMANDS: &[Command] = &[
     simple("help", "快捷键面板", Some("?"), no_args),
-    simple("login", "登录页（二维码 / 账号 / 短信 / 签到）", Some("L"), no_args),
+    simple(
+        "login",
+        "登录页（二维码 / 账号 / 短信 / 签到）",
+        Some("L"),
+        no_args,
+    ),
     simple("logout", "退出登录", None, no_args),
     simple("sign", "在登录页里每日签到", None, no_args),
     simple("visualizer", "频谱开关", Some("v"), on_off),
@@ -247,13 +254,49 @@ pub const COMMANDS: &[Command] = &[
         in_palette: true,
         group: Some("面板"),
     },
-    setting("notify", "notify song_change", "切歌时通知当前曲目", "通知", notify_switches),
-    setting("notify", "notify errors", "播放出错时通知", "通知", notify_switches),
+    setting(
+        "notify",
+        "notify song_change",
+        "切歌时通知当前曲目",
+        "通知",
+        notify_switches,
+    ),
+    setting(
+        "notify",
+        "notify errors",
+        "播放出错时通知",
+        "通知",
+        notify_switches,
+    ),
     setting("mouse", "mouse", "鼠标捕获开关", "终端", on_off),
-    setting("cursor", "cursor", "输入框光标形状", "终端", names_of::<CursorStyle>),
-    setting("progress", "progress", "进度条样式", "播放条", names_of::<ProgressStyle>),
-    setting("lyrics", "lyrics", "歌词显示样式", "歌词", names_of::<LyricStyle>),
-    setting("lyricgradient", "lyricgradient", "歌词渐变预设", "歌词", names_of::<GradientPreset>),
+    setting(
+        "cursor",
+        "cursor",
+        "输入框光标形状",
+        "终端",
+        names_of::<CursorStyle>,
+    ),
+    setting(
+        "progress",
+        "progress",
+        "进度条样式",
+        "播放条",
+        names_of::<ProgressStyle>,
+    ),
+    setting(
+        "lyrics",
+        "lyrics",
+        "歌词显示样式",
+        "歌词",
+        names_of::<LyricStyle>,
+    ),
+    setting(
+        "lyricgradient",
+        "lyricgradient",
+        "歌词渐变预设",
+        "歌词",
+        names_of::<GradientPreset>,
+    ),
     setting("saveonplay", "saveonplay", "边听边存开关", "缓存", on_off),
 ];
 

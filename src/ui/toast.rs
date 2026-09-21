@@ -5,11 +5,7 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Clear, Paragraph},
 };
 
-use crate::{
-    app::App,
-    config::Theme,
-    state::notices::Level,
-};
+use crate::{app::App, config::Theme, state::notices::Level};
 
 pub(super) fn draw_toast(f: &mut Frame, app: &App, colors: &Theme) {
     // The newest notice, while its level's time lasts: an error is worth reading for longer than a
@@ -50,7 +46,8 @@ pub(super) fn draw_toast(f: &mut Frame, app: &App, colors: &Theme) {
         .border_style(Style::default().fg(text))
         .style(Style::default().bg(colors.surface));
 
-    let p = Paragraph::new(format!(" {} ", notice.text)).style(text_look.style())
+    let p = Paragraph::new(format!(" {} ", notice.text))
+        .style(text_look.style())
         .block(block)
         .alignment(Alignment::Center);
     f.render_widget(p, toast_area);

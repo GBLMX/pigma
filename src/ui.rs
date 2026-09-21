@@ -8,20 +8,20 @@ mod command_panel;
 mod content;
 mod gradient_line_gauge;
 mod help;
-mod messages;
-mod tasks;
 mod login;
 mod lyrics;
+mod messages;
 mod navigation;
 pub(crate) mod playerbar;
 mod queue;
-pub(crate) mod settings;
 mod scrollbar;
+pub(crate) mod settings;
 mod skeleton;
 mod spinner;
 mod splash;
 mod styled_text;
 mod table;
+mod tasks;
 mod title;
 mod toast;
 mod topbar;
@@ -37,7 +37,6 @@ use ratatui::{
 
 use crate::{
     app::App,
-    utils::terminal::Background,
     config::{BorderConfig, Config, NavPosition, ThemeRegistry},
     layout,
     state::{PageRender, lyrics as lyrics_state},
@@ -45,6 +44,7 @@ use crate::{
         block::{BlockStyle, CornerBlock},
         title::render_title,
     },
+    utils::terminal::Background,
 };
 
 pub fn draw(f: &mut Frame, app: &mut App) {
@@ -548,12 +548,7 @@ mod contrast_audit {
 /// The theme has to own the background, not just the text colours.
 #[cfg(test)]
 mod theme_background {
-    use ratatui::{
-        Terminal,
-        backend::TestBackend,
-        buffer::Buffer,
-        style::Color,
-    };
+    use ratatui::{Terminal, backend::TestBackend, buffer::Buffer, style::Color};
 
     use crate::{
         app::App,

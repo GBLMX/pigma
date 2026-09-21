@@ -406,10 +406,14 @@ impl App {
                         match crate::input::ex::ExCommand::parse(&line) {
                             Ok(command) => {
                                 if let Err(error) = crate::input::ex::execute(self, command) {
-                                    self.notice(crate::state::notices::Level::Error, format!("E: {error}"));
+                                    self.notice(
+                                        crate::state::notices::Level::Error,
+                                        format!("E: {error}"),
+                                    );
                                 }
                             }
-                            Err(error) => self.notice(crate::state::notices::Level::Error, format!("E: {error}")),
+                            Err(error) => self
+                                .notice(crate::state::notices::Level::Error, format!("E: {error}")),
                         }
                     }
                     // One that needs an argument opens the command line ready for it, rather than

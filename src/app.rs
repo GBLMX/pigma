@@ -36,8 +36,8 @@ use crate::{
     playback::{NCM_SEARCH_QUEUE_KEY, PlaybackEngine, THIRD_PARTY_QUEUE_KEY},
     service::{ApiEndpoint, ApiService},
     state::{
-        ContentState, LoginState, NavState, NavigationState, Page, PromptState,
-        QueueHits, SearchProvider, SearchState, SplashState, State, TableMode,
+        ContentState, LoginState, NavState, NavigationState, Page, PromptState, QueueHits,
+        SearchProvider, SearchState, SplashState, State, TableMode,
     },
     ui,
     utils::{

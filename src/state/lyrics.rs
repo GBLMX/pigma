@@ -48,7 +48,13 @@ impl LyricsState {
     }
 
     /// How many characters of the line at `i` the voice has passed — where the fill has got to.
-    pub fn fill(&self, lyrics: &[LyricLine], i: usize, cur_ms: f64, total_ms: Option<f64>) -> usize {
+    pub fn fill(
+        &self,
+        lyrics: &[LyricLine],
+        i: usize,
+        cur_ms: f64,
+        total_ms: Option<f64>,
+    ) -> usize {
         fill(lyrics, i, cur_ms, total_ms)
     }
 
@@ -215,7 +221,13 @@ mod tests {
         let lines = lyrics();
         let mut state = LyricsState::default();
 
-        for (ms, expected) in [(0.0, 0), (6_000.0, 1), (11_000.0, 2), (26_000.0, 5), (1_000.0, 0)] {
+        for (ms, expected) in [
+            (0.0, 0),
+            (6_000.0, 1),
+            (11_000.0, 2),
+            (26_000.0, 5),
+            (1_000.0, 0),
+        ] {
             assert_eq!(state.current_line(&lines, ms), expected, "at {ms} ms");
         }
     }
@@ -290,8 +302,14 @@ mod tests {
         state.flow(true, 5_000.0, start);
         state.flow(true, 5_000.0, start + Duration::from_millis(1_000));
         // The next line is quicker; the phase it starts from is where the last one left it.
-        assert_eq!(state.flow(true, 2_500.0, start + Duration::from_millis(1_000)), 0.2);
-        assert_eq!(state.flow(true, 2_500.0, start + Duration::from_millis(1_500)), 0.4);
+        assert_eq!(
+            state.flow(true, 2_500.0, start + Duration::from_millis(1_000)),
+            0.2
+        );
+        assert_eq!(
+            state.flow(true, 2_500.0, start + Duration::from_millis(1_500)),
+            0.4
+        );
     }
 
     /// A stall moves the colour by the cap, not by the time that passed: a suspended process must
@@ -302,7 +320,10 @@ mod tests {
         let start = Instant::now();
 
         state.flow(true, 2_000.0, start);
-        assert_eq!(state.flow(true, 2_000.0, start + Duration::from_secs(30)), MAX_FRAME_PASS);
+        assert_eq!(
+            state.flow(true, 2_000.0, start + Duration::from_secs(30)),
+            MAX_FRAME_PASS
+        );
     }
 
     /// The colour only moves while the song does.
@@ -313,12 +334,21 @@ mod tests {
 
         state.flow(true, 5_000.0, start);
         let paused = state.flow(false, 5_000.0, start + Duration::from_millis(1_000));
-        assert_eq!(paused, 0.0, "paused, the colour stays where the voice left it");
+        assert_eq!(
+            paused, 0.0,
+            "paused, the colour stays where the voice left it"
+        );
 
         // Time spent paused is not a pass either: the next playing frame moves on from where the
         // voice stopped, by one frame's worth.
-        assert_eq!(state.flow(true, 5_000.0, start + Duration::from_millis(2_000)), 0.2);
-        assert_eq!(state.flow(true, 5_000.0, start + Duration::from_millis(2_500)), 0.3);
+        assert_eq!(
+            state.flow(true, 5_000.0, start + Duration::from_millis(2_000)),
+            0.2
+        );
+        assert_eq!(
+            state.flow(true, 5_000.0, start + Duration::from_millis(2_500)),
+            0.3
+        );
     }
 
     /// A line whose length is unknown has no speed to move at — the colour holds rather than
@@ -329,6 +359,9 @@ mod tests {
         let start = Instant::now();
 
         state.flow(true, 0.0, start);
-        assert_eq!(state.flow(true, 0.0, start + Duration::from_millis(1_000)), 0.0);
+        assert_eq!(
+            state.flow(true, 0.0, start + Duration::from_millis(1_000)),
+            0.0
+        );
     }
 }

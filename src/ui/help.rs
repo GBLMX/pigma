@@ -105,8 +105,8 @@ pub(super) fn draw(f: &mut Frame, app: &App, area: Rect) -> usize {
         crate::config::symbols().title_open,
         crate::config::symbols().title_close
     );
-    let block =
-        CornerBlock::from_color(&style, colors.surface).title_styled(&title, colors, colors.looks().popup_title)
+    let block = CornerBlock::from_color(&style, colors.surface)
+        .title_styled(&title, colors, colors.looks().popup_title)
         .border_color(colors.looks().popup_border.fg.unwrap_or(colors.border));
     let inner = block.inner(popup_area);
 

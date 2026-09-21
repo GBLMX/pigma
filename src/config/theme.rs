@@ -310,7 +310,10 @@ impl Theme {
     /// the theme, so a file that sets only `text` and `accent` still has a complete set.
     pub fn looks(&self) -> Looks {
         Looks {
-            table_header: self.table.header.over(Look::default(), self, "table.header"),
+            table_header: self
+                .table
+                .header
+                .over(Look::default(), self, "table.header"),
             table_row: self.table.row.over(
                 Look {
                     fg: Some(self.text),
@@ -1469,7 +1472,8 @@ mod schema_tests {
     #[test]
     fn the_schema_describes_every_key_a_theme_has() {
         let schema: serde_json::Value =
-            serde_json::from_str(include_str!("../../theme.schema.json")).expect("the schema parses");
+            serde_json::from_str(include_str!("../../theme.schema.json"))
+                .expect("the schema parses");
 
         let written = toml_edit::ser::to_string_pretty(&Theme::default()).expect("a theme writes");
         let theme: toml_edit::DocumentMut = written.parse().expect("and reads back");

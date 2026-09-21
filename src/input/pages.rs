@@ -16,12 +16,7 @@ use super::{
     },
     main::{artist_play_selected, reload_artist},
 };
-use crate::{
-    app::App,
-    event::NavigationEvent,
-    state::Page,
-    text_input::TextInput,
-};
+use crate::{app::App, event::NavigationEvent, state::Page, text_input::TextInput};
 
 /// The artist page's keys.
 ///
@@ -32,10 +27,7 @@ pub(crate) fn artist_keys(app: &mut App, key_event: KeyEvent) -> bool {
         // The artist page is not part of the content breadcrumb stack — it is opened from a row
         // rather than by walking the table — so leaving it is a page change, not a restore, and
         // there is no breadcrumb for `ContentRestore` to pop.
-        KeyCode::Esc => app
-            .state
-            .events
-            .send(NavigationEvent::Navigate(Page::Main)),
+        KeyCode::Esc => app.state.events.send(NavigationEvent::Navigate(Page::Main)),
         KeyCode::Up | KeyCode::Char('k' | 'K') => app.state.navigation.artist.select_prev(),
         KeyCode::Down | KeyCode::Char('j' | 'J') => app.state.navigation.artist.select_next(),
         KeyCode::Char('g') => app.state.navigation.artist.select_first(),
@@ -109,14 +101,14 @@ mod tests {
     #[tokio::test]
     async fn the_queue_page_walks_its_own_rows() {
         let mut app = app(Page::Playlist);
-        app.playback.set_queue_songs(
-            (1..=3)
-                .map(|id| std::sync::Arc::new(song(id)))
-                .collect(),
-        );
+        app.playback
+            .set_queue_songs((1..=3).map(|id| std::sync::Arc::new(song(id))).collect());
 
         press(&mut app, KeyCode::Char('j'));
-        assert_eq!(app.state.navigation.playlist_selected, 1, "`j` walks the queue");
+        assert_eq!(
+            app.state.navigation.playlist_selected, 1,
+            "`j` walks the queue"
+        );
         press(&mut app, KeyCode::Char('G'));
         assert_eq!(app.state.navigation.playlist_selected, 2);
         press(&mut app, KeyCode::Char('g'));

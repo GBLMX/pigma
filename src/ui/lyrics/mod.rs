@@ -8,18 +8,12 @@ use ratatui::{
     widgets::{Padding, Paragraph},
 };
 
-use super::{
-    BlockStyle,
-    block::CornerBlock,
-};
+use super::{BlockStyle, block::CornerBlock};
 use crate::{
     config::{Pane, PanesConfig, lyrics::LyricsConfig},
     layout::{Axis, Divider, Dividers},
     playback::PlaybackState,
-    state::{
-        lyrics::LyricsState,
-        mv,
-    },
+    state::{lyrics::LyricsState, mv},
 };
 
 mod panel;
@@ -69,7 +63,12 @@ pub(super) fn draw(
             Pane::Mv,
             Axis::Columns,
             -1,
-            Rect::new(panel_area.x.saturating_sub(1), panel_area.y, 1, panel_area.height),
+            Rect::new(
+                panel_area.x.saturating_sub(1),
+                panel_area.y,
+                1,
+                panel_area.height,
+            ),
         ));
     }
 

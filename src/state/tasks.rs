@@ -82,7 +82,11 @@ impl Tasks {
     /// says. The id of the request is not carried by the event, and does not have to be — the
     /// navigation asks for one thing at a time.
     pub fn finish_running(&mut self, state: TaskState) {
-        for task in self.entries.iter_mut().filter(|task| task.state.is_running()) {
+        for task in self
+            .entries
+            .iter_mut()
+            .filter(|task| task.state.is_running())
+        {
             task.state = state;
         }
     }

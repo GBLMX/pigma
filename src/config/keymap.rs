@@ -16,8 +16,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::config::Config;
-use crate::state::command::COMMANDS;
+use crate::{config::Config, state::command::COMMANDS};
 
 /// One key of a binding: the character, and whether Ctrl or Alt is held with it. Shift is part of
 /// the character (`G` is shift-`g` and is written `G`).
@@ -115,7 +114,9 @@ impl Keymap {
                         if crate::config::theme::report_unknown_field_once(&format!(
                             "key {name}={spec}"
                         )) {
-                            log::warn!("[keys] `{name} = \"{spec}\"` is not a key sequence; ignored");
+                            log::warn!(
+                                "[keys] `{name} = \"{spec}\"` is not a key sequence; ignored"
+                            );
                         }
                     }
                 },
@@ -179,7 +180,10 @@ fn chord_of(spec: &str) -> Option<Chord> {
         return Some(vec![Key::char(spec.chars().next().expect("one character"))]);
     }
 
-    let chord: Chord = spec.split_whitespace().map(Key::parse).collect::<Option<_>>()?;
+    let chord: Chord = spec
+        .split_whitespace()
+        .map(Key::parse)
+        .collect::<Option<_>>()?;
 
     (!chord.is_empty()).then_some(chord)
 }

@@ -67,7 +67,10 @@ pub(super) fn handle_main_key(app: &mut App, key_event: KeyEvent) -> color_eyre:
                 if let Ok(command) = super::ex::ExCommand::parse(name)
                     && let Err(error) = super::ex::execute(app, command)
                 {
-                    app.notice(crate::state::notices::Level::Error, format!("{name}: {error}"));
+                    app.notice(
+                        crate::state::notices::Level::Error,
+                        format!("{name}: {error}"),
+                    );
                 }
                 return Ok(());
             }
@@ -721,7 +724,10 @@ mod tests {
         assert!(!app.config.playerbar.visible.visualizer, "a fresh config");
 
         press(&mut app, 'v');
-        assert!(app.config.playerbar.visible.visualizer, "`v` ran `:visualizer`");
+        assert!(
+            app.config.playerbar.visible.visualizer,
+            "`v` ran `:visualizer`"
+        );
 
         app.config
             .keys
@@ -749,14 +755,18 @@ mod tests {
     /// after it was first drawn.
     #[tokio::test]
     async fn the_settings_page_answers_keys_tab_and_mouse() {
-        use crossterm::event::{MouseButton, MouseEventKind};
         use crate::ui::settings::{Focus, SETTINGS};
+        use crossterm::event::{MouseButton, MouseEventKind};
 
         let mut app = app();
         press(&mut app, ',');
         app.handle_events().await.expect("events");
         assert_eq!(app.state.navigation.page, Page::Settings);
-        assert_eq!(app.state.settings.focus, Focus::Rows, "the rows are what a page is for");
+        assert_eq!(
+            app.state.settings.focus,
+            Focus::Rows,
+            "the rows are what a page is for"
+        );
 
         // `Tab` moves to the sections, and `↑↓` walks them there.
         press_key(&mut app, KeyCode::Tab);
@@ -811,14 +821,21 @@ mod tests {
             .last()
             .copied()
             .expect("the frame drew the section's rows");
-        assert_eq!(app.state.settings.row_hits.len(), 1, "one row in this section");
+        assert_eq!(
+            app.state.settings.row_hits.len(),
+            1,
+            "one row in this section"
+        );
         crate::input::handle_mouse_event(
             &mut app,
             MouseEventKind::Down(MouseButton::Left),
             area.x + 1,
             area.y,
         );
-        assert_eq!(app.state.settings.selected, target, "the click picked the row");
+        assert_eq!(
+            app.state.settings.selected, target,
+            "the click picked the row"
+        );
 
         let before = app.config.cache.save_on_play;
         crate::input::handle_mouse_event(
@@ -836,7 +853,10 @@ mod tests {
         // the cursor does on every other list in the app.
         let before = app.state.settings.selected;
         crate::input::handle_mouse_event(&mut app, MouseEventKind::ScrollDown, area.x + 1, area.y);
-        assert_ne!(app.state.settings.selected, before, "the wheel moved the cursor");
+        assert_ne!(
+            app.state.settings.selected, before,
+            "the wheel moved the cursor"
+        );
     }
 
     /// A key sequence, typed through the real entry point: the first key is held, the second runs
@@ -844,7 +864,9 @@ mod tests {
     #[tokio::test]
     async fn a_key_sequence_runs_when_it_is_complete() {
         let mut app = app();
-        app.config.keys.insert("spin".to_string(), "e e".to_string());
+        app.config
+            .keys
+            .insert("spin".to_string(), "e e".to_string());
         assert!(!app.config.playerbar.spinning_cover, "a fresh config");
 
         press(&mut app, 'e');
@@ -901,7 +923,11 @@ mod tests {
         app.state.events.send(arrived);
         app.handle_events().await.expect("events");
 
-        assert_eq!(app.state.tasks.running(), 0, "the arrival finished the load");
+        assert_eq!(
+            app.state.tasks.running(),
+            0,
+            "the arrival finished the load"
+        );
         assert!(
             app.state
                 .tasks
@@ -929,7 +955,10 @@ mod tests {
         assert_eq!(app.state.navigation.page, Page::Settings);
 
         // Walk to the last row of the table, which is a switch the page draws as 开/关.
-        let Some(target) = SETTINGS.iter().position(|setting| setting.label == "边听边存") else {
+        let Some(target) = SETTINGS
+            .iter()
+            .position(|setting| setting.label == "边听边存")
+        else {
             panic!("the cache switch is a row of the settings page");
         };
         while app.state.settings.selected != target {

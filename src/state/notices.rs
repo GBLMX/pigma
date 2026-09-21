@@ -96,7 +96,10 @@ mod tests {
         let start = Instant::now();
 
         notices.push(Level::Info, "first");
-        assert_eq!(notices.latest(start).map(|n| n.text.as_str()), Some("first"));
+        assert_eq!(
+            notices.latest(start).map(|n| n.text.as_str()),
+            Some("first")
+        );
 
         notices.push(Level::Error, "second");
         assert_eq!(

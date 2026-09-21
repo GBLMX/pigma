@@ -644,10 +644,7 @@ mod tests {
         // The style's gradient reaches the gauge: one colour for the flat default, a spread of
         // them for `blocks` (turbo).
         let shades = |cells: &[ratatui::style::Color]| {
-            cells
-                .iter()
-                .collect::<std::collections::HashSet<_>>()
-                .len()
+            cells.iter().collect::<std::collections::HashSet<_>>().len()
         };
         assert_eq!(shades(&thick_shades), 1, "the default bar is one colour");
         assert!(shades(&block_shades) > 1, "blocks carries a gradient");
