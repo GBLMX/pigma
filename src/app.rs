@@ -107,6 +107,11 @@ impl App {
     /// `with_terminal` selects the interactive TUI event source (crossterm);
     /// pass `false` for headless daemon mode.
     pub fn new(mut config: Config, with_terminal: bool) -> color_eyre::Result<Self> {
+        // Only the process that owns the terminal owns the config file: a test or a CLI run
+        // calls the same setters and commands, and saving from there used to write over the
+        // user's own settings.
+        config.persist = with_terminal;
+
         let border = config.border.clone();
 
         // Resolve the appearance once, up front: the glyph set comes from the config, and

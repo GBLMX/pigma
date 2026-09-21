@@ -57,7 +57,16 @@ fn unversioned_config_version() -> u32 {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
-    /// Schema version of the file this config was loaded from; written back on save.
+    /// Whether this config may be written back to the user's file.
+    ///
+    /// The TUI owns the terminal and the user's config; a test, the CLI and the headless paths
+    /// do not — and they *do* call the same setters and commands, every one of which saves. A
+    /// test that resized a pane used to write its own default config straight over the real one
+    /// (measured: a `cargo test` run replaced a user's theme, gradient, player-bar layout and
+    /// navigation position with defaults). Never the user's file from a process that does not
+    /// own it.
+    #[serde(skip)]
+    pub persist: bool,
     #[serde(default = "unversioned_config_version")]
     pub config_version: u32,
     pub default_theme: String,
@@ -253,6 +262,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             config_version: CONFIG_VERSION,
+            persist: true,
             default_theme: Theme::default().name,
             light_theme: None,
             panes: PanesConfig::default(),
@@ -315,12 +325,17 @@ impl Config {
             None
         };
 
-        let config = if let Some(mut cfg) = parsed {
+        let mut config = if let Some(mut cfg) = parsed {
             cfg.migrate_from(config_path);
             cfg
         } else {
             Config::default()
         };
+        // A config read from the user's file is the user's: the app that loaded it may write it
+        // back. (`Config::deserialize` cannot know this — `persist` is skipped on the way in —
+        // so it is said here, and `App::new` narrows it again to "the process owns the
+        // terminal".)
+        config.persist = true;
 
         // Only a missing file is (re)created: a file that exists but failed to parse is
         // left alone rather than overwritten with defaults.
@@ -374,6 +389,10 @@ impl Config {
     }
 
     pub fn save(&self) {
+        if !self.persist {
+            return;
+        }
+
         let dir = utils::boxpigma_config_dir();
         if let Err(e) = fs::create_dir_all(&dir) {
             log::error!("Failed to create config directory: {e}");
@@ -429,6 +448,30 @@ impl Config {
 
 #[cfg(test)]
 mod tests {
+    /// A config the process does not own is never written: `App::new(_, false)` — tests, the
+    /// CLI, the headless paths — leaves the user's file exactly as it found it.
+    ///
+    /// This is the regression test for a `cargo test` run replacing a real config with defaults
+    /// (theme, gradient, player-bar layout, navigation position — all of it), because a test
+    /// resized a pane and the setter that follows a drag saved.
+    #[test]
+    fn a_config_that_is_not_the_users_is_never_written() {
+        let path = utils::boxpigma_config_dir().join("config.toml");
+        let before = fs::read(&path).ok();
+        let config = Config {
+            persist: false,
+            ..Config::default()
+        };
+
+        config.save();
+
+        assert_eq!(
+            fs::read(&path).ok(),
+            before,
+            "a config the process does not own was written over the user's"
+        );
+    }
+
     /// Mouse capture is what makes the player bar clickable and also what stops the terminal
     /// from selecting text, so the default is on and the way out has to actually parse.
     #[test]
