@@ -6,6 +6,7 @@ pub mod command;
 pub mod content;
 pub mod help;
 pub mod login;
+pub mod lyrics;
 pub mod mv;
 pub mod navigation;
 pub mod page;
@@ -31,6 +32,7 @@ pub use splash::*;
 
 // --- Private Internal Imports ---
 use crate::{config::BorderConfig, event::EventHandler};
+use lyrics::LyricsState;
 use ratatui::layout::Rect;
 use serde::{Deserialize, Serialize};
 
@@ -93,6 +95,9 @@ pub struct State {
     pub offline: bool,
     pub tick: u64,
     pub last_tick: Instant,
+    /// Where the song is in its lyrics: the current line, and the flow's colour. The page draws
+    /// from it and hands it back at the end of the frame.
+    pub lyrics: LyricsState,
     /// The frame's draggable pane edges, rebuilt by the draw pass (`ui::draw`) and consumed by
     /// mouse input — the same contract as `nav_hits`: an edge belongs to the frame that drew it.
     pub pane_dividers: crate::layout::Dividers,

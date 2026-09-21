@@ -23,7 +23,10 @@ mod title;
 mod toast;
 mod topbar;
 
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use ratatui::{
     Frame,
@@ -37,7 +40,7 @@ use crate::{
     utils::terminal::Background,
     config::{BorderConfig, Config, NavPosition, ThemeRegistry},
     layout,
-    state::PageRender,
+    state::{PageRender, lyrics as lyrics_state},
     ui::{
         block::{BlockStyle, CornerBlock},
         title::render_title,
@@ -315,6 +318,11 @@ pub(crate) fn draw_main(f: &mut Frame, app: &mut App, areas: &layout::LayoutArea
 
 /// The lyrics page: the scrolling lyrics, in the content area.
 pub(crate) fn draw_lyrics(f: &mut Frame, app: &mut App, areas: &layout::LayoutAreas) {
+    // The flow's colour advances here, by the clock, before the page reads it: one pass takes one
+    // line, so its speed comes from the line being sung, and the phase is carried across line
+    // changes rather than derived from the frame count.
+    advance_flow(app);
+
     let bs = style(
         &app.config,
         &app.theme_registry,
@@ -336,10 +344,34 @@ pub(crate) fn draw_lyrics(f: &mut Frame, app: &mut App, areas: &layout::LayoutAr
             show_translation: app.config.lyric_translation,
             title: &app.config.titles.lyrics,
         },
+        &mut app.state.lyrics,
         &app.config.panes,
         &mut app.state.pane_dividers,
         areas.content,
     );
+}
+
+/// Move the lyrics page's flow on to now: one pass of the palette per line of the song.
+///
+/// The phase belongs to the `App` rather than to the page, so a line change does not restart it,
+/// and it is advanced with the wall clock rather than with the frame counter: the flow's speed
+/// follows the line being sung, which a frame count cannot know.
+fn advance_flow(app: &mut App) {
+    let player = &app.playback.state;
+    let Some(lyrics) = player.lyrics.as_deref().filter(|lines| !lines.is_empty()) else {
+        return;
+    };
+
+    let cur_ms = player.position_secs * 1000.0;
+    let total_ms = player
+        .current_song
+        .as_ref()
+        .and_then(|song| lyrics_state::song_duration_ms(song.duration));
+    let line = app.state.lyrics.current_line(lyrics, cur_ms);
+    let line_ms = lyrics_state::line_duration(lyrics, line, total_ms);
+    let playing = player.playing && !player.paused;
+
+    app.state.lyrics.flow(playing, line_ms, Instant::now());
 }
 
 /// The queue page: the queue tabs and their table, in the content area.

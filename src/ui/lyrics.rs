@@ -1,4 +1,3 @@
-use std::cell::Cell;
 
 use ratatui::{
     Frame,
@@ -14,37 +13,16 @@ use crate::{
     config::{LyricStyle, Pane, PanesConfig, Theme, symbols},
     layout::{Axis, Divider, Dividers, clamp},
     playback::{LyricLine, PlaybackState},
-    state::mv::{self, MvPanel},
+    state::{
+        lyrics::LyricsState,
+        mv::{self, MvPanel},
+    },
     utils::{GradientPreset, format::clip_long_text, format_duration},
 };
 
-thread_local! {
-    static LAST_CUR: Cell<usize> = const { Cell::new(0) };
-}
-
-/// Find the current lyric index — incremental forward scan, O(1) amortized.
-fn find_current_line(lyrics: &[LyricLine], cur_ms: f64) -> usize {
-    LAST_CUR.with(|last| {
-        let mut cur = last.get();
-        // Reset if lyrics changed (new song)
-        if cur >= lyrics.len() {
-            cur = 0;
-        }
-        // Advance forward from last position
-        while cur + 1 < lyrics.len() && lyrics[cur + 1].time.as_millis() as f64 <= cur_ms {
-            cur += 1;
-        }
-        // Only scan backward if we overshot (user seeked back)
-        if cur > 0 && lyrics[cur].time.as_millis() as f64 > cur_ms {
-            cur = lyrics
-                .iter()
-                .rposition(|l| l.time.as_millis() as f64 <= cur_ms)
-                .unwrap_or(0);
-        }
-        last.set(cur);
-        cur
-    })
-}
+// Where the song is in its lyrics — the current line, the fill, and the flow's phase — lives in
+// `state::lyrics`: it used to live here, in a thread-local cache that belonged to whichever
+// thread drew last, and in the frame counter.
 
 /// Everything the four presentations share: the song's lyrics, where the recording is, and
 /// the colours and gradient to draw them with.
@@ -55,13 +33,13 @@ struct View<'a> {
     cur_ms: f64,
     colors: &'a Theme,
     gradient: GradientPreset,
+    /// Where the song is in these lyrics: the current line's fill, and the flow's phase.
+    state: &'a LyricsState,
     /// What `ktv` paints the sung part with.
     ktv_color: Color,
     /// The song's length in milliseconds, when the player knows it. It is what says where the
     /// last line ends — nothing else in the file does.
     total_ms: Option<f64>,
-    /// Free-running frame counter, used as the clock for the animated styles.
-    tick: u64,
 }
 
 /// What the page is asked to draw beyond the player's own state.
@@ -79,11 +57,15 @@ pub(super) struct Options<'a> {
     pub title: &'a str,
 }
 
+// The page takes its player, its style, where the song is, the pane sizes and the frame: they
+// are what a page needs, and a struct that only ever holds them would be this list with a name.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn draw(
     f: &mut Frame,
     player: &PlaybackState,
     bs: &BlockStyle<'_>,
     options: Options<'_>,
+    state: &mut LyricsState,
     panes: &PanesConfig,
     dividers: &mut Dividers,
     area: Rect,
@@ -136,7 +118,7 @@ pub(super) fn draw(
     // the decoder reported, so multiplying it back by the metadata's duration scales the whole
     // lyric timeline by a constant — lines that run at a steady but wrong rate.
     let cur_ms = player.position_secs * 1000.0;
-    let cur = find_current_line(lyrics, cur_ms);
+    let cur = state.current_line(lyrics, cur_ms);
 
     let view = View {
         lyrics,
@@ -149,13 +131,13 @@ pub(super) fn draw(
         cur_ms,
         colors,
         gradient,
+        state,
         ktv_color: options.ktv_color,
         total_ms: player
             .current_song
             .as_ref()
             .map(|song| song.duration as f64)
             .filter(|ms| *ms > 0.0),
-        tick: bs.tick,
     };
 
     match style {
@@ -308,9 +290,9 @@ impl<'a> View<'a> {
         if text.is_empty() { "·" } else { text }
     }
 
-    /// How long the line at `i` lasts, in milliseconds: see [`line_duration_ms`].
-    fn line_duration(&self, i: usize) -> f64 {
-        line_duration_ms(self.lyrics, i, self.total_ms)
+    /// How much of the line at `i` has been sung, in characters — where the fill has got to.
+    fn sung_chars(&self, i: usize) -> usize {
+        self.state.fill(self.lyrics, i, self.cur_ms, self.total_ms)
     }
 
     /// The translation of line `i` drawn as its own line, marked so it reads as the translation
@@ -474,25 +456,12 @@ fn draw_plain(f: &mut Frame, view: &View<'_>, inner: Rect) {
 /// This is what replaced the old "the next line's start, or zero for the last line":
 /// `unwrap_or_default()` on the last line made the fill jump straight to complete, and the window
 /// passed `lyrics[i + 1]` straight through, which panicked at the end of every song.
-fn line_duration_ms(lyrics: &[LyricLine], i: usize, total_ms: Option<f64>) -> f64 {
-    const LAST_LINE_FALLBACK_MS: f64 = 4_000.0;
-
-    let start = lyrics[i].time.as_millis() as f64;
-    if lyrics.get(i + 1).is_some() {
-        return (lyrics[i + 1].time.as_millis() as f64 - start).max(1.0);
-    }
-    match total_ms {
-        Some(total) if total > start => (total - start).max(1.0),
-        _ => LAST_LINE_FALLBACK_MS,
-    }
-}
-
 /// The karaoke-screen fill: everything up to the voice is one flat colour — blue, unless the
 /// config says otherwise — and the rest of the line stays in the theme's text colour, so the
 /// words are simply covered as they are sung instead of being tinted by the gradient.
 fn ktv_line<'a>(view: &View<'a>, i: usize) -> Line<'a> {
     let text = view.text(i);
-    let split_at = sung_chars(view, i);
+    let split_at = view.sung_chars(i);
     let color = view.ktv_color;
 
     let mut line = Line::default();
@@ -517,14 +486,6 @@ fn ktv_line<'a>(view: &View<'a>, i: usize) -> Line<'a> {
     line.alignment(Alignment::Center)
 }
 
-/// How many characters of the line at `i` the voice is past — where the fill has got to.
-fn sung_chars(view: &View<'_>, i: usize) -> usize {
-    let line_ms = view.lyrics[i].time.as_millis() as f64;
-    let progress = ((view.cur_ms - line_ms) / view.line_duration(i)).clamp(0.0, 1.0);
-
-    (view.text(i).chars().count() as f64 * progress).floor() as usize
-}
-
 /// The karaoke fill: what has been sung is painted with the gradient, the rest gets the same
 /// gradient reversed, and the boundary character marks where the voice is.
 fn karaoke_line<'a>(view: &View<'a>, i: usize) -> Line<'a> {
@@ -532,7 +493,7 @@ fn karaoke_line<'a>(view: &View<'a>, i: usize) -> Line<'a> {
     let gradient = view.gradient;
 
     let total = text.chars().count();
-    let split_at = sung_chars(view, i);
+    let split_at = view.sung_chars(i);
 
     let mut line = Line::default();
     for (j, (byte_start, ch)) in text.char_indices().enumerate() {
@@ -565,7 +526,7 @@ fn karaoke_line<'a>(view: &View<'a>, i: usize) -> Line<'a> {
 /// the line plus a phase that advances with the frames, so the colours travel through the
 /// words instead of standing still.
 fn flow_line<'a>(view: &View<'a>, text: &'a str, keep: f32, marker: bool) -> Line<'a> {
-    let phase = flow_phase(view.tick);
+    let phase = view.state.flow_phase();
     let total = text.chars().count().max(1);
     let mut line = Line::default();
 
@@ -589,16 +550,6 @@ fn flow_line<'a>(view: &View<'a>, text: &'a str, keep: f32, marker: bool) -> Lin
     line.alignment(Alignment::Center)
 }
 
-/// How far the gradient has travelled, from the frame counter.
-///
-/// `tick` advances once per 80ms of wall time (`ui::draw`), not once per frame, so this is a
-/// speed rather than a per-frame step and the flow looks the same on a busy and an idle page:
-/// 12.5 ticks a second at 0.01 leaves one pass through the palette taking eight seconds.
-fn flow_phase(tick: u64) -> f32 {
-    const PER_TICK: f32 = 0.01;
-    (tick as f32 * PER_TICK).rem_euclid(1.0)
-}
-
 /// Keep `keep` of `color` and mix the rest with `background`, for the lines that should sit
 /// behind the one being sung.
 fn fade(color: [u8; 3], background: Color, keep: f32) -> Color {
@@ -615,6 +566,8 @@ fn fade(color: [u8; 3], background: Color, keep: f32) -> Color {
 
 #[cfg(test)]
 mod tests {
+    use std::time::{Duration, Instant};
+
     use ratatui::{Terminal, backend::TestBackend, buffer::Buffer};
 
     use super::*;
@@ -720,10 +673,13 @@ mod tests {
     }
 
     /// The same, with a translation attached and the two switches the page obeys.
+    /// `flow_ticks` is how far the page's flow clock has run: 0 is a fresh phase and each tick is
+    /// a tenth of a pass — advanced through the state's own clock rather than set behind its back,
+    /// so the phase a test draws with is one the app could really have.
     fn render_full(
         style: LyricStyle,
         position_secs: f64,
-        tick: u64,
+        flow_ticks: u64,
         ktv_color: Color,
         show_translation: bool,
         translated: Option<Vec<LyricLine>>,
@@ -735,7 +691,7 @@ mod tests {
             colors: &theme,
             base: theme.bg,
             border: &crate::config::BorderConfig::default(),
-            tick,
+            tick: flow_ticks,
         };
         let player = PlaybackState {
             current_song: Some(std::sync::Arc::new(ncm_api::SongInfo {
@@ -757,6 +713,13 @@ mod tests {
             ..PlaybackState::default()
         };
 
+        let mut state = LyricsState::default();
+        let start = Instant::now();
+        state.flow(true, 5_000.0, start);
+        if flow_ticks > 0 {
+            state.flow(true, 5_000.0, start + Duration::from_millis(500 * flow_ticks));
+        }
+
         let mut terminal = Terminal::new(TestBackend::new(60, 12)).expect("backend");
         terminal
             .draw(|f| {
@@ -771,6 +734,7 @@ mod tests {
                         show_translation,
                         title: "LYRICS",
                     },
+                    &mut state,
                     &PanesConfig::default(),
                     &mut Dividers::default(),
                     f.area(),
@@ -869,12 +833,12 @@ mod tests {
         );
     }
 
-    /// The flow style animates: the same line is coloured differently on a later frame, and the
-    /// neighbouring lines carry the gradient too.
+    /// The flow style animates: the same line is coloured differently once the phase has moved
+    /// on, and the neighbouring lines carry the gradient too.
     #[test]
-    fn the_flow_style_moves_with_the_frames() {
+    fn the_flow_style_moves_with_the_phase() {
         let first = render(LyricStyle::Flow, 22.0, 0);
-        let later = render(LyricStyle::Flow, 22.0, 40);
+        let later = render(LyricStyle::Flow, 22.0, 4);
         assert_ne!(
             colored_cells(&first),
             colored_cells(&later),
@@ -885,23 +849,6 @@ mod tests {
         assert!(
             rows.iter().any(|r| r.contains("line3")) && rows.iter().any(|r| r.contains("line5")),
             "the flow keeps the window: {rows:?}"
-        );
-    }
-}
-
-#[cfg(test)]
-mod flow_speed {
-    use super::*;
-
-    /// One pass should take about eight seconds, and `tick` counts 80ms steps, so a second is
-    /// 12.5 ticks: assert the pace instead of trusting the constant's comment.
-    #[test]
-    fn one_pass_takes_about_eight_seconds() {
-        let ticks_per_second = 1000.0 / 80.0;
-        let seconds_per_pass = 1.0 / (flow_phase(1) as f64 * ticks_per_second);
-        assert!(
-            (7.0..9.0).contains(&seconds_per_pass),
-            "one pass takes {seconds_per_pass:.1}s, which is not the pace this is meant to have"
         );
     }
 }
@@ -994,6 +941,7 @@ mod panel_tests {
                         show_translation: true,
                         title: TITLE,
                     },
+                    &mut LyricsState::default(),
                     &PanesConfig::default(),
                     dividers,
                     f.area(),

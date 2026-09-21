@@ -243,6 +243,7 @@ impl App {
             offline: false,
             tick: 0,
             last_tick: Instant::now(),
+            lyrics: crate::state::lyrics::LyricsState::default(),
             pane_dividers: crate::layout::Dividers::default(),
             pane_drag: None,
             last_pane_click: None,
