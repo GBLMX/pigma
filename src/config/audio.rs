@@ -18,6 +18,11 @@ pub struct AudioConfig {
     pub eq: Vec<EqBand>,
     /// Loudness normalization. `None` leaves the level alone.
     pub loudness: Option<LoudnessConfig>,
+    /// Windows only: play through the output device in exclusive mode, so nothing between this
+    /// process and the DAC touches the samples. The device is then owned for as long as the
+    /// track plays, and it only accepts the formats it agrees to — which is why the chain
+    /// converts to whatever it reports. Ignored elsewhere, with a log line.
+    pub exclusive: bool,
 }
 
 /// One EQ band: a peaking filter at `freq` Hz, cut or boosted by `gain_db`, with width `q`.
@@ -62,6 +67,7 @@ impl Default for AudioConfig {
             resample: true,
             eq: Vec::new(),
             loudness: None,
+            exclusive: false,
         }
     }
 }

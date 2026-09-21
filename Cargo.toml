@@ -83,6 +83,7 @@ rustls = { workspace = true }
 libc = "0.2.189"
 
 [target.'cfg(windows)'.dependencies]
+wasapi = "0.24.0"
 # The console's background colour (`GetConsoleScreenBufferInfoEx`, src/utils/terminal.rs):
 # Windows has no `/dev/tty`, and ConPTY does not answer the OSC 11 query the Unix side uses.
 windows-sys = { version = "0.61.2", features = ["Win32_System_Console"] }

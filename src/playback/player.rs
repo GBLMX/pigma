@@ -94,6 +94,106 @@ pub enum ControlCmd {
 /// Run the audio player as a persistent blocking task. The task is spawned once
 /// and stays alive across songs — new sources are fed via ControlCmd::Switch.
 ///
+/// What the loop drives.
+///
+/// Shared mode goes through rodio's player, which mixes into the system's stream; exclusive mode
+/// owns the device itself. The loop only ever asks them the same few questions — where the track
+/// is, whether it is paused, whether it has ended — so they meet here.
+enum Output {
+    Shared(rodio::Player),
+    Exclusive(super::exclusive::ExclusivePlayer),
+}
+
+impl Output {
+    fn position(&self) -> Duration {
+        match self {
+            Self::Shared(player) => player.get_pos(),
+            Self::Exclusive(player) => player.position(),
+        }
+    }
+
+    fn is_paused(&self) -> bool {
+        match self {
+            Self::Shared(player) => player.is_paused(),
+            Self::Exclusive(player) => player.is_paused(),
+        }
+    }
+
+    /// Whether the source has run out. rodio reports an empty queue; the exclusive player
+    /// reports that it has flushed the tail and stopped feeding the device.
+    fn is_finished(&self) -> bool {
+        match self {
+            Self::Shared(player) => player.empty() && !player.is_paused(),
+            Self::Exclusive(player) => player.is_finished(),
+        }
+    }
+
+    fn stop(&self) {
+        match self {
+            Self::Shared(player) => player.stop(),
+            Self::Exclusive(player) => player.stop(),
+        }
+    }
+
+    fn pause(&self) {
+        match self {
+            Self::Shared(player) => player.pause(),
+            Self::Exclusive(player) => player.pause(),
+        }
+    }
+
+    fn resume(&self) {
+        match self {
+            Self::Shared(player) => player.play(),
+            Self::Exclusive(player) => player.resume(),
+        }
+    }
+
+    fn set_volume(&self, volume: f32) {
+        match self {
+            Self::Shared(player) => player.set_volume(volume),
+            Self::Exclusive(player) => player.set_volume(volume),
+        }
+    }
+}
+
+/// Hand the source to an exclusive device, or hand it back with the reason.
+///
+/// The source comes back on every failure — the device refused the format, it is taken by
+/// another process, the thread could not start — so the caller can fall back to the shared
+/// path with the samples it already has, rather than failing the track.
+fn start_exclusive(
+    dsp: &crate::config::AudioConfig,
+    source: Box<dyn Source<Item = f32> + Send>,
+    volume: f32,
+) -> Result<super::exclusive::ExclusivePlayer, (Box<dyn Source<Item = f32> + Send>, String)> {
+    let decoded_rate = source.sample_rate().get();
+    let format = match super::exclusive::probe(decoded_rate) {
+        Ok(format) => format,
+        Err(error) => return Err((source, error)),
+    };
+    // The chain is built for what the device agreed to: in exclusive mode there is no mixer
+    // behind us to convert anything.
+    let built = chain::build(source, format.rate, dsp);
+    match super::exclusive::ExclusivePlayer::start(built, format, volume) {
+        Ok(player) => Ok(player),
+        Err(error) => Err((
+            Box::new(silence()) as Box<dyn Source<Item = f32> + Send>,
+            error,
+        )),
+    }
+}
+
+/// A source that ends immediately. Only used where a failed exclusive start has already taken
+/// the samples with it and the caller has been told why.
+fn silence() -> rodio::buffer::SamplesBuffer {
+    rodio::buffer::SamplesBuffer::new(
+        std::num::NonZero::new(1).expect("one channel"),
+        std::num::NonZero::new(48_000).expect("48 kHz"),
+        Vec::new(),
+    )
+}
+
 /// The rate the open device runs at, which is what the file's rate has to be converted to.
 fn device_rate(sink: &rodio::MixerDeviceSink) -> Option<u32> {
     Some(sink.config().sample_rate().get())
@@ -127,7 +227,7 @@ pub(super) fn run(
         // Watchdog state: position frozen while playing => dead stream.
         let mut last_pos = Duration::default();
         let mut stall_ticks: u32 = 0;
-        let mut player: Option<rodio::Player> = None;
+        let mut player: Option<Output> = None;
         // Default-device following state (see FOLLOW_POLL_TICKS).
         let mut sink_dev_id: Option<String> = None;
         let mut follow_poll: u32 = 0;
@@ -185,18 +285,40 @@ pub(super) fn run(
                         // at the samples: the spectrum shows what is heard, and so does the
                         // volume the device gets. A file already at the device's rate is not
                         // touched at all, which is the bit-perfect path.
-                        let source = match sink.as_ref().and_then(device_rate) {
-                            Some(rate) => chain::build(source, rate, &dsp),
-                            None => source,
-                        };
-                        let p = rodio::Player::connect_new(
-                            &sink.as_ref().expect("sink ensured").mixer().clone(),
-                        );
-                        p.set_volume(volume);
-                        p.append(SpectrumTap::new(source, spectrum::buffer()));
-                        last_pos = Duration::default();
-                        stall_ticks = 0;
-                        Some(p)
+                        if dsp.exclusive {
+                            match start_exclusive(&dsp, source, volume) {
+                                Ok(player) => {
+                                    last_pos = Duration::default();
+                                    stall_ticks = 0;
+                                    Some(Output::Exclusive(player))
+                                }
+                                Err((_source, error)) => {
+                                    // The shared path is still there, and a track that plays
+                                    // through the mixer beats a track that does not play.
+                                    log::warn!("独占输出失败，改用共享模式: {error}");
+                                    let _ = event_tx.send(
+                                        AppEvent::Toast(format!(
+                                            "独占输出失败，改用共享模式: {error}"
+                                        ))
+                                        .into(),
+                                    );
+                                    None
+                                }
+                            }
+                        } else {
+                            let source = match sink.as_ref().and_then(device_rate) {
+                                Some(rate) => chain::build(source, rate, &dsp),
+                                None => source,
+                            };
+                            let p = rodio::Player::connect_new(
+                                &sink.as_ref().expect("sink ensured").mixer().clone(),
+                            );
+                            p.set_volume(volume);
+                            p.append(SpectrumTap::new(source, spectrum::buffer()));
+                            last_pos = Duration::default();
+                            stall_ticks = 0;
+                            Some(Output::Shared(p))
+                        }
                     }
                     Err(e) => {
                         let _ = event_tx.send(PlaybackEvent::Error(format!("decode: {e}")).into());
@@ -299,7 +421,7 @@ pub(super) fn run(
                     }
                     ControlCmd::Resume => {
                         if let Some(ref p) = player {
-                            p.play();
+                            p.resume();
                         }
                     }
                     ControlCmd::SetVolume(v) => {
@@ -316,7 +438,7 @@ pub(super) fn run(
             // Fatal stream error (device removed etc.) — rebuild and resume at
             // the last known position.
             if health.device_lost.load(Ordering::Relaxed) {
-                let resume_at = player.as_ref().map(|p| p.get_pos() + seek_offset);
+                let resume_at = player.as_ref().map(|p| p.position() + seek_offset);
                 let was_paused = player.as_ref().is_some_and(|p| p.is_paused());
                 rebuild_sink!(resume_at, was_paused);
                 continue;
@@ -344,7 +466,7 @@ pub(super) fn run(
                             sink_dev_id.as_deref().unwrap_or("?")
                         );
                         follow_diff = 0;
-                        let resume_at = player.as_ref().map(|p| p.get_pos() + seek_offset);
+                        let resume_at = player.as_ref().map(|p| p.position() + seek_offset);
                         let was_paused = player.as_ref().is_some_and(|p| p.is_paused());
                         rebuild_sink!(resume_at, was_paused);
                         continue;
@@ -353,7 +475,7 @@ pub(super) fn run(
             }
 
             if let Some(ref p) = player {
-                if p.empty() && !p.is_paused() {
+                if p.is_finished() {
                     #[cfg(all(target_os = "linux", target_env = "gnu"))]
                     log::info!(
                         "[HEAP] song finished (playback complete): {} kB",
@@ -370,7 +492,7 @@ pub(super) fn run(
                 }
 
                 if !p.is_paused() {
-                    let pos = p.get_pos() + seek_offset;
+                    let pos = p.position() + seek_offset;
                     let _ = event_tx.send(
                         PlaybackEvent::Progress {
                             position: pos,
@@ -384,8 +506,8 @@ pub(super) fn run(
                     // the output device without firing the error callback).
                     // Skip when underruns were seen recently — that freeze is
                     // just the network lagging behind.
-                    if !p.empty() {
-                        let raw_pos = p.get_pos();
+                    if !p.is_finished() {
+                        let raw_pos = p.position();
                         if raw_pos == last_pos {
                             stall_ticks += 1;
                         } else {
