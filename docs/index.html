@@ -316,18 +316,18 @@
   <section id="install" aria-labelledby="install-title">
     <div class="wrap">
       <h2 id="install-title">安装</h2>
-      <p class="section-note">下面两条命令从本仓库的 release 下载，并校验随发布附带的 <code>SHA256SUMS</code>。</p>
+      <p class="section-note">下面两条命令从本仓库的 release 下载，并校验随发布附带的 <code>SHA256SUMS</code>。安装按版本分目录、<code>current</code> 指向当前版本，升级不覆盖正在跑的那份，出问题一条命令回退。</p>
 
       <div class="install-grid">
         <article>
           <h3>Linux / macOS</h3>
           <pre><code>curl -fsSL https://raw.githubusercontent.com/GBLMX/pigma/main/install.sh | sh</code></pre>
-          <p>脚本按 <code>uname</code> 判定平台，默认装到 <code>~/.local/bin</code>；先看一眼它要做什么可以加 <code>--dry-run</code>。</p>
+          <p>脚本按 <code>uname</code> 判定平台，默认装到 <code>~/.local/bin</code>；先看一眼它要做什么可以加 <code>--dry-run</code>。回退：<code>sh install.sh --rollback</code>。</p>
         </article>
         <article>
           <h3>Windows / PowerShell</h3>
           <pre><code>irm https://raw.githubusercontent.com/GBLMX/pigma/main/install.ps1 | iex</code></pre>
-          <p>也可以从 releases 直接下载 <code>boxpigma-x86_64-pc-windows-msvc.zip</code> 解包使用。</p>
+          <p>也可以从 releases 直接下载 <code>boxpigma-x86_64-pc-windows-msvc.zip</code> 解包使用。回退：<code>.\install.ps1 -Rollback</code>。</p>
         </article>
       </div>
     </div>
