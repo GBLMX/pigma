@@ -2,9 +2,9 @@ name: Pages
 
 # 把 docs/ 作为静态站点发布到 GitHub Pages。
 #
-# 【需要人工做一次的设置】仓库 Settings → Pages → Build and deployment → Source 必须选成
-# "GitHub Actions"。GitHub 没有为这一步提供 API，workflow 里也点不动它 —— 只能人工选一次，
-# 否则这个 workflow 跑完也是白跑（站点照旧或 404）；deploy 那一步会直接报错并提示这一点。
+# Pages 的开关由本 workflow 自己打开（`enablement: true`，权限里已给 `pages: write`）。
+# 如果组织策略禁止 workflow 打开它，就退回人工设置一次：Settings → Pages →
+# Build and deployment → Source 选 "GitHub Actions"；那之前 Setup Pages 这一步会失败。
 #
 # 站点内容就是 docs/ 目录本身（入口 docs/index.html），这里不做任何构建：
 # 页面是单文件 HTML + 内联 CSS，图片走仓库的 raw 地址，所以产物等于仓库里的那几份文件。
@@ -42,6 +42,11 @@ jobs:
 
       - name: Setup Pages
         uses: actions/configure-pages@v6
+        with:
+          # The workflow has `pages: write`, so it can switch the repository's Pages on
+          # itself (`build_type: workflow`); without this, a repository that has never
+          # enabled Pages fails here and every later step is skipped.
+          enablement: true
 
       - name: Upload docs/ as the site artifact
         uses: actions/upload-pages-artifact@v5
