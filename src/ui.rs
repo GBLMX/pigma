@@ -336,6 +336,8 @@ pub(crate) fn draw_lyrics(f: &mut Frame, app: &mut App, areas: &layout::LayoutAr
             show_translation: app.config.lyric_translation,
             title: &app.config.titles.lyrics,
         },
+        &app.config.panes,
+        &mut app.state.pane_dividers,
         areas.content,
     );
 }

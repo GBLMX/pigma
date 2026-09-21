@@ -11,7 +11,8 @@ use ratatui_image::{Resize, StatefulImage};
 
 use super::{BlockStyle, block::CornerBlock};
 use crate::{
-    config::{LyricStyle, Theme, symbols},
+    config::{LyricStyle, Pane, PanesConfig, Theme, symbols},
+    layout::{Axis, Divider, Dividers, clamp},
     playback::{LyricLine, PlaybackState},
     state::mv::{self, MvPanel},
     utils::{GradientPreset, format::clip_long_text, format_duration},
@@ -83,6 +84,8 @@ pub(super) fn draw(
     player: &PlaybackState,
     bs: &BlockStyle<'_>,
     options: Options<'_>,
+    panes: &PanesConfig,
+    dividers: &mut Dividers,
     area: Rect,
 ) {
     let gradient = options.gradient;
@@ -101,11 +104,20 @@ pub(super) fn draw(
     // belongs to the song rather than to its lyrics, so it is drawn whether or not they have
     // arrived — and it is what is left of the page while they are still on their way.
     let mut slot = mv::panel();
-    let (inner, panel_area) = panel_split(inner, slot.is_some());
-    if let Some(panel_area) = panel_area
-        && let Some(panel) = slot.as_mut()
-    {
-        draw_panel(f, panel_area, panel, colors);
+    let (inner, panel_area) = panel_split(inner, panes, slot.is_some());
+    if let Some(panel_area) = panel_area {
+        if let Some(panel) = slot.as_mut() {
+            draw_panel(f, panel_area, panel, colors);
+        }
+        // The column's left edge is draggable — the same edge the sidebar has on the other side,
+        // and the same `[panes]` machinery. Dragging it left makes the column wider, so the sign
+        // is negative; double-clicking it collapses the pane, like the sidebar's.
+        dividers.push(Divider::new(
+            Pane::Mv,
+            Axis::Columns,
+            -1,
+            Rect::new(panel_area.x.saturating_sub(1), panel_area.y, 1, panel_area.height),
+        ));
     }
 
     let Some(lyrics) = &player.lyrics else {
@@ -188,21 +200,29 @@ const PANEL_GAP: u16 = 2;
 /// What the lyrics keep of the page: narrower than this and the poster would be the page.
 const MIN_LYRICS_WIDTH: u16 = 30;
 
-/// Divide `inner` between the lyrics and the poster's column, which is the rightmost one.
+/// Divide `inner` between the lyrics and the MV's column, which is the rightmost one.
 ///
-/// The poster is as tall as the page can spare, up to [`MAX_POSTER_ROWS`], and the column is
-/// twice that: a page with rows to give gets the big poster, and a shorter one gets a smaller
-/// poster rather than none.
+/// The column's width is `[panes] mv` — the size the user dragged it to, or left at 0 for the
+/// width the page can spare: as tall as the page has rows for, up to [`MAX_POSTER_ROWS`], and the
+/// column twice that, since a poster is a square picture. So a page with rows to give gets the
+/// big poster, a shorter one a smaller poster, and a page that was never dragged keeps exactly
+/// what it drew before the panel was a pane.
 ///
 /// Returns the lyrics area and `None` when there is no panel to draw, or no room for one: the
 /// lyrics then keep the whole page, which is what makes a page without a poster — and a page too
 /// small for one — exactly the page this drew before the panel existed.
-fn panel_split(inner: Rect, has_panel: bool) -> (Rect, Option<Rect>) {
-    if !has_panel || inner.height < MIN_PANEL_HEIGHT {
+fn panel_split(inner: Rect, panes: &PanesConfig, has_panel: bool) -> (Rect, Option<Rect>) {
+    if !has_panel || !panes.visible(Pane::Mv) || inner.height < MIN_PANEL_HEIGHT {
         return (inner, None);
     }
 
-    let width = poster_rows(inner.height) * 2;
+    // A dragged width is clamped the way the other panes are (their config stays usable on a
+    // narrower terminal than the one it was written on); the automatic one is only used when the
+    // page really has the room, so a page too small for a poster is still a page of lyrics.
+    let width = match panes.size(Pane::Mv) {
+        0 => poster_rows(inner.height) * 2,
+        dragged => clamp(Pane::Mv, Axis::Columns, dragged, inner.width),
+    };
     if inner.width < width + PANEL_GAP + MIN_LYRICS_WIDTH {
         return (inner, None);
     }
@@ -751,6 +771,8 @@ mod tests {
                         show_translation,
                         title: "LYRICS",
                     },
+                    &PanesConfig::default(),
+                    &mut Dividers::default(),
                     f.area(),
                 );
             })
@@ -932,6 +954,20 @@ mod panel_tests {
         width: u16,
         height: u16,
     ) -> (Buffer, Rect) {
+        let (buffer, inner, _) = render_with(player, style, width, height, &mut Dividers::default());
+
+        (buffer, inner)
+    }
+
+    /// The same, handing back the dividers the page registered — a pane the mouse cannot land on
+    /// is a pane that cannot be dragged.
+    fn render_with(
+        player: &PlaybackState,
+        style: LyricStyle,
+        width: u16,
+        height: u16,
+        dividers: &mut Dividers,
+    ) -> (Buffer, Rect, Dividers) {
         let theme = Theme::default();
         let bs = BlockStyle {
             colors: &theme,
@@ -958,11 +994,17 @@ mod panel_tests {
                         show_translation: true,
                         title: TITLE,
                     },
+                    &PanesConfig::default(),
+                    dividers,
                     f.area(),
                 );
             })
             .expect("draw");
-        (terminal.backend().buffer().clone(), inner)
+        (
+            terminal.backend().buffer().clone(),
+            inner,
+            std::mem::take(dividers),
+        )
     }
 
     /// Every cell of the frame as it will be painted — the symbol and both colours — so two
@@ -1053,7 +1095,7 @@ mod panel_tests {
     #[test]
     fn the_panel_is_only_handed_a_column_when_the_page_can_hold_it() {
         let tall = Rect::new(0, 0, 100, 40);
-        let (lyrics, panel) = panel_split(tall, true);
+        let (lyrics, panel) = panel_split(tall, &PanesConfig::default(), true);
         let panel = panel.expect("a 100×40 page holds the panel");
         assert_eq!(
             panel.width,
@@ -1068,7 +1110,7 @@ mod panel_tests {
         );
 
         let small = Rect::new(0, 0, 100, MIN_PANEL_HEIGHT);
-        let (lyrics, panel) = panel_split(small, true);
+        let (lyrics, panel) = panel_split(small, &PanesConfig::default(), true);
         let panel = panel.expect("the shortest page that holds the panel does hold it");
         assert_eq!(
             panel.width,
@@ -1078,24 +1120,103 @@ mod panel_tests {
         assert_eq!(lyrics.width, 100 - panel.width - PANEL_GAP);
 
         assert_eq!(
-            panel_split(tall, false),
+            panel_split(tall, &PanesConfig::default(), false),
             (tall, None),
             "a song with no poster is handed no column"
         );
         let short = Rect::new(0, 0, 100, MIN_PANEL_HEIGHT - 1);
-        assert_eq!(panel_split(short, true), (short, None));
+        assert_eq!(panel_split(short, &PanesConfig::default(), true), (short, None));
         let narrow = Rect::new(
             0,
             0,
             MAX_POSTER_ROWS * 2 + PANEL_GAP + MIN_LYRICS_WIDTH - 1,
             40,
         );
-        assert_eq!(panel_split(narrow, true), (narrow, None));
+        assert_eq!(panel_split(narrow, &PanesConfig::default(), true), (narrow, None));
         assert_eq!(
-            panel_split(Rect::new(0, 0, 60, 12), true),
+            panel_split(Rect::new(0, 0, 60, 12), &PanesConfig::default(), true),
             (Rect::new(0, 0, 60, 12), None),
             "the page the other tests draw on"
         );
+    }
+
+    /// The MV column is a pane like the sidebar: `[panes] mv` is its width, collapsing it hands
+    /// the whole page to the lyrics, and a width the page cannot hold is clamped rather than
+    /// taken out of the lyrics — a config written on a wide terminal has to stay usable on a
+    /// narrow one.
+    #[test]
+    fn the_mv_column_is_a_pane() {
+        let page = Rect::new(0, 0, 100, 30);
+        let auto = panel_split(page, &PanesConfig::default(), true)
+            .1
+            .expect("the default is the width the page can spare");
+        assert_eq!(auto.width, poster_rows(page.height) * 2);
+
+        let dragged = PanesConfig {
+            mv: 30,
+            ..PanesConfig::default()
+        };
+        let panel = panel_split(page, &dragged, true)
+            .1
+            .expect("a dragged width is used");
+        assert_eq!(panel.width, 30);
+        assert_eq!(panel.right(), page.right(), "the column stays on the right");
+
+        let collapsed = PanesConfig {
+            collapsed: vec![Pane::Mv],
+            ..PanesConfig::default()
+        };
+        assert_eq!(
+            panel_split(page, &collapsed, true),
+            (page, None),
+            "a collapsed pane is not drawn, whatever the page could hold"
+        );
+
+        // Wider than the page: clamped, so the lyrics keep their columns.
+        let too_wide = PanesConfig {
+            mv: 200,
+            ..PanesConfig::default()
+        };
+        let (lyrics, panel) = panel_split(page, &too_wide, true);
+        assert!(panel.is_some(), "a clamped column is still a column");
+        assert!(
+            lyrics.width >= MIN_LYRICS_WIDTH,
+            "the lyrics keep their columns: {lyrics:?}"
+        );
+    }
+
+    /// The column's edge is the divider the mouse lands on, and dragging it left has to make the
+    /// column wider — the pane is on the right, so its edge works the other way round from the
+    /// sidebar's.
+    #[tokio::test]
+    async fn the_mv_edge_is_draggable_and_grows_leftwards() {
+        let _turn = fixtures::turn().await;
+        mv::clear();
+        assert!(mv::install(
+            mv::generation(),
+            fixtures::panel(&Picker::halfblocks())
+        ));
+
+        let mut dividers = Dividers::default();
+        let (_, inner, dividers) =
+            render_with(&player(), LyricStyle::Window, 100, 30, &mut dividers);
+        let (_, panel) = panel_split(inner, &PanesConfig::default(), true);
+        let panel = panel.expect("a 100×30 page holds the panel");
+
+        let divider = dividers
+            .iter()
+            .find(|divider| divider.pane == Pane::Mv)
+            .expect("the page registers the MV's edge");
+        assert_eq!(divider.axis, Axis::Columns);
+        assert_eq!(divider.rect.x, panel.x - 1, "the edge is the column beside it");
+        assert_eq!(divider.rect.height, panel.height);
+        assert_eq!(
+            divider.size_for(30, -4),
+            34,
+            "dragging the edge left makes the column wider"
+        );
+
+        mv::clear();
     }
 
     /// With a poster in the slot, the panel's column paints the poster and writes the MV's own
@@ -1111,7 +1232,7 @@ mod panel_tests {
         ));
 
         let (buffer, inner) = render(&player(), LyricStyle::Window, 100, 30);
-        let (lyrics_area, panel) = panel_split(inner, true);
+        let (lyrics_area, panel) = panel_split(inner, &PanesConfig::default(), true);
         let panel = panel.expect("a 100×30 page holds the panel");
 
         let poster_rows = panel.width / 2;
@@ -1166,7 +1287,7 @@ mod panel_tests {
 
         // The shortest page that still holds the panel: poster, facts and one row of blurb.
         let (buffer, inner) = render(&player(), LyricStyle::Window, 100, MIN_PANEL_HEIGHT + 2);
-        let (_, panel) = panel_split(inner, true);
+        let (_, panel) = panel_split(inner, &PanesConfig::default(), true);
         let panel = panel.expect("this is the page the panel is measured against");
 
         let drawn = blurb_cells(&buffer).len();
@@ -1203,7 +1324,7 @@ mod panel_tests {
 
         for style in LyricStyle::ALL {
             let (buffer, inner) = render(&player(), style, 100, 30);
-            let (lyrics_area, panel) = panel_split(inner, true);
+            let (lyrics_area, panel) = panel_split(inner, &PanesConfig::default(), true);
             let panel = panel.expect("a 100×30 page holds the panel");
             assert!(
                 spells(&rows_in(&buffer, panel), fixtures::NAME),
@@ -1237,7 +1358,7 @@ mod panel_tests {
         let mut pending = player();
         pending.lyrics = None;
         let (buffer, inner) = render(&pending, LyricStyle::Window, 100, 30);
-        let (_, panel) = panel_split(inner, true);
+        let (_, panel) = panel_split(inner, &PanesConfig::default(), true);
         let panel = panel.expect("the page holds the panel");
         assert!(
             spells(&rows_in(&buffer, panel), fixtures::NAME),
@@ -1285,7 +1406,7 @@ mod panel_tests {
         // any other colour in the frame would be a pixel of a poster that should not be there.
         let (buffer, inner) = render(&player(), LyricStyle::Plain, 100, 30);
         assert_eq!(
-            panel_split(inner, false),
+            panel_split(inner, &PanesConfig::default(), false),
             (inner, None),
             "the lyrics keep the whole page"
         );
