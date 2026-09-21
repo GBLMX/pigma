@@ -422,7 +422,13 @@ pub(crate) fn draw_artist(f: &mut Frame, app: &mut App, areas: &layout::LayoutAr
         app.state.tick,
     );
     let lay = layout::artist(areas.content);
-    artist::draw(f, &mut app.state.navigation.artist, &bs, &lay);
+    artist::draw(
+        f,
+        &mut app.state.navigation.artist,
+        &bs,
+        &lay,
+        &mut app.state.artist_hits,
+    );
 }
 
 /// Throwaway audit: render every user-facing view for every built-in theme and report

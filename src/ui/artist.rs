@@ -30,7 +30,7 @@ use super::{
 use crate::{
     config::{ColumnDef, Theme},
     layout::ArtistLayout,
-    state::{ArtistData, ArtistState, TableMode},
+    state::{ArtistData, ArtistHits, ArtistPane, ArtistState, TableMode},
     utils::format_duration,
 };
 
@@ -83,11 +83,16 @@ pub(super) fn draw(
     state: &mut ArtistState,
     bs: &BlockStyle<'_>,
     lay: &ArtistLayout,
+    hits: &mut ArtistHits,
 ) {
+    // The tables publish where they were drawn and which row each started at, so a click can
+    // name a row without a second layout pass; a pane that shows no rows publishes nothing a
+    // click could land on.
+    *hits = ArtistHits::default();
     match &state.data {
         ArtistData::Loading => draw_loading(f, state, bs, lay),
         ArtistData::Failed(error) => draw_failed(f, state, error, bs, lay),
-        ArtistData::Ready { .. } => draw_ready(f, state, bs, lay),
+        ArtistData::Ready { .. } => draw_ready(f, state, bs, lay, hits),
     }
 }
 
@@ -95,15 +100,21 @@ pub(super) fn draw(
 /// panes keep their titles over a skeleton, the same way the main table loads.
 fn draw_loading(f: &mut Frame, state: &ArtistState, bs: &BlockStyle<'_>, lay: &ArtistLayout) {
     let title = bordered_title("歌手 {name}", &state.name, 0, 0);
-    let inner = panel(f, bs, &title, lay.profile);
+    let inner = panel(f, bs, &title, lay.profile, false);
     let note = Line::from(Span::styled(
         "正在加载歌手信息…",
         Style::default().fg(bs.colors.muted),
     ));
     f.render_widget(Paragraph::new(note).wrap(Wrap { trim: true }), inner);
 
-    skeleton_pane(f, bs, &bordered_title("热门曲目", "", 0, 0), lay.songs);
-    skeleton_pane(f, bs, &bordered_title("专辑", "", 0, 0), lay.albums);
+    skeleton_pane(
+        f,
+        bs,
+        &bordered_title("热门曲目", "", 0, 0),
+        lay.songs,
+        false,
+    );
+    skeleton_pane(f, bs, &bordered_title("专辑", "", 0, 0), lay.albums, false);
 }
 
 /// The profile request itself failed: nothing loaded, so the error is the page. It says what
@@ -118,7 +129,7 @@ fn draw_failed(
 ) {
     let title = bordered_title("歌手 {name} · 加载失败", &state.name, 0, 0);
     // The whole content area, not just the band: there are no lists to keep room for.
-    let inner = panel(f, bs, &title, lay.profile.union(lay.albums));
+    let inner = panel(f, bs, &title, lay.profile.union(lay.albums), false);
     let lines = vec![
         Line::from(Span::styled(
             format!("错误: {error}"),
@@ -134,7 +145,13 @@ fn draw_failed(
 }
 
 /// The loaded page: the profile band over the hot songs and the albums.
-fn draw_ready(f: &mut Frame, state: &mut ArtistState, bs: &BlockStyle<'_>, lay: &ArtistLayout) {
+fn draw_ready(
+    f: &mut Frame,
+    state: &mut ArtistState,
+    bs: &BlockStyle<'_>,
+    lay: &ArtistLayout,
+    hits: &mut ArtistHits,
+) {
     // The band borrows the state mutably (the image protocol carries its own resize state), so
     // take the pieces the panes need before it runs.
     draw_profile(f, state, bs, lay.profile);
@@ -142,8 +159,18 @@ fn draw_ready(f: &mut Frame, state: &mut ArtistState, bs: &BlockStyle<'_>, lay: 
     let ArtistData::Ready { detail, albums } = &state.data else {
         return;
     };
-    draw_songs(f, state, bs, lay.songs);
-    draw_albums(f, detail, albums, bs, lay.albums);
+    let (pane, album_selected) = (state.pane, state.album_selected);
+    draw_songs(f, state, bs, lay.songs, hits);
+    draw_albums(
+        f,
+        detail,
+        albums,
+        pane,
+        album_selected,
+        bs,
+        lay.albums,
+        hits,
+    );
 }
 
 /// The profile band: the portrait when it is decoded, then the name, the aliases, the sizes
@@ -155,7 +182,7 @@ fn draw_profile(f: &mut Frame, state: &mut ArtistState, bs: &BlockStyle<'_>, are
         return;
     };
     let title = bordered_title("歌手 {name}", &detail.name, 0, 0);
-    let inner = panel(f, bs, &title, area);
+    let inner = panel(f, bs, &title, area, false);
     if inner.is_empty() {
         return;
     }
@@ -218,10 +245,21 @@ fn draw_profile(f: &mut Frame, state: &mut ArtistState, bs: &BlockStyle<'_>, are
 }
 
 /// The hot songs, with the cursor on one of them: Enter plays what the cursor is on.
-fn draw_songs(f: &mut Frame, state: &ArtistState, bs: &BlockStyle<'_>, area: Rect) {
+fn draw_songs(
+    f: &mut Frame,
+    state: &ArtistState,
+    bs: &BlockStyle<'_>,
+    area: Rect,
+    hits: &mut ArtistHits,
+) {
     let songs = state.hot_songs();
+    let focused = state.pane == ArtistPane::Songs;
     let title = bordered_title("热门曲目 ({count})", "", songs.len(), 0);
-    let inner = panel(f, bs, &title, area);
+    let inner = panel(f, bs, &title, area, focused);
+    *hits = ArtistHits {
+        songs: inner,
+        ..*hits
+    };
     if songs.is_empty() {
         note(f, "（没有热门曲目）", inner, bs.colors);
         return;
@@ -231,10 +269,17 @@ fn draw_songs(f: &mut Frame, state: &ArtistState, bs: &BlockStyle<'_>, area: Rec
     let visible = inner.height.saturating_sub(1).max(1) as usize;
     let offset = calc_scroll_offset(sel, visible, songs.len());
     let end = (offset + visible).min(songs.len());
+    *hits = ArtistHits {
+        songs: inner,
+        songs_offset: offset,
+        ..*hits
+    };
     let mut table_state = TableState::default();
     // Only the visible window is materialized; the window is pre-scrolled, so the selection
     // ratatui sees is relative to it. Same trick, and same reason, as the main content table.
-    table_state.select(Some(sel - offset));
+    // The highlight follows the focus: the cursor of the other pane is still there, it just is
+    // not the row the keys are talking to.
+    table_state.select(focused.then_some(sel - offset));
     *table_state.offset_mut() = 0;
 
     table::render_table(
@@ -252,48 +297,75 @@ fn draw_songs(f: &mut Frame, state: &ArtistState, bs: &BlockStyle<'_>, area: Rec
 
 /// The albums, newest first. A failed album request says so in the pane: the profile above it
 /// stays readable, so the page is not lost to it.
+#[allow(clippy::too_many_arguments)]
 fn draw_albums(
     f: &mut Frame,
     detail: &ArtistDetail,
     albums: &Result<Vec<ArtistAlbum>, String>,
+    pane: ArtistPane,
+    selected: usize,
     bs: &BlockStyle<'_>,
     area: Rect,
+    hits: &mut ArtistHits,
 ) {
     let colors = bs.colors;
     let total = detail.album_size as usize;
     let list = match albums {
         Ok(list) => list,
         Err(error) => {
-            let inner = panel(f, bs, &bordered_title("专辑 加载失败", "", 0, 0), area);
+            let inner = panel(
+                f,
+                bs,
+                &bordered_title("专辑 加载失败", "", 0, 0),
+                area,
+                false,
+            );
+            *hits = ArtistHits {
+                albums: inner,
+                ..*hits
+            };
             note(f, &format!("错误: {error}（按 r 重试）"), inner, colors);
             return;
         }
     };
 
+    let focused = pane == ArtistPane::Albums;
     let title = bordered_title("专辑 ({count}/{total})", "", list.len(), total);
-    let inner = panel(f, bs, &title, area);
+    let inner = panel(f, bs, &title, area, focused);
+    *hits = ArtistHits {
+        albums: inner,
+        ..*hits
+    };
     if list.is_empty() {
         note(f, "（没有专辑）", inner, colors);
         return;
     }
 
-    // The album list is read top-down rather than walked with a cursor, so it has no
-    // selection of its own; the pane scrolls nothing and always shows the newest albums.
+    // The album list is walked the way the songs are, so an album can be opened from here: a
+    // cursor, a window that follows it, and a highlight that only lights up while this pane is
+    // the one the keys are talking to.
+    let sel = selected.min(list.len() - 1);
     let visible = inner.height.saturating_sub(1).max(1) as usize;
-    let end = visible.min(list.len());
+    let offset = calc_scroll_offset(sel, visible, list.len());
+    let end = (offset + visible).min(list.len());
+    *hits = ArtistHits {
+        albums: inner,
+        albums_offset: offset,
+        ..*hits
+    };
     let mut table_state = TableState::default();
-    table_state.select(None);
+    table_state.select(focused.then_some(sel - offset));
 
     table::render_table(
         f,
         &ALBUM_COLUMNS,
-        album_rows(&list[..end], colors),
+        album_rows(&list[offset..end], colors),
         &mut table_state,
         TableMode::Row,
         colors,
         inner,
         list.len(),
-        0,
+        sel,
     );
 }
 
@@ -349,8 +421,17 @@ fn release_date(publish_time_ms: u64) -> String {
 }
 
 /// A pane's block, drawn; returns the area left for its body.
-fn panel(f: &mut Frame, bs: &BlockStyle<'_>, title: &str, area: Rect) -> Rect {
-    let block = CornerBlock::from_color(bs, bs.base).title(title, bs.colors);
+///
+/// `focused` decides how loudly the title reads: the pane the keys are talking to gets the
+/// theme's active-tab look, and the others keep the plain title they always had — the pane
+/// that is *not* under the cursor should look exactly like a pane that cannot be under it.
+fn panel(f: &mut Frame, bs: &BlockStyle<'_>, title: &str, area: Rect, focused: bool) -> Rect {
+    let block = CornerBlock::from_color(bs, bs.base);
+    let block = if focused {
+        block.title_styled(title, bs.colors, bs.colors.looks().tab_active)
+    } else {
+        block.title(title, bs.colors)
+    };
     let inner = block.inner(area);
     f.render_widget(block, area);
     inner
@@ -358,8 +439,8 @@ fn panel(f: &mut Frame, bs: &BlockStyle<'_>, title: &str, area: Rect) -> Rect {
 
 /// A pane that has nothing to show yet: its title over a skeleton, which reads as "loading"
 /// rather than as an empty box.
-fn skeleton_pane(f: &mut Frame, bs: &BlockStyle<'_>, title: &str, area: Rect) {
-    let inner = panel(f, bs, title, area);
+fn skeleton_pane(f: &mut Frame, bs: &BlockStyle<'_>, title: &str, area: Rect, focused: bool) {
+    let inner = panel(f, bs, title, area, focused);
     f.render_widget(
         Skeleton::new().bg(bs.base).surface(bs.colors.surface),
         inner,
@@ -404,7 +485,7 @@ mod tests {
         terminal
             .draw(|f| {
                 let lay = layout::artist(f.area());
-                draw(f, state, &bs, &lay);
+                draw(f, state, &bs, &lay, &mut ArtistHits::default());
             })
             .expect("draw");
         terminal.backend().buffer().clone()

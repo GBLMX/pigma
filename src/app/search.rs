@@ -126,6 +126,13 @@ impl App {
 
     pub(super) fn handle_content_restore(&mut self) {
         let nav = &mut self.state.navigation;
-        nav.pop_breadcrumb();
+        // An album opened from the artist page starts with an empty stack, so a failed pop is
+        // not the end of the walk: the page that opened the content is the step back.
+        if !nav.pop_breadcrumb()
+            && let Some(page) = nav.return_page.take()
+        {
+            nav.nav.subtitle = None;
+            nav.page = page;
+        }
     }
 }

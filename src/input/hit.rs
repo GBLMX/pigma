@@ -41,8 +41,10 @@ pub(super) fn table_row(
 ///
 /// Clicks at the very edge land on the first/last cell rather than off the end, which is
 /// what a user expects when aiming for the start or the end of a track.
-pub(super) fn progress_fraction(area: Rect, column: u16) -> Option<f64> {
-    if area.width == 0 || column < area.x || column >= area.x + area.width {
+pub(super) fn progress_fraction(area: Rect, column: u16, row: u16) -> Option<f64> {
+    // The row matters: the bar is one row of the player bar, and a click on any row above it
+    // whose column happens to line up with the bar is a click on that row, not a seek.
+    if !contains(area, column, row) {
         return None;
     }
 
@@ -126,18 +128,20 @@ mod tests {
     #[test]
     fn empty_areas_never_match() {
         assert_eq!(table_row(area(0, 0, 0, 0), 1, 0, 10, 0, 0), None);
-        assert_eq!(progress_fraction(area(0, 0, 0, 0), 0), None);
+        assert_eq!(progress_fraction(area(0, 0, 0, 0), 0, 0), None);
     }
 
     #[test]
     fn progress_fraction_spans_the_bar() {
         let bar = area(10, 20, 40, 1);
-        assert_eq!(progress_fraction(bar, 9), None, "left of the bar");
-        assert_eq!(progress_fraction(bar, 50), None, "right of the bar");
-        assert!((progress_fraction(bar, 10).unwrap() - 0.0125).abs() < 1e-9);
-        assert!((progress_fraction(bar, 49).unwrap() - 0.9875).abs() < 1e-9);
+        assert_eq!(progress_fraction(bar, 9, 20), None, "left of the bar");
+        assert_eq!(progress_fraction(bar, 50, 20), None, "right of the bar");
+        assert_eq!(progress_fraction(bar, 20, 19), None, "above the bar");
+        assert_eq!(progress_fraction(bar, 20, 21), None, "below the bar");
+        assert!((progress_fraction(bar, 10, 20).unwrap() - 0.0125).abs() < 1e-9);
+        assert!((progress_fraction(bar, 49, 20).unwrap() - 0.9875).abs() < 1e-9);
         // the middle cell reads as the middle of the track
-        let middle = progress_fraction(bar, 29).unwrap();
+        let middle = progress_fraction(bar, 29, 20).unwrap();
         assert!((0.4..0.6).contains(&middle), "middle click gave {middle}");
     }
 

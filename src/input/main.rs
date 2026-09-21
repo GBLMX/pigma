@@ -18,7 +18,7 @@ use crate::{
     config::symbols,
     event::{NavigationEvent, PlaybackEvent},
     playback::mode_icon,
-    state::{ArtistIo, ContentState, Page, TableMode},
+    state::{ArtistIo, ArtistPane, ContentState, Page, TableMode},
     ui::playerbar,
 };
 
@@ -168,30 +168,36 @@ pub(super) fn handle_main_key(app: &mut App, key_event: KeyEvent) -> color_eyre:
             }
         }
         KeyCode::Char('s') => {
-            if let ContentState::Songs(songs) = app.state.navigation.content.as_ref() {
-                let sel = app.state.navigation.content_selected;
-                if let Some(song) = songs.get(sel) {
-                    app.state
-                        .events
-                        .send(PlaybackEvent::LikeSong(song.id, true));
-                    app.toast(format!("♥  {}", song.name));
-                }
+            // The artist page's rows are songs too, so `s` likes the one its cursor is on: that
+            // page is not table content, and its own list is what the cursor walks.
+            let song = match app.state.navigation.page {
+                Page::Artist => app.state.navigation.artist.selected_song(),
+                _ => match app.state.navigation.content.as_ref() {
+                    ContentState::Songs(songs) => songs
+                        .get(app.state.navigation.content_selected)
+                        .map(|song| &**song),
+                    _ => None,
+                },
+            }
+            .map(|song| (song.id, song.name.clone()));
+            if let Some((id, name)) = song {
+                app.state.events.send(PlaybackEvent::LikeSong(id, true));
+                app.toast(format!("♥  {name}"));
             }
         }
         KeyCode::Char('a' | 'A') => {
-            let song =/* if app.state.navigation.page == Page::Playlist {
-                app.playback
-                    .song_at(app.state.navigation.playlist_selected)
-                    .cloned()
-            } else */ if let ContentState::Songs(songs) = app.state.navigation.content.as_ref() {
+            // Same rows as `s`: the artist page's own list, or the table's current content.
+            let song = if app.state.navigation.page == Page::Artist {
+                app.state.navigation.artist.selected_song().cloned()
+            } else if let ContentState::Songs(songs) = app.state.navigation.content.as_ref() {
                 songs
                     .get(app.state.navigation.content_selected)
-                    .cloned()
+                    .map(|song| (**song).clone())
             } else {
                 None
             };
             if let Some(song) = song {
-                app.playback.add_next(song.clone());
+                app.playback.add_next(Arc::new(song.clone()));
                 app.toast(format!("⏭  下一首: {}", song.name));
             }
         }
@@ -332,6 +338,12 @@ pub(super) fn handle_main_mouse(app: &mut App, kind: MouseEventKind, col: u16, r
             }
         }
         Page::Artist => {
+            // The wheel walks the list it is over, and that list takes the cursor: the pointer
+            // says which pane the reader is working in. Over neither pane the wheel keeps
+            // walking whichever list the cursor is already in.
+            if let Some(pane) = artist_pane_at(app, col, row) {
+                app.state.navigation.artist.pane = pane;
+            }
             if kind == MouseEventKind::ScrollUp {
                 app.state.navigation.artist.select_prev();
             } else if kind == MouseEventKind::ScrollDown {
@@ -415,7 +427,7 @@ fn toggle_like(app: &mut App) {
 /// navigation item, and select rows — clicking the row that is already selected opens it,
 /// which is the mouse's Enter.
 fn handle_click(app: &mut App, col: u16, row: u16) {
-    if let Some(fraction) = hit::progress_fraction(app.state.gauge_area, col) {
+    if let Some(fraction) = hit::progress_fraction(app.state.gauge_area, col, row) {
         app.playback.seek_to_fraction(fraction);
         return;
     }
@@ -443,6 +455,7 @@ fn handle_click(app: &mut App, col: u16, row: u16) {
     match app.state.navigation.page {
         Page::Playlist => click_queue_page(app, col, row),
         Page::Main => click_content(app, col, row),
+        Page::Artist => click_artist(app, col, row),
         Page::Settings => {
             crate::ui::settings::handle_settings_click(app, col, row);
         }
@@ -604,6 +617,9 @@ fn open_artist_from_table(app: &mut App) -> bool {
     };
     let io = artist_io(app);
     app.state.navigation.artist.open(id, name, pic_url, io);
+    // The artist page is opened from the table, so it is a step of its own: content opened
+    // from it returns here, but nothing returns to it.
+    app.state.navigation.return_page = None;
     app.state
         .events
         .send(NavigationEvent::Navigate(Page::Artist));
@@ -658,6 +674,80 @@ pub(super) fn artist_play_selected(app: &mut App) {
         .map(Arc::new)
         .collect();
     app.playback.play_songs(&key, songs, index);
+}
+
+/// The pane of the artist page a screen position is over, if it is over one.
+fn artist_pane_at(app: &App, col: u16, row: u16) -> Option<ArtistPane> {
+    artist_row_at(app, col, row).map(|(pane, _)| pane)
+}
+
+/// The pane and the row of the artist page a screen position is over. The draw pass publishes
+/// both tables' bodies and their first visible row, so this is the same arithmetic the main
+/// table's clicks use — rather than a second layout pass, which would have to guess how tall
+/// the profile band came out.
+fn artist_row_at(app: &App, col: u16, row: u16) -> Option<(ArtistPane, usize)> {
+    let hits = app.state.artist_hits;
+    let artist = &app.state.navigation.artist;
+    if let Some(index) = hit::table_row(
+        hits.songs,
+        1,
+        hits.songs_offset,
+        artist.hot_songs().len(),
+        col,
+        row,
+    ) {
+        return Some((ArtistPane::Songs, index));
+    }
+    hit::table_row(
+        hits.albums,
+        1,
+        hits.albums_offset,
+        artist.albums().len(),
+        col,
+        row,
+    )
+    .map(|index| (ArtistPane::Albums, index))
+}
+
+/// A click on the artist page puts the cursor on the row it landed on, in the pane it landed
+/// in: the list that was clicked is the list being worked in, so the click moves the focus too.
+/// Clicking the row that was already selected opens it, which is what `Enter` does there.
+fn click_artist(app: &mut App, col: u16, row: u16) {
+    let Some((pane, index)) = artist_row_at(app, col, row) else {
+        return;
+    };
+    let artist = &mut app.state.navigation.artist;
+    let repeat = artist.pane == pane
+        && match pane {
+            ArtistPane::Songs => artist.song_selected == index,
+            ArtistPane::Albums => artist.album_selected == index,
+        };
+    artist.select_in(pane, index);
+    if repeat {
+        artist_activate(app);
+    }
+}
+
+/// `Enter` on the artist page. The pane the cursor is in decides what the row under it means:
+/// a hot song is played, an album is opened as content.
+pub(super) fn artist_activate(app: &mut App) {
+    match app.state.navigation.artist.pane {
+        ArtistPane::Songs => artist_play_selected(app),
+        ArtistPane::Albums => {
+            let Some((id, name)) = app
+                .state
+                .navigation
+                .artist
+                .selected_album()
+                .map(|album| (album.id, album.name.clone()))
+            else {
+                return;
+            };
+            app.state
+                .events
+                .send(NavigationEvent::OpenAlbum { id, name });
+        }
+    }
 }
 
 fn current_api(app: &App) -> Option<&str> {

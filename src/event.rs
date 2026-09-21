@@ -128,6 +128,12 @@ pub enum NavigationEvent {
     SearchActivated,
     SearchDeactivated,
     ContentRestore,
+    /// Open one album as table content. The artist page is the only sender: an album row is
+    /// not a row of the main table, so opening it is a load this app has to start itself.
+    OpenAlbum {
+        id: u64,
+        name: String,
+    },
     CellAction(usize, usize),
     LoadMore,
     /// A paged load failed; clears the in-flight flag so it can be retried.

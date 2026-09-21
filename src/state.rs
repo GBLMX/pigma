@@ -140,6 +140,9 @@ pub struct State {
     pub prompt: PromptState,
     /// Tabs and table of the queue page, for click-to-switch and click-to-play.
     pub queue_hits: QueueHits,
+    /// Rows of the artist page's hot-song and album tables, for click-to-select and for the
+    /// wheel: which pane a pointer is over decides which list it walks.
+    pub artist_hits: crate::state::navigation::ArtistHits,
     /// Player bar rects for click targets: the volume icon, the cover, and the row that
     /// hosts the spectrum and the pitch readout.
     pub volume_area: Rect,

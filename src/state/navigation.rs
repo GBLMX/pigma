@@ -139,6 +139,11 @@ pub struct NavigationState {
     /// True when the current `Songs` content is a search result (Enter plays
     /// only the selected song instead of appending the whole list to the queue).
     pub content_is_search: bool,
+    /// The page `Esc` returns to once the breadcrumb stack is empty: where content that is
+    /// *not* part of the table's own walk was opened from (an album opened on the artist
+    /// page). `None` — the usual case — leaves `Esc` on the main table, which is where the
+    /// table's own navigation ends.
+    pub return_page: Option<Page>,
     /// Cached block title string, keyed by
     /// (focus_section, selected_index, generation, content item count).
     /// The item count is part of the key so incremental (paged) loads that
@@ -270,11 +275,47 @@ pub enum ArtistData {
     Failed(String),
 }
 
+/// Which of the page's lists the keyboard is walking. The page shows the hot songs and the
+/// albums side by side, and only one of them holds the cursor; `Tab` swaps between them, the
+/// way it swaps between the settings sections and the settings rows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ArtistPane {
+    #[default]
+    Songs,
+    Albums,
+}
+
+impl ArtistPane {
+    /// The other pane: what `Tab` switches to.
+    fn other(self) -> Self {
+        match self {
+            Self::Songs => Self::Albums,
+            Self::Albums => Self::Songs,
+        }
+    }
+}
+
+/// Where the page's two tables were last drawn, and which row each of them started at. The
+/// draw pass publishes this the same way the main table publishes `content_inner`, so a click
+/// can be turned into a row without re-deriving the layout (which depends on the terminal
+/// size, and on the profile band's height).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ArtistHits {
+    /// Hot-song table body, and the first song index in it.
+    pub songs: Rect,
+    pub songs_offset: usize,
+    /// Album table body, and the first album index in it.
+    pub albums: Rect,
+    pub albums_offset: usize,
+}
+
 /// The artist page's own state.
 ///
 /// The page keeps its own loader instead of going through `ApiService` and `ContentState`:
 /// an artist profile is not table content — it must not replace what the main page is
 /// showing, and it never joins the breadcrumb stack (the page is opened and left by name).
+/// An *album* opened from here is table content, so that one does go through `ApiService`,
+/// and the page leaves a return target behind for it (`NavigationState::return_page`).
 pub struct ArtistState {
     /// Artist the page is showing.
     pub id: u64,
@@ -285,6 +326,11 @@ pub struct ArtistState {
     pub data: ArtistData,
     /// Cursor over the hot songs of a loaded profile.
     pub song_selected: usize,
+    /// Cursor over the albums of a loaded profile. The pane is walked like the songs are, so
+    /// an album can be opened from it.
+    pub album_selected: usize,
+    /// Which of the two lists the keyboard is walking.
+    pub pane: ArtistPane,
     /// The portrait decoded for the terminal's image protocol. `None` until it arrives, and
     /// it stays `None` when the download or the decoding failed — the page reads fine
     /// without a portrait, so that case has no error of its own.
@@ -313,6 +359,8 @@ impl Default for ArtistState {
             pic_url: String::new(),
             data: ArtistData::Loading,
             song_selected: 0,
+            album_selected: 0,
+            pane: ArtistPane::default(),
             avatar: None,
             rx: None,
         }
@@ -339,6 +387,8 @@ impl ArtistState {
     fn load(&mut self, io: ArtistIo) {
         self.data = ArtistData::Loading;
         self.song_selected = 0;
+        self.album_selected = 0;
+        self.pane = ArtistPane::default();
         self.avatar = None;
 
         let (tx, rx) = mpsc::unbounded_channel();
@@ -425,28 +475,84 @@ impl ArtistState {
         self.hot_songs().get(self.song_selected)
     }
 
-    /// Move the cursor down the hot songs, wrapping the way the main table's does.
+    /// The albums of the loaded profile. Empty while loading, after a failure, and when the
+    /// album request itself failed — the songs above the pane stay readable in that case.
+    pub fn albums(&self) -> &[ArtistAlbum] {
+        match &self.data {
+            ArtistData::Ready {
+                albums: Ok(list), ..
+            } => list,
+            _ => &[],
+        }
+    }
+
+    /// The album the cursor is on.
+    pub fn selected_album(&self) -> Option<&ArtistAlbum> {
+        self.albums().get(self.album_selected)
+    }
+
+    /// The list the cursor is walking, and how long it is.
+    fn focused(&self) -> (ArtistPane, usize) {
+        let len = match self.pane {
+            ArtistPane::Songs => self.hot_songs().len(),
+            ArtistPane::Albums => self.albums().len(),
+        };
+        (self.pane, len)
+    }
+
+    /// How far down the focused list the cursor is.
+    fn cursor(&self) -> usize {
+        match self.pane {
+            ArtistPane::Songs => self.song_selected,
+            ArtistPane::Albums => self.album_selected,
+        }
+    }
+
+    fn set_cursor(&mut self, index: usize) {
+        match self.pane {
+            ArtistPane::Songs => self.song_selected = index,
+            ArtistPane::Albums => self.album_selected = index,
+        }
+    }
+
+    /// Move the cursor down the focused list, wrapping the way the main table's does.
     pub fn select_next(&mut self) {
-        let count = self.hot_songs().len();
+        let (_, count) = self.focused();
         if count > 0 {
-            self.song_selected = (self.song_selected + 1) % count;
+            self.set_cursor((self.cursor() + 1) % count);
         }
     }
 
     /// Move the cursor up, wrapping.
     pub fn select_prev(&mut self) {
-        let count = self.hot_songs().len();
+        let (_, count) = self.focused();
         if count > 0 {
-            self.song_selected = (self.song_selected + count - 1) % count;
+            self.set_cursor((self.cursor() + count - 1) % count);
         }
     }
 
     pub fn select_first(&mut self) {
-        self.song_selected = 0;
+        self.set_cursor(0);
     }
 
     pub fn select_last(&mut self) {
-        self.song_selected = self.hot_songs().len().saturating_sub(1);
+        let (_, count) = self.focused();
+        self.set_cursor(count.saturating_sub(1));
+    }
+
+    /// Put the cursor on a row of `pane`, and walk that pane from now on. What a click on a
+    /// row does: clicking a list means working in it.
+    pub fn select_in(&mut self, pane: ArtistPane, index: usize) {
+        self.pane = pane;
+        self.set_cursor(index);
+    }
+
+    /// `Tab` between the two lists. There are only two, so this is also `Shift+Tab`: both
+    /// keys land here and both swap the pane. The cursor of the list being left is kept, so
+    /// `Tab`-ing back returns to the row that was left; switching needs no clamping, because
+    /// the draws clamp.
+    pub fn toggle_focus(&mut self) {
+        self.pane = self.pane.other();
     }
 }
 

@@ -352,6 +352,7 @@ impl App {
             NavigationEvent::SearchActivated => self.handle_search_activate(),
             NavigationEvent::SearchDeactivated => self.handle_search_deactivate(),
             NavigationEvent::ContentRestore => self.handle_content_restore(),
+            NavigationEvent::OpenAlbum { id, name } => self.open_album(id, name),
             NavigationEvent::CellAction(row, col) => {
                 if let Err(e) = self.handle_cell_action(row, col) {
                     log::error!("CellAction error: {e}");

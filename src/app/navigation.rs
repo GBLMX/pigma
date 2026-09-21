@@ -9,6 +9,29 @@ use crate::{
 };
 
 impl App {
+    /// Open one album as table content.
+    ///
+    /// The artist page is the only caller: an album row is not a row of the main table, so
+    /// nothing in the navigation would load it. The artist page is remembered as the way back
+    /// (`return_page`), because the album *is* table content and `Esc` on it pops the
+    /// breadcrumb stack — which is empty here, since this load starts the stack rather than
+    /// continuing it.
+    pub(super) fn open_album(&mut self, id: u64, name: String) {
+        self.state.navigation.clear_breadcrumb();
+        self.state.navigation.return_page = Some(Page::Artist);
+        self.state.navigation.content_is_search = false;
+        self.state.navigation.set_content(ContentState::Loading);
+        self.state.navigation.nav.subtitle = Some(name);
+        self.state.navigation.page = Page::Main;
+        self.state.navigation.generation += 1;
+        let service = self.service.clone();
+        let sender = self.state.events.sender();
+        tokio::spawn(async move {
+            let state = service.load_album(id).await;
+            send_event(&sender, NavigationEvent::ContentLoaded(state).into());
+        });
+    }
+
     /// Reload the content for the current navigation item.
     ///
     /// With `force = true`, skip the content cache, refetch directly from the API,
