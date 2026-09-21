@@ -149,6 +149,15 @@ jobs:
       - name: cargo test --locked
         # `--workspace` also runs the tests of the `crates/*` members, which a
         # package-only invocation silently skipped.
-        run: cargo test --locked --workspace --all-features
+        run: cargo test --locked --workspace --all-features 2>&1 | tee test-output.log
+      # TEMPORARY: a failing test's output lives in the job log, which needs a token to read.
+      # This republishes the tail as an annotation, which is public, so the failure can be read
+      # from outside. Remove once the failure it was added for is understood.
+      - name: Report the test output
+        if: failure()
+        run: |
+          tail -n 40 test-output.log | while IFS= read -r line; do
+            echo "::error::$line"
+          done
       - name: Cache Cargo dependencies
         uses: Swatinem/rust-cache@v2
