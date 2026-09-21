@@ -171,7 +171,18 @@ boxpigma 把网易云音乐与本地音频播放带进终端：流式播放、�
 curl -fsSL https://raw.githubusercontent.com/GBLMX/pigma/main/install.sh | sh
 ```
 
-脚本自己判定平台：`uname -s`/`uname -m` 映射到发布的目标三元组，musl 会被挡下（只发 `gnu`），下载对应资产、按发布里的 `SHA256SUMS` 校验后装到 `~/.local/bin`。可覆盖的项：
+脚本自己判定平台：`uname -s`/`uname -m` 映射到发布的目标三元组，musl 会被挡下（只发 `gnu`），下载对应资产、按发布里的 `SHA256SUMS` 校验后装到 `~/.local/bin`。
+
+装成**版本化布局**，升级不动正在跑的那个：
+
+```
+~/.local/bin/
+├── releases/1.4.0-x86_64-unknown-linux-gnu/boxpigma    每个版本各占一个目录
+├── current -> releases/1.4.0-x86_64-unknown-linux-gnu  原子切换，指向当前版本
+└── install.lock                                        当前版本、安装时间与版本历史
+```
+
+`PATH` 里放的是 `current`。装新版本时先下完、校验通过才切 `current`；切换失败会退回旧链接并报错。默认保留最近 3 个版本（`current` 指向的那个永不删），`--rollback` 切回上一个版本。可覆盖的项：
 
 | 参数 | 环境变量 | 默认 |
 | :--- | :--- | :--- |
@@ -179,6 +190,7 @@ curl -fsSL https://raw.githubusercontent.com/GBLMX/pigma/main/install.sh | sh
 | `--dir <path>` | `BOXPIGMA_INSTALL_DIR` | `~/.local/bin` |
 | `--checksums <url\|file>` | `BOXPIGMA_CHECKSUMS` | 资产旁边的 `SHA256SUMS` |
 | `--host <url>` | `BOXPIGMA_GITHUB` | `https://github.com`（镜像/代理用） |
+| `--rollback` | — | — （切回上一个版本；配 `--dry-run` 只看计划） |
 | `--dry-run` / `--force` | — | — |
 
 先看一眼它打算做什么：`sh install.sh --dry-run`。目标版本已装好时是 no-op（`--force` 重装）；`SHA256SUMS` 拿不到（旧版本发布）会**明说「未校验」**而不是假装校验过。
