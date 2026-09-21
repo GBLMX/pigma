@@ -141,10 +141,25 @@ jobs:
           VERSION=${GITHUB_REF#refs/tags/}
           git-cliff --latest --tag "$VERSION" -o release-notes.md
 
+      - name: Checksums
+        # One file the installer scripts can verify against, and the answer to "did my
+        # download arrive intact" without asking anyone to copy a hash out of the release
+        # page. Names are bare (the assets sit at the release root), sorted so the file
+        # itself is reproducible.
+        run: |
+          cd artifacts
+          find . -type f \( -name 'boxpigma-*.tar.gz' -o -name 'boxpigma-*.zip' \) -exec sha256sum {} + \
+            | sed -E 's|^([0-9a-f]{64})  \./[^/]+/|\1  |' \
+            | sort -k2 \
+            > SHA256SUMS
+          cat SHA256SUMS
+
       - name: Upload release
         uses: softprops/action-gh-release@v3
         with:
-          files: artifacts/boxpigma-*/boxpigma-*
+          files: |
+            artifacts/SHA256SUMS
+            artifacts/boxpigma-*/boxpigma-*
           body_path: release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

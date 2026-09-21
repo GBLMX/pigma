@@ -19,8 +19,10 @@ boxpigma 把网易云音乐与本地音频播放带进终端：流式播放、�
 - [Features](#features)
 - [Preview](#preview)
 - [Install](#install)
-  - [Linux / macOS](#linux--macos)
-  - [Windows](#windows)
+  - [一键安装（Linux / macOS）](#一键安装linux--macos)
+  - [一键安装（Windows / PowerShell）](#一键安装windows--powershell)
+  - [Linux / macOS（手动）](#linux--macos手动)
+  - [Windows（手动）](#windows手动)
   - [从源码](#从源码)
 - [Usage](#usage)
   - [快捷键](#快捷键)
@@ -198,7 +200,37 @@ RSS 大致是**二进制体积 + 约 3 MB**（1.0 的二进制 11.1 MB），换�
 
 > 本节命令都对应本仓库的 [releases](https://github.com/GBLMX/pigma/releases)；通过上游渠道装到的是不含本仓库改动的版本。
 
-### Linux / macOS
+### 一键安装（Linux / macOS）
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/GBLMX/pigma/main/install.sh | sh
+```
+
+脚本自己判定平台：`uname -s`/`uname -m` 映射到发布的目标三元组，musl 会被挡下（只发 `gnu`），下载对应资产、按发布里的 `SHA256SUMS` 校验后装到 `~/.local/bin`。可覆盖的项：
+
+| 参数 | 环境变量 | 默认 |
+| :--- | :--- | :--- |
+| `--version <tag\|latest>` | `BOXPIGMA_VERSION` | `latest` |
+| `--dir <path>` | `BOXPIGMA_INSTALL_DIR` | `~/.local/bin` |
+| `--checksums <url\|file>` | `BOXPIGMA_CHECKSUMS` | 资产旁边的 `SHA256SUMS` |
+| `--host <url>` | `BOXPIGMA_GITHUB` | `https://github.com`（镜像/代理用） |
+| `--dry-run` / `--force` | — | — |
+
+先看一眼它打算做什么：`sh install.sh --dry-run`。目标版本已装好时是 no-op（`--force` 重装）；`SHA256SUMS` 拿不到（旧版本发布）会**明说「未校验」**而不是假装校验过。
+
+### 一键安装（Windows / PowerShell）
+
+```powershell
+irm https://raw.githubusercontent.com/GBLMX/pigma/main/install.ps1 | iex
+```
+
+按 `RuntimeInformation.OSArchitecture` 选 `x86_64-pc-windows-msvc` 或 `aarch64-pc-windows-msvc`（不是 `PROCESSOR_ARCHITECTURE`：后者在 ARM64 上跑 x64 模拟 shell 时会报错平台），校验和逻辑与上面一致，装到 `%LOCALAPPDATA%\Programs\boxpigma`：
+
+```powershell
+.\install.ps1 -Dir 'D:\tools\boxpigma' -AddToPath   # -Version / -Checksums / -Mirror / -DryRun / -Force
+```
+
+### Linux / macOS（手动）
 
 ```sh
 # https://github.com/marcosnils/bin
@@ -209,7 +241,7 @@ bin install https://github.com/GBLMX/pigma
 
 > `gnu` 构建依赖系统音频库（如 `alsa-lib`）。
 
-### Windows
+### Windows（手动）
 
 从 [releases](https://github.com/GBLMX/pigma/releases) 下载 `boxpigma-x86_64-pc-windows-msvc.zip`（或 `aarch64` 版），解包后把 `boxpigma.exe` 放进 `%PATH%`。
 

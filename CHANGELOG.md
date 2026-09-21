@@ -2,13 +2,15 @@
 
 ### 🚀 Features
 
+- *(install)* **一键安装脚本，自己判定平台**：`install.sh`（Linux/macOS）与 `install.ps1`（Windows）。判定用 `uname -s`/`uname -m`，Windows 用 `RuntimeInformation.OSArchitecture`（不是 `PROCESSOR_ARCHITECTURE`——它在 ARM64 上跑 x64 模拟 shell 时会报错平台），musl 直接挡下并建议从源码装。下载后按发布里的 `SHA256SUMS` 校验；`SHA256SUMS` 拿不到时明确打印「未校验」，**校验和不匹配则拒绝安装**。`--version`/`--dir`/`--checksums`/`--host`（镜像）与对应环境变量可覆盖，`--dry-run` 先看计划，已装同版本即 no-op（`--force` 重装）。
+- *(release)* **发布产物带 `SHA256SUMS`**：由发布作业从各平台产物现算，随 release 一起上传 —— 安装脚本据此校验，也给 PKGBUILD 那类手工校验和留了权威来源。
 - *(windows)* **Windows Terminal 适配**：启动路径不再依赖 Windows 上不存在或在 ConPTY 下不可用的东西 —— 终端模式（括号粘贴 `CSI ? 2004 h`、kitty 键盘协议 `CSI > 1 u`）改为**直接写字节**（crossterm 的 `PushKeyboardEnhancementFlags` 在 Windows 是**无条件返回 Err**，而上游分支用 `?` 传播 ⇒ 1.2.0 在 Windows 上启动即失败）；鼠标捕获与光标形状改为**尽力而为**（缺控制台时只告警，不再中断启动）；`background = auto` 改用控制台的背景色与调色板（`GetConsoleScreenBufferInfoEx`，跟随当前配色方案）；封面协议按环境判定（`WT_SESSION` → sixel），因为 ConPTY 不会回答图形查询
 - *(ui)* **`:spin` 开关封面旋转（同 `t` 键）**：`[playerbar] spinning_cover` 此前只能改配置文件，而同类可见性开关（`:visualizer` `:pitch` `:border` `:navpos`）都有命令与按键 —— 补上这块不一致。**裸调用即取反**（与 `:visualizer` 同），`on` / `off` 显式设置，`Tab` 补全 `off` / `on`。帧每次重绘都从配置读这一项，所以翻转**当场生效**；同时写回 `config.toml`，下次启动沿用
 
 ### 🐛 Bug Fixes
 
 - *(startup)* **Windows 上不再挂死在启动路径**：`Picker::from_query_stdio()` 自己的超时只覆盖两次 read 之间、且每次 read 后就被重置，因此 stdin 处于 EOF（`-d`、CLI 子命令、测试、`boxpigma > file`）时它**永不返回**。实测后果：任何构造 `App::new` 的测试在 Windows 上全部挂死，CI 的 `test windows-latest` 作业挂了 **6 小时 5 分**后被取消（同日 ubuntu/macOS 各 2 分钟通过），最近 25 次运行里 22 次以 `cancelled` 收场。现在只在「有终端」且非 Windows 时询问，并且在工作线程里给 2 秒预算 —— 终端不回答就退回半块并继续启动
-- *(ui)* **明暗主题探测在 Linux/macOS 上从未生效**：OSC 11 的回包 `ESC ] 11 ; rgb:… ESC \` **没有换行**，而探测跑在 `App::new` 里、早于 raw mode，行规缓冲区把回包扣住 ⇒ 120 ms 的 poll 必然超时 ⇒ 永远落到「深色」默认值。现在探测期间把 tty 置为非规范模式（并屏蔽 `SIGTTIN`/`SIGTTOU`：默认动作是**停止进程**，一个被停住的启动是「无错误的挂死」），扩展到全 unix，并用一个 pty 假终端测试钉住（canonical 拿不到回包、非 canonical 立刻拿到）
+- *(ui)* **明暗主题探测在 Linux/macOS 上从未生效**：OSC 11 的回包 `ESC ] 11 ; rgb:… ESC \` **没有换行**，而探测跑在 `App::new` 里、早于 raw mode，行规缓冲区把回包扣住 ⇒ 120 ms 的 poll 必然超时 ⇒ 永远落到「深色」默认值。现在探测期间把 tty 置为非规范模式（并屏蔽 `SIGTTIN`/`SIGTTOU`：默认动作是**停止进程**，一个被停住的启动是「无错误的挂死」），扩展到全 unix，并用一个 pty 假终端测试钉住（canonical 拿不到回包、非 canonical 立刻拿到；该测试**只在 Linux 跑** —— 它断言的是内核行为，macOS 的 pty 实现无法在本机复现，CI 的 macOS 作业正是这么暴露出来的。探测代码本身仍在全 unix 编译）
 - *(audio)* **ALSA 静音从未生效，还可能挡住音频**：`let _ = StderrGuard::new()…?` 让 guard 在语句结束即析构（要覆盖的那段正是 `open_sink_impl`），且创建失败会经 `?` 变成 `DeviceSinkError::NoDevice`。现在 guard 绑定到变量跨过打开过程，创建失败只记一条告警
 - *(audio)* **没有音频设备时此前完全静默**：`ensure_sink!` 丢掉 `create_sink` 的 Err，UI 已经收到 `Started` 并显示在播放、进度冻住、看门狗因 `player == None` 不介入，用户看不到任何提示。现在每次失败弹一次 toast 并写一条 error（刻意**不**走 `PlaybackEvent::Error`：那条路会进「重试/跳歌」状态机，而「没有声卡」不该导致跳歌）
 - *(ncm-api,sonar)* **4 处 UTF-8 字节切片可能 panic**：DEBUG 日志对响应体做 `&result[..len.min(N)]`（智能推荐、创建/收藏歌单）与 WBI mixin key 的 `[..32]` —— 只要切点落在多字节字符中间就会 panic（key 来自 B 站接口，歌名里全是中文）。新增 `ncm-api::text::preview()` 按字符边界截断，mixin key 改为取 32 个**字符**
