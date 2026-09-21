@@ -8,6 +8,8 @@ mod command_panel;
 mod content;
 mod gradient_line_gauge;
 mod help;
+mod messages;
+mod tasks;
 mod login;
 mod lyrics;
 mod navigation;
@@ -24,10 +26,7 @@ mod title;
 mod toast;
 mod topbar;
 
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{sync::Arc, time::Instant};
 
 use ratatui::{
     Frame,
@@ -53,12 +52,6 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let steps = (now.duration_since(app.state.last_tick).as_millis() / 80).max(1) as u64;
     app.state.last_tick = now;
     app.state.tick = app.state.tick.wrapping_add(steps);
-
-    if let Some(t) = app.state.toast_time
-        && t.elapsed() > Duration::from_secs(2)
-    {
-        app.state.toast_time = None;
-    }
 
     let area = f.area();
 
@@ -147,6 +140,18 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
     if app.state.command_panel.open {
         command_panel::draw(f, app, area);
+    }
+
+    if app.state.messages.open {
+        let max_scroll = messages::draw(f, app, area);
+        app.state.messages.max_scroll = max_scroll;
+        app.state.messages.scroll = app.state.messages.scroll.min(max_scroll);
+    }
+
+    if app.state.tasks_popup.open {
+        let max_scroll = tasks::draw(f, app, area);
+        app.state.tasks_popup.max_scroll = max_scroll;
+        app.state.tasks_popup.scroll = app.state.tasks_popup.scroll.min(max_scroll);
     }
 
     if app.state.help.open {

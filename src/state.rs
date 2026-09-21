@@ -4,14 +4,16 @@
 pub mod avatar;
 pub mod command;
 pub mod content;
-pub mod help;
 pub mod login;
 pub mod lyrics;
 pub mod mv;
 pub mod navigation;
+pub mod notices;
+pub mod popup;
 pub mod page;
 pub mod prompt;
 pub mod queue_page;
+pub mod tasks;
 pub mod search;
 pub mod splash;
 
@@ -21,7 +23,6 @@ use crate::ui::playerbar::ControlButton;
 
 pub use command::*;
 pub use content::*;
-pub use help::*;
 pub use login::*;
 pub use navigation::*;
 pub use page::*;
@@ -33,6 +34,9 @@ pub use splash::*;
 // --- Private Internal Imports ---
 use crate::{config::BorderConfig, event::EventHandler};
 use lyrics::LyricsState;
+use notices::Notices;
+use popup::PopupState;
+use tasks::Tasks;
 use ratatui::layout::Rect;
 use serde::{Deserialize, Serialize};
 
@@ -91,7 +95,7 @@ pub struct State {
     pub login: LoginState,
     pub navigation: NavigationState,
     pub command_panel: CommandPanel,
-    pub help: HelpState,
+    pub help: PopupState,
     pub offline: bool,
     pub tick: u64,
     pub last_tick: Instant,
@@ -112,8 +116,12 @@ pub struct State {
     pub last_pane_click: Option<(crate::layout::Divider, Instant)>,
     /// The area the shell layout was given last frame: the room pane sizes are clamped to.
     pub shell_area: Rect,
-    pub toast_msg: String,
-    pub toast_time: Option<Instant>,
+    /// What the app has said, newest last: the toast shows the newest, `:messages` lists them all.
+    pub notices: Notices,
+    pub messages: PopupState,
+    /// What the app is doing: the loads behind the navigation, in flight and finished.
+    pub tasks: Tasks,
+    pub tasks_popup: PopupState,
     /// Layout rect of the player bar, cached by the draw pass (`ui::draw`) and
     /// consumed by mouse input to hit-test volume scrolling on the player bar.
     pub playerbar_area: Rect,

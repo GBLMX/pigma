@@ -55,6 +55,12 @@ pub(crate) enum ExCommand {
     ProgressStyle(Option<String>),
     /// Open the settings page: the switches as a list rather than one command per line.
     Settings,
+    /// Show what the app has said this session.
+    Messages,
+    /// Show what the app is doing: the loads behind the navigation.
+    Tasks,
+    /// Throw the playback queue away (the `w` key).
+    ClearQueue,
     /// Turn the record on the player bar; `None` toggles, like the `t` key.
     Spin(Option<bool>),
     /// Write to the download cache while playing; `None` toggles. The engine copied the
@@ -204,6 +210,9 @@ impl ExCommand {
             )?)),
             "pitch" => Ok(Self::Pitch(optional_on_off(args.first().copied())?)),
             "settings" => Ok(Self::Settings),
+            "messages" => Ok(Self::Messages),
+            "tasks" => Ok(Self::Tasks),
+            "clear" => Ok(Self::ClearQueue),
             "pane" => match args.as_slice() {
                 [] => Err(format!("`pane` 需要一个面板（{}）", Pane::names().join(" / "))),
                 [name, rest @ ..] => match rest {
@@ -573,10 +582,10 @@ fn close(app: &mut App) {
 /// Run a command line, reporting the outcome the way vim reports errors.
 fn run(app: &mut App, line: &str) {
     match ExCommand::parse(line) {
-        Err(error) => app.toast(format!("E: {error}")),
+        Err(error) => app.notice(crate::state::notices::Level::Error, format!("E: {error}")),
         Ok(command) => {
             if let Err(error) = execute(app, command) {
-                app.toast(format!("E: {error}"));
+                app.notice(crate::state::notices::Level::Error, format!("E: {error}"));
             }
         }
     }
@@ -686,6 +695,27 @@ pub(crate) fn execute(app: &mut App, command: ExCommand) -> Result<(), String> {
         }
         ExCommand::Settings => {
             app.state.navigation.page = Page::Settings;
+        }
+        ExCommand::Messages => app.state.messages.toggle(),
+        ExCommand::Tasks => app.state.tasks_popup.toggle(),
+        ExCommand::ClearQueue => {
+            app.playback.clear_queue();
+            app.toast(format!(" {}  已清空播放队列", crate::config::symbols().queue_clear));
+
+            // The queue page is now showing tabs the queue no longer has: focus the one that is
+            // left rather than a tab that has gone.
+            if app.state.navigation.page == Page::Playlist {
+                if let Some(key) = app.playback.switch_queue(false) {
+                    app.state.navigation.playlist_selected =
+                        app.playback.queue_current_index().unwrap_or(0);
+                    app.toast(format!("▣ 队列: {key}"));
+                } else if let Some(key) = app.playback.queue_keys().last().cloned() {
+                    app.playback.activate_queue(&key);
+                    app.state.navigation.playlist_selected =
+                        app.playback.queue_current_index().unwrap_or(0);
+                    app.toast(format!("▣ 队列: {key}"));
+                }
+            }
         }
         ExCommand::ProgressStyle(None) => {
             // Bare, it cycles — the same shape as the bare `:lyrics`.

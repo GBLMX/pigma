@@ -142,6 +142,9 @@ pub const COMMANDS: &[Command] = &[
     simple("navpos", "切换导航栏位置", Some("z"), no_args),
     simple("spin", "封面旋转开关", Some("t"), on_off),
     simple("save", "立即写回配置", None, no_args),
+    simple("clear", "清空播放队列", Some("w"), no_args),
+    simple("messages", "最近通知（同 :messages）", None, no_args),
+    simple("tasks", "正在进行的任务（同 :tasks）", None, no_args),
     simple("quit", "退出程序", Some("q"), no_args),
     // Aliases the command line accepts; the palette shows the canonical name.
     Command {

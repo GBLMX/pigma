@@ -82,7 +82,7 @@ const POPUP_HEIGHT: u16 = 24;
 const KEY_COL_WIDTH: usize = 16;
 
 /// Renders the popup and returns the scroll limit implied by the rendered
-/// geometry, for the caller to persist into [`crate::state::HelpState`].
+/// geometry, for the caller to persist into [`crate::state::popup::PopupState`].
 pub(super) fn draw(f: &mut Frame, app: &App, area: Rect) -> usize {
     let help = &app.state.help;
     let colors = app.current_theme();

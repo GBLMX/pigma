@@ -19,7 +19,6 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEventKind};
 
 use crate::{
     app::App,
-    config::symbols,
     event::{AppEvent, CommandEvent, CommandPanelAction, NavigationEvent},
     state::Page,
 };
@@ -80,8 +79,7 @@ pub fn handle_key_events(app: &mut App, key_event: KeyEvent) -> color_eyre::Resu
         return Ok(());
     }
 
-    if app.state.help.open {
-        help::handle_help_key(app, key_event);
+    if help::handle_popup_key(app, key_event) {
         return Ok(());
     }
 
@@ -111,30 +109,6 @@ pub fn handle_key_events(app: &mut App, key_event: KeyEvent) -> color_eyre::Resu
         app.state
             .events
             .send(NavigationEvent::Navigate(Page::Login));
-        return Ok(());
-    }
-
-    if let KeyCode::Char(c) = key_event.code
-        && c.eq_ignore_ascii_case(&'w')
-        && key_event.modifiers == KeyModifiers::NONE
-    {
-        app.playback.clear_queue();
-        app.toast(format!(" {}  已清空播放队列", symbols().queue_clear));
-        if app.state.navigation.page == Page::Playlist {
-            if let Some(key) = app.playback.switch_queue(false) {
-                app.state.navigation.playlist_selected =
-                    app.playback.queue_current_index().unwrap_or(0);
-                app.toast(format!("▣ 队列: {key}"));
-            } else if let Some(key) = app.playback.queue_keys().last().cloned() {
-                // After clearing, only one queue remains: switch_queue returns None when only
-                // one is left, so explicitly focus it here (the rightmost/last tab) to avoid
-                // an empty focus.
-                app.playback.activate_queue(&key);
-                app.state.navigation.playlist_selected =
-                    app.playback.queue_current_index().unwrap_or(0);
-                app.toast(format!("▣ 队列: {key}"));
-            }
-        }
         return Ok(());
     }
 

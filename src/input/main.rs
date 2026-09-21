@@ -67,7 +67,7 @@ pub(super) fn handle_main_key(app: &mut App, key_event: KeyEvent) -> color_eyre:
                 if let Ok(command) = super::ex::ExCommand::parse(name)
                     && let Err(error) = super::ex::execute(app, command)
                 {
-                    app.toast(format!("{name}: {error}"));
+                    app.notice(crate::state::notices::Level::Error, format!("{name}: {error}"));
                 }
                 return Ok(());
             }
@@ -673,8 +673,12 @@ mod tests {
     }
 
     /// The same, for the keys that are not characters.
+    ///
+    /// Through the app's own entry point, not this module's: a popup, the `:` line and the page
+    /// layers are all consulted before the map below, and a test that skipped them would be
+    /// testing a keyboard the user does not have.
     fn press_key(app: &mut App, key: KeyCode) {
-        handle_main_key(
+        crate::input::handle_key_events(
             app,
             crossterm::event::KeyEvent::new(key, crossterm::event::KeyModifiers::NONE),
         )
@@ -687,8 +691,12 @@ mod tests {
         // Both are what `src/main.rs` does at startup and what the other tests do before building
         // one: the crypto provider for the HTTP clients the app brings up.
         let _ = rustls::crypto::ring::default_provider().install_default();
+        let mut app = App::new(crate::config::Config::default(), false).expect("app");
+        // Past the splash: it is the one page that ignores keys, so a session that presses one is
+        // a session that has booted.
+        app.state.navigation.page = Page::Main;
 
-        App::new(crate::config::Config::default(), false).expect("app")
+        app
     }
 
     /// The keyboard is the command table, end to end: a key runs the command its row names, a
@@ -731,25 +739,70 @@ mod tests {
     #[tokio::test]
     async fn a_key_sequence_runs_when_it_is_complete() {
         let mut app = app();
-        app.config.keys.insert("spin".to_string(), "w w".to_string());
+        app.config.keys.insert("spin".to_string(), "e e".to_string());
         assert!(!app.config.playerbar.spinning_cover, "a fresh config");
 
-        press(&mut app, 'w');
+        press(&mut app, 'e');
         assert!(
             !app.config.playerbar.spinning_cover,
             "one key of two runs nothing"
         );
-        press(&mut app, 'w');
+        press(&mut app, 'e');
         assert!(app.config.playerbar.spinning_cover, "the sequence ran");
 
         // Half a sequence, then `Esc`: the held key is forgotten rather than joined by the next
         // one, so the command does not run.
-        press(&mut app, 'w');
+        press(&mut app, 'e');
         press_key(&mut app, KeyCode::Esc);
-        press(&mut app, 'w');
+        press(&mut app, 'e');
         assert!(
             app.config.playerbar.spinning_cover,
             "`Esc` gave up on the half-typed sequence"
+        );
+    }
+
+    /// `:tasks` opens the list, `Esc` closes it, and the keys while it is up are its own — the
+    /// same shape `:messages` and the help popup have, because they are the same list.
+    #[tokio::test]
+    async fn the_task_list_opens_with_its_command_and_closes_with_esc() {
+        let mut app = app();
+        assert!(!app.state.tasks_popup.open);
+
+        crate::input::ex::execute(
+            &mut app,
+            crate::input::ex::ExCommand::parse("tasks").expect("a command"),
+        )
+        .expect("opens");
+        assert!(app.state.tasks_popup.open);
+
+        press_key(&mut app, KeyCode::Esc);
+        assert!(!app.state.tasks_popup.open, "`Esc` closed it");
+    }
+
+    /// What the app is doing is visible: a navigation request registers a task, and the content
+    /// that arrives finishes it — the two ends of the wire the load travels along.
+    #[tokio::test]
+    async fn the_load_behind_a_navigation_shows_up_and_finishes() {
+        use crate::state::{ContentState, tasks::TaskState};
+
+        let mut app = app();
+        // The registration half is the navigation request's, which would go to the network if it
+        // were sent from a test; the task it registers is the same one.
+        app.state.tasks.begin("加载 每日推荐");
+        assert_eq!(app.state.tasks.running(), 1);
+
+        let arrived: crate::event::Event =
+            crate::event::NavigationEvent::ContentLoaded(ContentState::Empty).into();
+        app.state.events.send(arrived);
+        app.handle_events().await.expect("events");
+
+        assert_eq!(app.state.tasks.running(), 0, "the arrival finished the load");
+        assert!(
+            app.state
+                .tasks
+                .all()
+                .all(|task| task.state == TaskState::Done),
+            "and it is in the history as done"
         );
     }
 

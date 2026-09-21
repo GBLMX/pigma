@@ -36,7 +36,7 @@ use crate::{
     playback::{NCM_SEARCH_QUEUE_KEY, PlaybackEngine, THIRD_PARTY_QUEUE_KEY},
     service::{ApiEndpoint, ApiService},
     state::{
-        ContentState, HelpState, LoginState, NavState, NavigationState, Page, PromptState,
+        ContentState, LoginState, NavState, NavigationState, Page, PromptState,
         QueueHits, SearchProvider, SearchState, SplashState, State, TableMode,
     },
     ui,
@@ -239,7 +239,7 @@ impl App {
                 title_cache: RefCell::new(None),
             },
             command_panel,
-            help: HelpState::default(),
+            help: crate::state::popup::PopupState::default(),
             offline: false,
             tick: 0,
             last_tick: Instant::now(),
@@ -250,8 +250,10 @@ impl App {
             pane_drag: None,
             last_pane_click: None,
             shell_area: ratatui::layout::Rect::default(),
-            toast_msg: String::new(),
-            toast_time: None,
+            notices: crate::state::notices::Notices::default(),
+            messages: crate::state::popup::PopupState::default(),
+            tasks: crate::state::tasks::Tasks::default(),
+            tasks_popup: crate::state::popup::PopupState::default(),
             playerbar_area: Rect::default(),
             nav_area: Rect::default(),
             content_inner: Rect::default(),
@@ -330,9 +332,15 @@ impl App {
         self.state.running = false;
     }
 
+    /// Say something. A confirmation: it lingers for its level's time and the newest wins.
     pub fn toast(&mut self, msg: String) {
-        self.state.toast_msg = msg;
-        self.state.toast_time = Some(Instant::now());
+        self.notice(crate::state::notices::Level::Info, msg);
+    }
+
+    /// Say something, at a level: an error stays on screen longer than a confirmation, and both are
+    /// in `:messages` afterwards.
+    pub fn notice(&mut self, level: crate::state::notices::Level, msg: String) {
+        self.state.notices.push(level, msg);
     }
 
     /// Adjust playback volume by `delta` (fraction of 0..=1), clamped to bounds

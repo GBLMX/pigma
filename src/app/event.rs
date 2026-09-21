@@ -318,11 +318,26 @@ impl App {
     fn handle_navigation_event(&mut self, event: NavigationEvent) {
         match event {
             NavigationEvent::NavSelect(api_str) => {
+                // The work starts here: a navigation request is what the app asks for, and the
+                // content that arrives is what ends it (see the match arms below).
+                let label = self
+                    .config
+                    .navigation
+                    .name_for_api(&api_str)
+                    .map(|name| format!("加载 {name}"))
+                    .unwrap_or_else(|| format!("加载 {api_str}"));
+                self.state.tasks.begin(label);
+
                 if let Err(e) = self.handle_nav_select(api_str, false) {
                     log::error!("NavSelect error: {e}");
                 }
             }
-            NavigationEvent::ContentLoaded(content) => self.handle_content_loaded(content),
+            NavigationEvent::ContentLoaded(content) => {
+                self.state
+                    .tasks
+                    .finish_running(crate::state::tasks::TaskState::Done);
+                self.handle_content_loaded(content)
+            }
             NavigationEvent::ContentLoadedPaged {
                 content,
                 pagination,
@@ -391,10 +406,10 @@ impl App {
                         match crate::input::ex::ExCommand::parse(&line) {
                             Ok(command) => {
                                 if let Err(error) = crate::input::ex::execute(self, command) {
-                                    self.toast(format!("E: {error}"));
+                                    self.notice(crate::state::notices::Level::Error, format!("E: {error}"));
                                 }
                             }
-                            Err(error) => self.toast(format!("E: {error}")),
+                            Err(error) => self.notice(crate::state::notices::Level::Error, format!("E: {error}")),
                         }
                     }
                     // One that needs an argument opens the command line ready for it, rather than

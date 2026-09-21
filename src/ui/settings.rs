@@ -414,7 +414,7 @@ pub(crate) fn keys(app: &mut App, key_event: crossterm::event::KeyEvent) -> bool
     };
 
     if let Err(error) = outcome {
-        app.toast(format!("设置未改动: {error}"));
+        app.notice(crate::state::notices::Level::Error, format!("设置未改动: {error}"));
     }
     true
 }

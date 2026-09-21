@@ -264,18 +264,18 @@ mod tests {
     /// than half-run — when the next key cannot continue it.
     #[test]
     fn a_sequence_waits_and_then_runs() {
-        let keymap = Keymap::from_config(&config_with(&[("spin", "w w"), ("pitch", "ctrl+w s")]));
+        let keymap = Keymap::from_config(&config_with(&[("spin", "e e"), ("pitch", "ctrl+w s")]));
         let mut pending = Vec::new();
-        let w = Key::char('w');
+        let e = Key::char('e');
 
-        assert_eq!(keymap.advance(&mut pending, w), Pressed::Wait);
-        assert_eq!(pending, vec![w], "the first key is held");
-        assert_eq!(keymap.advance(&mut pending, w), Pressed::Run("spin"));
+        assert_eq!(keymap.advance(&mut pending, e), Pressed::Wait);
+        assert_eq!(pending, vec![e], "the first key is held");
+        assert_eq!(keymap.advance(&mut pending, e), Pressed::Run("spin"));
         assert!(pending.is_empty(), "a finished sequence is done with");
 
         // A key the sequence cannot continue: nothing ran, and nothing is held.
         pending.clear();
-        assert_eq!(keymap.advance(&mut pending, w), Pressed::Wait);
+        assert_eq!(keymap.advance(&mut pending, e), Pressed::Wait);
         assert_eq!(
             keymap.advance(&mut pending, Key::char('x')),
             Pressed::FallThrough
