@@ -896,6 +896,66 @@ pub struct SongInfo {
 
 ---
 
+#### `simi_song`
+
+```rust
+pub async fn simi_song(
+    &self,
+    id: u64,
+    limit: u16,
+    offset: u16,
+) -> Result<Vec<SongInfo>, NcmError>
+```
+
+获取与某首歌相似的歌曲（种子是歌曲本身，用于队列播完后的续播）。
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `id` | `u64` | 种子歌曲 ID |
+| `limit` | `u16` | 数量 |
+| `offset` | `u16` | 偏移 |
+
+<details>
+<summary>响应类型 Vec&lt;SongInfo&gt;</summary>
+
+```rust
+pub struct SongInfo { ... }
+```
+
+</details>
+
+---
+
+#### `simi_playlist`
+
+```rust
+pub async fn simi_playlist(
+    &self,
+    id: u64,
+    limit: u16,
+    offset: u16,
+) -> Result<Vec<SongList>, NcmError>
+```
+
+获取包含某首歌的歌单。
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `id` | `u64` | 歌曲 ID |
+| `limit` | `u16` | 数量 |
+| `offset` | `u16` | 偏移 |
+
+<details>
+<summary>响应类型 Vec&lt;SongList&gt;</summary>
+
+```rust
+pub struct SongList { ... }
+```
+
+</details>
+
+---
+
 #### `personal_fm`
 
 ```rust
@@ -1347,6 +1407,33 @@ pub struct SingerInfo { ... }
 
 ### 专辑 (Album)
 
+#### `simi_artist`
+
+```rust
+pub async fn simi_artist(&self, id: u64) -> Result<Vec<SingerInfo>, NcmError>
+```
+
+获取与某位歌手相似的歌手。
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `id` | `u64` | 歌手 ID |
+
+<details>
+<summary>响应类型 Vec&lt;SingerInfo&gt;</summary>
+
+```rust
+pub struct SingerInfo {
+    pub id: u64,
+    pub name: String,
+    pub pic_url: String,
+}
+```
+
+</details>
+
+---
+
 #### `album`
 
 ```rust
@@ -1723,6 +1810,35 @@ pub struct SongInfo { ... }
 
 ---
 
+#### `user_record`
+
+```rust
+pub async fn user_record(&self, uid: u64, week: bool) -> Result<Vec<PlayRecord>, NcmError>
+```
+
+获取听歌排行（带播放次数与分数）。`recent_songs` 只有「最近听了什么」的列表，
+这一条才是口味画像的输入。
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `uid` | `u64` | 用户 ID |
+| `week` | `bool` | `true` 取近一周，`false` 取全部时间 |
+
+<details>
+<summary>响应类型 Vec&lt;PlayRecord&gt;</summary>
+
+```rust
+pub struct PlayRecord {
+    pub song: SongInfo,
+    pub play_count: u64,
+    pub score: u64,
+}
+```
+
+</details>
+
+---
+
 #### `user_cloud_disk`
 
 ```rust
@@ -1763,6 +1879,28 @@ pub async fn user_radio_sublist(
 |------|------|------|
 | `offset` | `u16` | 分页偏移 |
 | `limit` | `u16` | 每页数量 |
+
+<details>
+<summary>响应类型 Vec&lt;SongList&gt;</summary>
+
+```rust
+pub struct SongList { ... }
+```
+
+</details>
+
+---
+
+#### `djradio_recommend`
+
+```rust
+pub async fn djradio_recommend(&self) -> Result<Vec<SongList>, NcmError>
+```
+
+获取推荐电台（区别于已订阅列表：还没订阅任何电台时看到的就是这一份）。
+
+| 参数 | 无 |
+|------|-----|
 
 <details>
 <summary>响应类型 Vec&lt;SongList&gt;</summary>
