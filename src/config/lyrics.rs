@@ -3,7 +3,10 @@
 //! The styles are all reads of the same timed lyric data; they differ in how much of the
 //! surrounding song they put on screen and how the current line is coloured.
 
+use ratatui::style::Color;
 use serde::{Deserialize, Serialize};
+
+use crate::utils::GradientPreset;
 
 /// Which lyric presentation to draw.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -72,6 +75,23 @@ impl LyricStyle {
             Self::Plain => "纯滚动列表，无高亮",
         }
     }
+}
+
+/// What the lyrics page is asked to draw, with everything resolved.
+///
+/// The page is handed this rather than the whole `Config`: it needs five things, and the colours
+/// in it are resolved against the theme in force by [`Config::lyrics_config`] — once a frame
+/// rather than once a line, which is also what keeps an unknown colour to one warning per name
+/// instead of one per line drawn.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LyricsConfig<'a> {
+    pub style: LyricStyle,
+    pub gradient: GradientPreset,
+    /// Colour of the sung part in the `ktv` style: a theme field name or a colour of its own,
+    /// resolved here.
+    pub ktv_color: Color,
+    pub show_translation: bool,
+    pub title: &'a str,
 }
 
 #[cfg(test)]

@@ -10,7 +10,11 @@ use ratatui_image::{Resize, StatefulImage};
 
 use super::{BlockStyle, block::CornerBlock};
 use crate::{
-    config::{LyricStyle, Pane, PanesConfig, Theme, symbols},
+    config::{
+        LyricStyle, Pane, PanesConfig, Theme,
+        lyrics::LyricsConfig,
+        symbols,
+    },
     layout::{Axis, Divider, Dividers, clamp},
     playback::{LyricLine, PlaybackState},
     state::{
@@ -42,21 +46,6 @@ struct View<'a> {
     total_ms: Option<f64>,
 }
 
-/// What the page is asked to draw beyond the player's own state.
-///
-/// Taken as one struct rather than four more arguments: the page has a style, a gradient, the
-/// `ktv` colour and the translation switch, and every presentation reads some of them.
-pub(super) struct Options<'a> {
-    pub style: LyricStyle,
-    pub gradient: GradientPreset,
-    /// Colour of the sung part in the `ktv` style, resolved against the active theme by the
-    /// caller (a theme field name or a colour of its own — see `Theme::resolve_color`).
-    pub ktv_color: Color,
-    /// Whether the translated lines are drawn under the originals.
-    pub show_translation: bool,
-    pub title: &'a str,
-}
-
 // The page takes its player, its style, where the song is, the pane sizes and the frame: they
 // are what a page needs, and a struct that only ever holds them would be this list with a name.
 #[allow(clippy::too_many_arguments)]
@@ -64,7 +53,7 @@ pub(super) fn draw(
     f: &mut Frame,
     player: &PlaybackState,
     bs: &BlockStyle<'_>,
-    options: Options<'_>,
+    options: &LyricsConfig<'_>,
     state: &mut LyricsState,
     panes: &PanesConfig,
     dividers: &mut Dividers,
@@ -727,7 +716,7 @@ mod tests {
                     f,
                     &player,
                     &bs,
-                    Options {
+                    &LyricsConfig {
                         style,
                         gradient: GradientPreset::Rainbow,
                         ktv_color,
@@ -934,7 +923,7 @@ mod panel_tests {
                     f,
                     player,
                     &bs,
-                    Options {
+                    &LyricsConfig {
                         style,
                         gradient: GradientPreset::Rainbow,
                         ktv_color: Color::Rgb(77, 166, 255),

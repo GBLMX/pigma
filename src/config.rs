@@ -4,7 +4,7 @@
 mod border;
 mod cache;
 mod column;
-mod lyrics;
+pub mod lyrics;
 mod navigation;
 mod notify;
 mod panes;
@@ -298,6 +298,21 @@ impl Default for Config {
 }
 
 impl Config {
+    /// The lyrics page's options, resolved against the theme in force.
+    ///
+    /// The page is handed this rather than the whole config: it draws five things, and resolving
+    /// the `ktv` colour here means once a frame rather than once per line, which is also what
+    /// keeps an unknown colour to a single warning per name.
+    pub fn lyrics_config(&self, theme: &Theme) -> crate::config::lyrics::LyricsConfig<'_> {
+        crate::config::lyrics::LyricsConfig {
+            style: self.lyric_style,
+            gradient: self.lyric_gradient,
+            ktv_color: theme.resolve_color(&self.lyric_ktv_color),
+            show_translation: self.lyric_translation,
+            title: &self.titles.lyrics,
+        }
+    }
+
     pub fn load() -> Self {
         Self::load_from(&utils::boxpigma_config_dir().join("config.toml"))
     }
