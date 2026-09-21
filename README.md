@@ -302,6 +302,7 @@ cargo build --release
 | v             |        频谱显示开关（同 `:visualizer on`）     |
 | V             |          音高读数开关（同 `:pitch on`）        |
 | y             |       歌词翻译开关（同 `:translation on`）     |
+| 任意可换       |       键位由命令表派生，`[keys]` 里 `命令名 = "键"` 即重绑；值可写多键序列（`"z z"`、`"ctrl+l"`，`Esc` 放弃半截），`""` 解绑     |
 | ,             |       设置页（同 `:settings`）：↑↓ 选择 · ←→ 修改 · 空格 开关     |
 | `ctrl+↑/↓/←/→` |  拖面板边界：顶栏/播放条、侧栏尺寸（同鼠标拖拽）  |
 | :             |      命令模式（vim 风格，Tab 补全，见下节）     |
@@ -514,7 +515,7 @@ Send-boxpigma '{"cmd":"msg","action":{"action":"volume","absolute":0.75}}'  # �
 | `lyric_ktv_color` | `ktv` 样式的填充色：主题字段（`accent` / `text` …）或颜色本身（`blue` / `#4da6ff` / ANSI 序号） |
 | `lyric_translation` | 原文下面是否画译文（同 `y` ／`:translation on\|off`） |
 | `[symbols]` | 字形预设与逐键覆盖（`translation` 是译文行前的标记，默认 `>`） |
-| `[keys]` | 键位重绑：`命令名 = "一个字符"`，`""` 为解绑；不写＝用命令表自带的键 |
+| `[keys]` | 键位重绑：`命令名 = "键序列"`（单键或空格分隔的多键，可带 `ctrl+`/`alt+`），`""` 为解绑；不写＝用命令表自带的键 |
 | `[terminal]` | 鼠标捕获与光标形状 |
 | `[notify]` | 桌面通知开关（切歌 / 出错） |
 | `[cache]` | 内容缓存与 save-on-play |

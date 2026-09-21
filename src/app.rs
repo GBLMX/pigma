@@ -245,6 +245,7 @@ impl App {
             last_tick: Instant::now(),
             lyrics: crate::state::lyrics::LyricsState::default(),
             settings: crate::ui::settings::SettingsState::default(),
+            pending_keys: Vec::new(),
             pane_dividers: crate::layout::Dividers::default(),
             pane_drag: None,
             last_pane_click: None,

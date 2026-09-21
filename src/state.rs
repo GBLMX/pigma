@@ -100,6 +100,9 @@ pub struct State {
     pub lyrics: LyricsState,
     /// Which row of the settings page the cursor is on.
     pub settings: crate::ui::settings::SettingsState,
+    /// The keys of a key sequence that is still being typed (`[keys] z z`): held between presses,
+    /// and cleared by `Esc` or by the key map once the sequence is done with.
+    pub pending_keys: crate::config::keymap::Chord,
     /// The frame's draggable pane edges, rebuilt by the draw pass (`ui::draw`) and consumed by
     /// mouse input — the same contract as `nav_hits`: an edge belongs to the frame that drew it.
     pub pane_dividers: crate::layout::Dividers,

@@ -22,6 +22,24 @@ use crate::{
     ui::playerbar,
 };
 
+/// The key a key event is, for the key map: the keys a binding can name are characters, with
+/// Ctrl/Alt optionally held (Shift is part of the character). Anything else — the arrows, `Tab`,
+/// `Enter` — is not a binding and is left to the key map's own arms.
+fn key_of(key_event: KeyEvent) -> Option<crate::config::keymap::Key> {
+    use crossterm::event::KeyModifiers;
+
+    let KeyCode::Char(code) = key_event.code else {
+        return None;
+    };
+    let alt = key_event.modifiers.contains(KeyModifiers::ALT);
+
+    Some(crate::config::keymap::Key {
+        code,
+        ctrl: key_event.modifiers.contains(KeyModifiers::CONTROL),
+        alt,
+    })
+}
+
 pub(super) fn handle_main_key(app: &mut App, key_event: KeyEvent) -> color_eyre::Result<()> {
     // `Ctrl` + an arrow moves a pane edge, the way dragging one does; nothing else uses it.
     // The page's own keys come first, the way a layered keymap works: what `↑`/`↓`/`←`/`→` mean
@@ -42,22 +60,30 @@ pub(super) fn handle_main_key(app: &mut App, key_event: KeyEvent) -> color_eyre:
     //
     // Built per key press rather than cached: a `[keys]` edit has to take effect the moment it is
     // saved, and a dozen bindings are nothing next to a key press.
-    if let KeyCode::Char(key) = key_event.code
-        && !key_event
-            .modifiers
-            .intersects(crossterm::event::KeyModifiers::CONTROL | crossterm::event::KeyModifiers::ALT)
-        && let Some(name) = crate::config::keymap::Keymap::from_config(&app.config).command(key)
-    {
-        if let Ok(command) = super::ex::ExCommand::parse(name)
-            && let Err(error) = super::ex::execute(app, command)
-        {
-            app.toast(format!("{name}: {error}"));
+    if let Some(key) = key_of(key_event) {
+        let keymap = crate::config::keymap::Keymap::from_config(&app.config);
+        match keymap.advance(&mut app.state.pending_keys, key) {
+            crate::config::keymap::Pressed::Run(name) => {
+                if let Ok(command) = super::ex::ExCommand::parse(name)
+                    && let Err(error) = super::ex::execute(app, command)
+                {
+                    app.toast(format!("{name}: {error}"));
+                }
+                return Ok(());
+            }
+            // The keys so far are the start of a binding: hold them and let the next key decide.
+            // `Esc` gives up on them (see the `Esc` arm below).
+            crate::config::keymap::Pressed::Wait => return Ok(()),
+            // Not a binding: the keys are forgotten and the press carries on to the map below.
+            crate::config::keymap::Pressed::FallThrough => {}
         }
-        return Ok(());
     }
 
     match key_event.code {
         KeyCode::Esc => {
+            // `Esc` also gives up on a half-typed key sequence: a modal keymap needs a way out of
+            // one, and this is the key that means "forget that".
+            app.state.pending_keys.clear();
             // Pages that are not in the breadcrumb stack handle `Esc` in their own layer, before
             // this map runs; what is left here is the restore every other page shares.
             app.state.events.send(NavigationEvent::ContentRestore);
@@ -643,12 +669,14 @@ mod tests {
 
     /// One key press, as the app receives it.
     fn press(app: &mut App, key: char) {
+        press_key(app, KeyCode::Char(key));
+    }
+
+    /// The same, for the keys that are not characters.
+    fn press_key(app: &mut App, key: KeyCode) {
         handle_main_key(
             app,
-            crossterm::event::KeyEvent::new(
-                KeyCode::Char(key),
-                crossterm::event::KeyModifiers::NONE,
-            ),
+            crossterm::event::KeyEvent::new(key, crossterm::event::KeyModifiers::NONE),
         )
         .expect("key");
     }
@@ -695,6 +723,33 @@ mod tests {
         assert!(
             !app.config.playerbar.visible.visualizer,
             "an empty binding leaves the command to the `:` line"
+        );
+    }
+
+    /// A key sequence, typed through the real entry point: the first key is held, the second runs
+    /// the command, and `Esc` gives up on a half-typed one instead of running it later.
+    #[tokio::test]
+    async fn a_key_sequence_runs_when_it_is_complete() {
+        let mut app = app();
+        app.config.keys.insert("spin".to_string(), "w w".to_string());
+        assert!(!app.config.playerbar.spinning_cover, "a fresh config");
+
+        press(&mut app, 'w');
+        assert!(
+            !app.config.playerbar.spinning_cover,
+            "one key of two runs nothing"
+        );
+        press(&mut app, 'w');
+        assert!(app.config.playerbar.spinning_cover, "the sequence ran");
+
+        // Half a sequence, then `Esc`: the held key is forgotten rather than joined by the next
+        // one, so the command does not run.
+        press(&mut app, 'w');
+        press_key(&mut app, KeyCode::Esc);
+        press(&mut app, 'w');
+        assert!(
+            app.config.playerbar.spinning_cover,
+            "`Esc` gave up on the half-typed sequence"
         );
     }
 
