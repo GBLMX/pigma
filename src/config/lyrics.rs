@@ -16,6 +16,9 @@ pub enum LyricStyle {
     /// One line at a time: only the current line, centred, with the same karaoke fill.
     #[serde(alias = "single")]
     OneLine,
+    /// The window again, but the sweep is a single colour (`lyric_ktv_color`) instead of the
+    /// gradient: the karaoke-screen look, with the sung part painted over in blue.
+    Ktv,
     /// The gradient runs along the text and moves with the music, the neighbouring lines
     /// tinted by the same gradient so the whole page flows.
     Flow,
@@ -25,13 +28,14 @@ pub enum LyricStyle {
 
 impl LyricStyle {
     /// Every style, in the order the command line offers them.
-    pub const ALL: [Self; 4] = [Self::Window, Self::OneLine, Self::Flow, Self::Plain];
+    pub const ALL: [Self; 5] = [Self::Window, Self::OneLine, Self::Ktv, Self::Flow, Self::Plain];
 
     /// The name this style is written as in the config and typed in `:lyrics`.
     pub fn name(self) -> &'static str {
         match self {
             Self::Window => "window",
             Self::OneLine => "one_line",
+            Self::Ktv => "ktv",
             Self::Flow => "flow",
             Self::Plain => "plain",
         }
@@ -42,6 +46,7 @@ impl LyricStyle {
         match name.trim().to_ascii_lowercase().as_str() {
             "window" => Some(Self::Window),
             "one_line" | "single" | "oneline" => Some(Self::OneLine),
+            "ktv" | "karaoke" => Some(Self::Ktv),
             "flow" => Some(Self::Flow),
             "plain" => Some(Self::Plain),
             _ => None,
@@ -62,6 +67,7 @@ impl LyricStyle {
         match self {
             Self::Window => "滚动窗口 + 卡拉OK填充",
             Self::OneLine => "一次只显示当前一行",
+            Self::Ktv => "滚动窗口 + 单色（蓝）卡拉OK填充",
             Self::Flow => "渐变沿文字流动，随声音变化",
             Self::Plain => "纯滚动列表，无高亮",
         }

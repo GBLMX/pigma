@@ -11,7 +11,7 @@ use ratatui_image::{Resize, StatefulImage};
 
 use super::{BlockStyle, block::CornerBlock};
 use crate::{
-    config::{LyricStyle, Theme},
+    config::{LyricStyle, Theme, symbols},
     playback::{LyricLine, PlaybackState},
     state::mv::{self, MvPanel},
     utils::{GradientPreset, format::clip_long_text, format_duration},
@@ -54,6 +54,8 @@ struct View<'a> {
     cur_ms: f64,
     colors: &'a Theme,
     gradient: GradientPreset,
+    /// What `ktv` paints the sung part with.
+    ktv_color: Color,
     /// The song's length in milliseconds, when the player knows it. It is what says where the
     /// last line ends — nothing else in the file does.
     total_ms: Option<f64>,
@@ -61,17 +63,32 @@ struct View<'a> {
     tick: u64,
 }
 
+/// What the page is asked to draw beyond the player's own state.
+///
+/// Taken as one struct rather than four more arguments: the page has a style, a gradient, the
+/// `ktv` colour and the translation switch, and every presentation reads some of them.
+pub(super) struct Options<'a> {
+    pub style: LyricStyle,
+    pub gradient: GradientPreset,
+    /// Colour of the sung part in the `ktv` style, resolved against the active theme by the
+    /// caller (a theme field name or a colour of its own — see `Theme::resolve_color`).
+    pub ktv_color: Color,
+    /// Whether the translated lines are drawn under the originals.
+    pub show_translation: bool,
+    pub title: &'a str,
+}
+
 pub(super) fn draw(
     f: &mut Frame,
     player: &PlaybackState,
     bs: &BlockStyle<'_>,
-    gradient: GradientPreset,
-    style: LyricStyle,
-    title: &str,
+    options: Options<'_>,
     area: Rect,
 ) {
+    let gradient = options.gradient;
+    let style = options.style;
     let colors = bs.colors;
-    let block = CornerBlock::from_color(bs, bs.base).title(title, bs.colors);
+    let block = CornerBlock::from_color(bs, bs.base).title(options.title, bs.colors);
     let inner = block.inner(area);
     f.render_widget(block.block_padding(Padding::vertical(1)), area);
 
@@ -114,11 +131,13 @@ pub(super) fn draw(
         translated: player
             .translated_lyrics
             .as_deref()
+            .filter(|_| options.show_translation)
             .filter(|t| !t.is_empty()),
         cur,
         cur_ms,
         colors,
         gradient,
+        ktv_color: options.ktv_color,
         total_ms: player
             .current_song
             .as_ref()
@@ -128,8 +147,9 @@ pub(super) fn draw(
     };
 
     match style {
-        LyricStyle::Window => draw_window(f, &view, inner),
+        LyricStyle::Window => draw_window(f, &view, inner, Fill::Gradient),
         LyricStyle::OneLine => draw_one_line(f, &view, inner),
+        LyricStyle::Ktv => draw_window(f, &view, inner, Fill::Ktv),
         LyricStyle::Flow => draw_flow(f, &view, inner),
         LyricStyle::Plain => draw_plain(f, &view, inner),
     }
@@ -273,6 +293,21 @@ impl<'a> View<'a> {
         line_duration_ms(self.lyrics, i, self.total_ms)
     }
 
+    /// The translation of line `i` drawn as its own line, marked so it reads as the translation
+    /// of the line above it rather than as another lyric.
+    ///
+    /// Italic alone does not tell the two apart: most terminals cannot slant CJK glyphs, so a
+    /// Chinese translation came out looking exactly like the English line above it.
+    fn translation_line(&self, i: usize, style: Style) -> Option<Line<'a>> {
+        let text = self.translation(i)?;
+        let mut line = Line::default();
+        line.push_span(Span::styled(symbols().translation.as_str(), style));
+        line.push_span(Span::styled(" ", style));
+        line.push_span(Span::styled(text, style));
+
+        Some(line.alignment(Alignment::Center))
+    }
+
     /// The translation of a line, when there is one to show.
     fn translation(&self, i: usize) -> Option<&'a str> {
         self.translated?
@@ -287,8 +322,17 @@ impl<'a> View<'a> {
     }
 }
 
+/// How the line being sung is painted in the scrolling window.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Fill {
+    /// The gradient: the sung part forward, the rest of the line reversed.
+    Gradient,
+    /// One flat colour over the sung part, the way a karaoke screen covers a word.
+    Ktv,
+}
+
 /// The default: a scrolling window of the lines around the current one.
-fn draw_window(f: &mut Frame, view: &View<'_>, inner: Rect) {
+fn draw_window(f: &mut Frame, view: &View<'_>, inner: Rect, fill: Fill) {
     let h = inner.height as usize;
     let lines_per_lyric = if view.translated.is_some() { 2 } else { 1 };
     let start = view.window_start(h, lines_per_lyric);
@@ -297,7 +341,10 @@ fn draw_window(f: &mut Frame, view: &View<'_>, inner: Rect) {
     let mut lines: Vec<Line> = Vec::new();
     for i in start..end {
         if i == view.cur {
-            lines.push(karaoke_line(view, i));
+            lines.push(match fill {
+                Fill::Gradient => karaoke_line(view, i),
+                Fill::Ktv => ktv_line(view, i),
+            });
         } else {
             // Theme colours, not fixed greys: a hardcoded grey cannot follow a light theme.
             let d = i.abs_diff(view.cur);
@@ -309,24 +356,20 @@ fn draw_window(f: &mut Frame, view: &View<'_>, inner: Rect) {
             lines.push(Line::from(view.text(i)).style(style));
         }
 
-        if let Some(translation) = view.translation(i) {
-            let t_style = if i == view.cur {
-                Style::default()
-                    .fg(view.colors.text)
-                    .add_modifier(Modifier::ITALIC)
+        let t_style = if i == view.cur {
+            Style::default()
+                .fg(view.colors.text)
+                .add_modifier(Modifier::ITALIC)
+        } else {
+            let d = i.abs_diff(view.cur);
+            if d <= 2 {
+                Style::default().fg(view.colors.muted)
             } else {
-                let d = i.abs_diff(view.cur);
-                if d <= 2 {
-                    Style::default().fg(view.colors.muted)
-                } else {
-                    Style::default().fg(view.colors.border)
-                }
-            };
-            lines.push(
-                Line::from(translation)
-                    .style(t_style)
-                    .alignment(Alignment::Center),
-            );
+                Style::default().fg(view.colors.border)
+            }
+        };
+        if let Some(translation) = view.translation_line(i, t_style) {
+            lines.push(translation);
         }
     }
 
@@ -344,16 +387,13 @@ fn draw_one_line(f: &mut Frame, view: &View<'_>, inner: Rect) {
 
     lines.push(karaoke_line(view, view.cur));
 
-    if let Some(translation) = view.translation(view.cur) {
-        lines.push(
-            Line::from(translation)
-                .style(
-                    Style::default()
-                        .fg(view.colors.text)
-                        .add_modifier(Modifier::ITALIC),
-                )
-                .alignment(Alignment::Center),
-        );
+    if let Some(translation) = view.translation_line(
+        view.cur,
+        Style::default()
+            .fg(view.colors.text)
+            .add_modifier(Modifier::ITALIC),
+    ) {
+        lines.push(translation);
     }
 
     f.render_widget(Paragraph::new(lines), inner);
@@ -376,12 +416,12 @@ fn draw_flow(f: &mut Frame, view: &View<'_>, inner: Rect) {
             (false, 0..=2) => 0.45,
             _ => 0.25,
         };
-        lines.push(flow_line(view, view.text(i), keep));
+        lines.push(flow_line(view, view.text(i), keep, false));
 
         if let Some(translation) = view.translation(i) {
             let t_keep = if i == view.cur { 0.7 } else { 0.25 };
             lines.push(
-                flow_line(view, translation, t_keep)
+                flow_line(view, translation, t_keep, true)
                     .style(Style::default().add_modifier(Modifier::ITALIC)),
             );
         }
@@ -427,17 +467,52 @@ fn line_duration_ms(lyrics: &[LyricLine], i: usize, total_ms: Option<f64>) -> f6
     }
 }
 
+/// The karaoke-screen fill: everything up to the voice is one flat colour — blue, unless the
+/// config says otherwise — and the rest of the line stays in the theme's text colour, so the
+/// words are simply covered as they are sung instead of being tinted by the gradient.
+fn ktv_line<'a>(view: &View<'a>, i: usize) -> Line<'a> {
+    let text = view.text(i);
+    let split_at = sung_chars(view, i);
+    let color = view.ktv_color;
+
+    let mut line = Line::default();
+    for (j, (byte_start, ch)) in text.char_indices().enumerate() {
+        let style = if j < split_at {
+            // Bold as well as coloured: a KTV sweep is a change of colour *and* weight, and it
+            // keeps the edge visible when the colour is close to the line's own.
+            Style::default().fg(color).add_modifier(Modifier::BOLD)
+        } else if j == split_at {
+            // The character the voice is on: a block of the same colour, so the edge of the
+            // fill is visible even when the sung colour is the colour of the text.
+            Style::default().fg(view.colors.bg).bg(color)
+        } else {
+            Style::default().fg(view.colors.text)
+        };
+        line.push_span(Span::styled(
+            &text[byte_start..byte_start + ch.len_utf8()],
+            style,
+        ));
+    }
+
+    line.alignment(Alignment::Center)
+}
+
+/// How many characters of the line at `i` the voice is past — where the fill has got to.
+fn sung_chars(view: &View<'_>, i: usize) -> usize {
+    let line_ms = view.lyrics[i].time.as_millis() as f64;
+    let progress = ((view.cur_ms - line_ms) / view.line_duration(i)).clamp(0.0, 1.0);
+
+    (view.text(i).chars().count() as f64 * progress).floor() as usize
+}
+
 /// The karaoke fill: what has been sung is painted with the gradient, the rest gets the same
 /// gradient reversed, and the boundary character marks where the voice is.
 fn karaoke_line<'a>(view: &View<'a>, i: usize) -> Line<'a> {
     let text = view.text(i);
-    let line_ms = view.lyrics[i].time.as_millis() as f64;
     let gradient = view.gradient;
 
-    let seg_dur = view.line_duration(i);
-    let seg_progress = ((view.cur_ms - line_ms) / seg_dur).clamp(0.0, 1.0);
     let total = text.chars().count();
-    let split_at = (total as f64 * seg_progress).floor() as usize;
+    let split_at = sung_chars(view, i);
 
     let mut line = Line::default();
     for (j, (byte_start, ch)) in text.char_indices().enumerate() {
@@ -469,10 +544,17 @@ fn karaoke_line<'a>(view: &View<'a>, i: usize) -> Line<'a> {
 /// One line with the gradient flowing through it: a character's colour is its position along
 /// the line plus a phase that advances with the frames, so the colours travel through the
 /// words instead of standing still.
-fn flow_line<'a>(view: &View<'a>, text: &'a str, keep: f32) -> Line<'a> {
+fn flow_line<'a>(view: &View<'a>, text: &'a str, keep: f32, marker: bool) -> Line<'a> {
     let phase = flow_phase(view.tick);
     let total = text.chars().count().max(1);
     let mut line = Line::default();
+
+    if marker {
+        let [r, g, b] = view.gradient.color(phase.rem_euclid(1.0));
+        let style = Style::default().fg(fade([r, g, b], view.colors.bg, keep));
+        line.push_span(Span::styled(symbols().translation.as_str(), style));
+        line.push_span(Span::styled(" ", style));
+    }
 
     for (j, (byte_start, ch)) in text.char_indices().enumerate() {
         let t = (j as f32 / total as f32 + phase).rem_euclid(1.0);
@@ -527,7 +609,105 @@ mod tests {
             .collect()
     }
 
+    /// The same shape as [`lyrics`], as a translation: what a translated file hands the player.
+    fn translated_lyrics() -> Vec<LyricLine> {
+        (0..12)
+            .map(|i| LyricLine {
+                time: std::time::Duration::from_millis(i * 5_000),
+                text: format!("译文{i}"),
+            })
+            .collect()
+    }
+
+    /// A translation is drawn under its own line — and marked, because italic alone does not
+    /// separate it from the line above: most terminals cannot slant CJK glyphs, so without the
+    /// marker the two rows read as two lyrics.
+    #[test]
+    fn a_translation_is_drawn_marked_under_its_line() {
+        let rows = symbols(&render_full(
+            LyricStyle::Window,
+            2.5,
+            0,
+            KTV,
+            true,
+            Some(translated_lyrics()),
+        ));
+        let marker = crate::config::symbols().translation.clone();
+
+        // Every line in the window is followed by its own translation, marker and all — a
+        // translation without its marker reads as the next lyric, and one under the wrong line
+        // misreads the song. (The rows keep a blank for the second cell of each wide character,
+        // so the comparison drops spaces.)
+        let flat: Vec<String> = rows.iter().map(|row| row.replace(' ', "")).collect();
+        let pairs: Vec<(&String, &String)> = flat
+            .iter()
+            .zip(flat.iter().skip(1))
+            .filter(|(original, _)| original.starts_with("line"))
+            .collect();
+
+        assert!(pairs.len() >= 3, "{rows:?}");
+        for (original, translation) in pairs {
+            let n = original.trim_start_matches("line");
+            assert_eq!(translation, &format!("{marker}译文{n}"), "{rows:?}");
+        }
+    }
+
+    /// The switch is what decides whether they are drawn; the file decides whether there is
+    /// anything to draw — and the two are independent.
+    #[test]
+    fn the_translation_switch_hides_translations() {
+        let shown = symbols(&render_full(
+            LyricStyle::Window,
+            2.5,
+            0,
+            KTV,
+            true,
+            Some(translated_lyrics()),
+        ));
+        let hidden = symbols(&render_full(
+            LyricStyle::Window,
+            2.5,
+            0,
+            KTV,
+            false,
+            Some(translated_lyrics()),
+        ));
+
+        assert!(shown.iter().any(|r| r.contains('译')), "{shown:?}");
+        assert!(!hidden.iter().any(|r| r.contains('译')), "{hidden:?}");
+    }
+
+    /// `ktv` paints the sung part in one flat colour — that is what makes it a karaoke screen
+    /// rather than a tinted line. The gradient style is what it deliberately is not.
+    #[test]
+    fn ktv_fills_the_sung_part_with_one_colour() {
+        let ktv = colored_cells(&render(LyricStyle::Ktv, 2_500.0, 0));
+        let gradient = colored_cells(&render(LyricStyle::Window, 2_500.0, 0));
+
+        assert!(ktv.contains(&KTV), "{ktv:?}");
+        assert!(
+            !gradient.contains(&KTV),
+            "the gradient style must not paint with the ktv colour: {gradient:?}"
+        );
+    }
+
+    /// A blue that is none of the theme's own colours, so "the sung part is painted with
+    /// `lyric_ktv_color`" is distinguishable from "it is the text colour".
+    const KTV: Color = Color::Rgb(77, 166, 255);
+
     fn render(style: LyricStyle, position_secs: f64, tick: u64) -> Buffer {
+        render_full(style, position_secs, tick, KTV, true, None)
+    }
+
+    /// The same, with a translation attached and the two switches the page obeys.
+    fn render_full(
+        style: LyricStyle,
+        position_secs: f64,
+        tick: u64,
+        ktv_color: Color,
+        show_translation: bool,
+        translated: Option<Vec<LyricLine>>,
+    ) -> Buffer {
         let theme = Theme::default();
         // A line with a gradient that differs from every theme colour, so the karaoke fill and
         // the flow are distinguishable from the surrounding text.
@@ -552,6 +732,7 @@ mod tests {
                 local_path: None,
             })),
             lyrics: Some(lyrics()),
+            translated_lyrics: translated,
             position_secs,
             ..PlaybackState::default()
         };
@@ -563,9 +744,13 @@ mod tests {
                     f,
                     &player,
                     &bs,
-                    GradientPreset::Rainbow,
-                    style,
-                    "LYRICS",
+                    Options {
+                        style,
+                        gradient: GradientPreset::Rainbow,
+                        ktv_color,
+                        show_translation,
+                        title: "LYRICS",
+                    },
                     f.area(),
                 );
             })
@@ -766,9 +951,13 @@ mod panel_tests {
                     f,
                     player,
                     &bs,
-                    GradientPreset::Rainbow,
-                    style,
-                    TITLE,
+                    Options {
+                        style,
+                        gradient: GradientPreset::Rainbow,
+                        ktv_color: Color::Rgb(77, 166, 255),
+                        show_translation: true,
+                        title: TITLE,
+                    },
                     f.area(),
                 );
             })

@@ -57,6 +57,7 @@ static HELP_ITEMS: LazyLock<Vec<HelpRow>> = LazyLock::new(|| {
         row("r", "手动刷新列表内容"),
         row("v", "频谱开关"),
         row("V", "音高读数开关"),
+        row("y", "歌词译文开关"),
     ]);
     items
 });

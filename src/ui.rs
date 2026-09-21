@@ -322,13 +322,20 @@ pub(crate) fn draw_lyrics(f: &mut Frame, app: &mut App, areas: &layout::LayoutAr
         app.terminal_background,
         app.state.tick,
     );
+    // The `ktv` colour is a named theme field or a colour of its own, so it is resolved here,
+    // against the theme in force right now — the page cannot know which theme is active.
+    let ktv_color = bs.colors.resolve_color(&app.config.lyric_ktv_color);
     lyrics::draw(
         f,
         &app.playback.state,
         &bs,
-        app.config.lyric_gradient,
-        app.config.lyric_style,
-        &app.config.titles.lyrics,
+        lyrics::Options {
+            style: app.config.lyric_style,
+            gradient: app.config.lyric_gradient,
+            ktv_color,
+            show_translation: app.config.lyric_translation,
+            title: &app.config.titles.lyrics,
+        },
         areas.content,
     );
 }

@@ -259,6 +259,11 @@ pub(super) fn handle_main_key(app: &mut App, key_event: KeyEvent) -> color_eyre:
             let on = !app.config.playerbar.visible.pitch;
             app.set_pitch(on);
         }
+        // `y` shows or hides the translations, exactly like `:translation`.
+        KeyCode::Char('y' | 'Y') => {
+            let on = !app.config.lyric_translation;
+            app.set_lyric_translation(on);
+        }
         // `t` turns the record, exactly like `:spin`.
         KeyCode::Char('t' | 'T') => {
             let on = !app.config.playerbar.spinning_cover;

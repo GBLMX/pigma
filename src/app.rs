@@ -377,6 +377,14 @@ impl App {
     /// `[playerbar] spinning_cover`: the record turns while a track plays. The frame reads this
     /// config every time it draws, so the flip is on screen at once; saving is what makes it
     /// survive the next start.
+    /// Draw (or hide) the translated lyric lines. The page reads the flag on every draw, so
+    /// nothing else has to be told.
+    pub fn set_lyric_translation(&mut self, on: bool) {
+        self.config.lyric_translation = on;
+        self.config.save();
+        self.toast(format!("歌词译文: {}", if on { "开" } else { "关" }));
+    }
+
     pub fn set_spinning_cover(&mut self, on: bool) {
         self.config.playerbar.spinning_cover = on;
         self.config.save();
