@@ -12,8 +12,6 @@
 //! The options a row cycles through are the command's own completions ([`super::super::input::ex::options_for`]),
 //! so a new preset appears in the page the moment the command line offers it.
 
-use crate::utils::Named;
-
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Layout, Rect},

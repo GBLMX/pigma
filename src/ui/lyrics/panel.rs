@@ -9,8 +9,6 @@ use ratatui::{
 };
 use ratatui_image::{Resize, StatefulImage};
 
-use crate::utils::Named;
-
 use crate::{
     config::{Pane, PanesConfig, Theme},
     layout::{Axis, clamp},
@@ -167,6 +165,7 @@ mod panel_tests {
 
     use super::super::{draw, lines::lyrics};
     use super::*;
+    use crate::utils::Named;
     use crate::{
         config::{BorderConfig, LyricStyle, lyrics::LyricsConfig},
         layout::Dividers,

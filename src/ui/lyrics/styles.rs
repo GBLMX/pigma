@@ -13,8 +13,6 @@ use ratatui::{
     widgets::Paragraph,
 };
 
-use crate::utils::Named;
-
 use super::view::View;
 use crate::config::{LyricStyle, symbols};
 
@@ -313,6 +311,7 @@ mod tests {
         lines::{lyrics, translated as translated_lyrics},
     };
     use super::*;
+    use crate::utils::Named;
     use crate::{
         config::{PanesConfig, Theme, lyrics::LyricsConfig},
         layout::Dividers,
