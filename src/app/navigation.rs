@@ -98,8 +98,12 @@ impl App {
         self.state.navigation.nav.subtitle = None;
         self.state.navigation.generation += 1;
         let generation = self.state.navigation.generation;
-        if api == ApiEndpoint::Search {
-            self.state.navigation.nav.subtitle = Some("热搜榜".into());
+        // Which slice of the data this item is, where the name alone does not say.
+        match api {
+            ApiEndpoint::Search => self.state.navigation.nav.subtitle = Some("热搜榜".into()),
+            ApiEndpoint::RecordWeek => self.state.navigation.nav.subtitle = Some("近一周".into()),
+            ApiEndpoint::RecordAll => self.state.navigation.nav.subtitle = Some("全部时间".into()),
+            _ => {}
         }
         let cache = self.service.cache().clone();
         let service = self.service.clone();

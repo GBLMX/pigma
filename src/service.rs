@@ -32,6 +32,12 @@ pub enum ApiEndpoint {
     Recent,
     Search,
     TopSingers,
+    /// The listener's play ranking, all time and last week. The two windows are two items
+    /// rather than one with a switch: the table has nowhere to put a switch.
+    RecordAll,
+    RecordWeek,
+    /// Radio stations the service recommends, as opposed to the subscribed list.
+    RadioRecommend,
 }
 
 impl ApiEndpoint {
@@ -53,6 +59,9 @@ impl ApiEndpoint {
             "recent" | "__recent__" => Some(ApiEndpoint::Recent),
             "search" => Some(ApiEndpoint::Search),
             "top_singers" => Some(ApiEndpoint::TopSingers),
+            "record_all" | "__record_all__" => Some(ApiEndpoint::RecordAll),
+            "record_week" | "__record_week__" => Some(ApiEndpoint::RecordWeek),
+            "radio_recommend" => Some(ApiEndpoint::RadioRecommend),
             _ => None,
         }
     }
@@ -107,6 +116,8 @@ impl ApiService {
                 | ApiEndpoint::UserSubscribedSongList
                 | ApiEndpoint::SavedAlbums
                 | ApiEndpoint::Recent
+                | ApiEndpoint::RecordAll
+                | ApiEndpoint::RecordWeek
         );
         if requires_login && !self.client.is_logged_in() {
             return (ContentState::Error("未登录".into()), None);
@@ -151,6 +162,26 @@ impl ApiService {
             ApiEndpoint::Recent => content_result(self.client.recent_songs(limit).await, |songs| {
                 ContentState::Songs(arc_songs(songs))
             }),
+            ApiEndpoint::RecordAll | ApiEndpoint::RecordWeek => {
+                let week = api == ApiEndpoint::RecordWeek;
+                match uid {
+                    // The ranking is a list of songs in the order it ranks them; the counts it
+                    // is built from are what the order means, so the table shows the order.
+                    Some(uid) => content_result(self.client.user_record(uid, week).await, |records| {
+                        ContentState::Songs(
+                            records
+                                .into_iter()
+                                .map(|record| std::sync::Arc::new(record.song))
+                                .collect(),
+                        )
+                    }),
+                    None => (ContentState::Error("未登录".into()), None),
+                }
+            }
+            ApiEndpoint::RadioRecommend => content_result(
+                self.client.djradio_recommend().await,
+                ContentState::SongLists,
+            ),
             ApiEndpoint::UserSongList => match uid {
                 Some(uid) => content_result(
                     self.client.user_song_list(uid, 0, limit).await,
@@ -688,4 +719,51 @@ fn content_result<T>(
 /// playback queue share ownership, avoiding deep-cloning the whole list between content and queue.
 fn arc_songs(songs: Vec<ncm_api::SongInfo>) -> Vec<Arc<ncm_api::SongInfo>> {
     songs.into_iter().map(Arc::new).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::NavConfig;
+
+    /// Every built-in navigation item must name an endpoint the parser knows. A typo there is a
+    /// sidebar row that opens "未知: …" instead of a page, and nothing else in the app would
+    /// notice — the row still draws, still takes Enter, and only then does nothing useful.
+    #[test]
+    fn every_built_in_navigation_item_names_a_known_endpoint() {
+        for section in NavConfig::default().sections {
+            for item in section.items {
+                let Some(api) = item.api.as_deref() else {
+                    continue;
+                };
+                assert!(
+                    ApiEndpoint::parse(api).is_some(),
+                    "{} names `{api}`, which is not an endpoint",
+                    item.name.trim()
+                );
+            }
+        }
+    }
+
+    /// The ranking's two windows are two endpoints, and nothing may quietly turn one into the
+    /// other: they are the same payload with different counts in it.
+    #[test]
+    fn the_ranking_windows_stay_apart() {
+        assert_eq!(
+            ApiEndpoint::parse("record_week"),
+            Some(ApiEndpoint::RecordWeek)
+        );
+        assert_eq!(
+            ApiEndpoint::parse("record_all"),
+            Some(ApiEndpoint::RecordAll)
+        );
+        assert_eq!(
+            ApiEndpoint::parse("radio_recommend"),
+            Some(ApiEndpoint::RadioRecommend)
+        );
+        assert_eq!(
+            ApiEndpoint::parse("recommend_songs"),
+            Some(ApiEndpoint::RecommendSongs)
+        );
+    }
 }

@@ -57,6 +57,11 @@ impl Default for NavConfig {
                             title_template: None,
                         },
                         NavItemConfig {
+                            name: " 推荐电台".into(),
+                            api: Some("radio_recommend".into()),
+                            title_template: None,
+                        },
+                        NavItemConfig {
                             name: " 搜索".into(),
                             api: Some("search".into()),
                             title_template: None,
@@ -104,6 +109,16 @@ impl Default for NavConfig {
                         NavItemConfig {
                             name: " 最近播放".into(),
                             api: Some("recent".into()),
+                            title_template: None,
+                        },
+                        NavItemConfig {
+                            name: " 听歌排行·本周".into(),
+                            api: Some("record_week".into()),
+                            title_template: None,
+                        },
+                        NavItemConfig {
+                            name: " 听歌排行·全部".into(),
+                            api: Some("record_all".into()),
                             title_template: None,
                         },
                     ],
