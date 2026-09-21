@@ -461,42 +461,26 @@ fn split_head(line: &str) -> (String, &str) {
     }
 }
 
-/// The values a command accepts after it — its own completion list, so a row on the settings
-/// page offers exactly what the command line would.
-pub(crate) fn options_for(command: &str, themes: &[String]) -> Vec<String> {
-    let themes: Vec<&str> = themes.iter().map(String::as_str).collect();
-    candidate_names(&format!("{command} "), "", &themes)
-}
-
-/// Completions for the word being typed: command names, theme names after `:theme`, and the
-/// fixed lists the value-taking commands draw from.
+/// Completions for the word being typed, from the command table: the command names, and then, for
+/// a command that takes values, the pool its own row carries ([`crate::state::command::ArgsPool`]).
+///
+/// Those pools used to be a second table here, so a command's options lived in two places and a new
+/// preset had to be added to both. They live on the row now, the way Helix keeps each command's
+/// completer beside the command.
 fn candidate_names(head: &str, typed: &str, themes: &[&str]) -> Vec<String> {
     let name = head.trim();
-    let pool: Vec<&str> = if name.is_empty() {
+    let pool: Vec<String> = if name.is_empty() {
         crate::state::command_names()
+            .iter()
+            .map(|name| (*name).to_string())
+            .collect()
     } else {
-        match name {
-            "theme" => themes.to_vec(),
-            "visualizer" | "pitch" | "mouse" | "saveonplay" | "spin" | "translation" => {
-                vec!["off", "on"]
-            }
-            "notify" => NotifySwitch::ALL
-                .iter()
-                .map(|switch| switch.name())
-                .collect(),
-            "cursor" => CURSOR_STYLES.iter().map(|(name, _)| *name).collect(),
-            "lyricgradient" => GRADIENTS.iter().map(|(name, _)| *name).collect(),
-            "pane" => Pane::names(),
-            "layout" => vec!["default", "minimal", "modern"],
-            "lyrics" => LyricStyle::ALL.iter().map(|s| s.name()).collect(),
-            "progress" => ProgressStyle::ALL.iter().map(|s| s.name()).collect(),
-            _ => Vec::new(),
-        }
+        let themes: Vec<String> = themes.iter().map(|theme| (*theme).to_string()).collect();
+        crate::state::command::args_for(name, &themes)
     };
 
     pool.into_iter()
         .filter(|candidate| candidate.starts_with(typed))
-        .map(str::to_string)
         .collect()
 }
 

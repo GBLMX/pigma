@@ -12,6 +12,8 @@
 //! The options a row cycles through are the command's own completions ([`super::super::input::ex::options_for`]),
 //! so a new preset appears in the page the moment the command line offers it.
 
+use crate::utils::Named;
+
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Layout, Rect},
@@ -218,9 +220,11 @@ fn value_at(doc: &toml_edit::DocumentMut, key: &str) -> String {
     }
 }
 
-/// The options a row cycles through: the ones its own command line offers after it.
+/// The options a row cycles through: the ones its own command offers after it — read from the
+/// command's row, which is the same list the `:` line completes from.
 pub fn options(setting: &Setting, themes: &[String]) -> Vec<String> {
-    ex::options_for(setting.ex, themes)
+    let command = setting.ex.split_whitespace().next().unwrap_or(setting.ex);
+    crate::state::command::args_for(command, themes)
 }
 
 /// Change a row by one step: the command does the work, exactly as if it had been typed.

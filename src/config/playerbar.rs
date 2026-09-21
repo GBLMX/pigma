@@ -81,15 +81,6 @@ impl ProgressStyle {
         },
     ];
 
-    /// Every style, in the order `:progress` and its completion offer them.
-    pub const ALL: [Self; 5] = [
-        Self::Thick,
-        Self::Segment,
-        Self::Line,
-        Self::Blocks,
-        Self::Plain,
-    ];
-
     fn spec(self) -> &'static ProgressSpec {
         Self::SPECS
             .iter()
@@ -104,13 +95,6 @@ impl ProgressStyle {
     /// Short description, for the toast and the command line's completion list.
     pub fn describe(self) -> &'static str {
         self.spec().describe
-    }
-
-    pub fn parse(name: &str) -> Option<Self> {
-        let name = name.trim().to_ascii_lowercase();
-        Self::ALL
-            .into_iter()
-            .find(|style| style.name() == name.replace('-', "_"))
     }
 
     /// The next style, for the bare `:progress`: the cycle is `ALL`'s, so a style cannot be
@@ -131,6 +115,24 @@ impl ProgressStyle {
         self.spec().gradient
     }
 }
+impl Named for ProgressStyle {
+    const ALL: &'static [Self] = &[
+        Self::Thick,
+        Self::Segment,
+        Self::Line,
+        Self::Blocks,
+        Self::Plain,
+    ];
+
+    fn name(self) -> &'static str {
+        self.spec().name
+    }
+
+    fn describe(self) -> &'static str {
+        self.spec().describe
+    }
+}
+
 
 /// The progress bar's gradient setting, in the three states one key has to express.
 ///
@@ -411,7 +413,7 @@ mod tests {
             progress_style: ProgressStyle,
         }
 
-        for style in ProgressStyle::ALL {
+        for style in ProgressStyle::ALL.iter().copied() {
             let text = toml_edit::ser::to_string_pretty(&Holder {
                 progress_style: style,
             })
@@ -448,7 +450,7 @@ mod tests {
     /// wide would misdraw the bar (and every style has a describe text for the toast).
     #[test]
     fn every_style_has_a_single_cell_symbol_and_a_description() {
-        for style in ProgressStyle::ALL {
+        for style in ProgressStyle::ALL.iter().copied() {
             let (filled, unfilled) = style.symbols();
 
             assert!(!filled.is_empty(), "{}: empty filled symbol", style.name());

@@ -8,6 +8,8 @@ use ratatui::{
     widgets::{Padding, Paragraph},
 };
 
+use crate::utils::Named;
+
 use super::{
     BlockStyle,
     block::CornerBlock,

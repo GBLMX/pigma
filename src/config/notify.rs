@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::utils::Named;
+
 /// Which events raise a terminal notification. Off by default, like opencode's `attention`
 /// block: an app that starts notifying on its own is worse than one that waits to be asked.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -27,5 +29,36 @@ mod tests {
             parsed.song_change && !parsed.errors,
             "the rest keeps its default"
         );
+    }
+}
+
+/// One `[notify]` switch: the events the app can announce.
+///
+/// It lives here rather than with the `:notify` command because it *is* the config block: the two
+/// variants are the two keys, so the switch, its name, its column in the config and the word the
+/// command line takes are one thing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotifySwitch {
+    /// Announce the song that starts playing.
+    SongChange,
+    /// Announce playback failures.
+    Errors,
+}
+
+impl Named for NotifySwitch {
+    const ALL: &'static [Self] = &[Self::SongChange, Self::Errors];
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::SongChange => "song_change",
+            Self::Errors => "errors",
+        }
+    }
+
+    fn describe(self) -> &'static str {
+        match self {
+            Self::SongChange => "切歌时通知当前曲目",
+            Self::Errors => "播放出错时通知",
+        }
     }
 }

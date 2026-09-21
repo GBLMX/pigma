@@ -33,6 +33,19 @@ pub enum CursorStyle {
     Bar,
 }
 
+impl crate::utils::Named for CursorStyle {
+    const ALL: &'static [Self] = &[Self::Default, Self::Block, Self::Underline, Self::Bar];
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::Block => "block",
+            Self::Underline => "underline",
+            Self::Bar => "bar",
+        }
+    }
+}
+
 impl CursorStyle {
     /// The escape sequence this style is written as.
     pub fn command(self) -> crossterm::cursor::SetCursorStyle {

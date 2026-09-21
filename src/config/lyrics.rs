@@ -6,7 +6,7 @@
 use ratatui::style::Color;
 use serde::{Deserialize, Serialize};
 
-use crate::utils::GradientPreset;
+use crate::utils::{GradientPreset, Named};
 
 /// Which lyric presentation to draw.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -29,51 +29,78 @@ pub enum LyricStyle {
     Plain,
 }
 
+/// One row of the style table: everything a style decides, in one place.
+///
+/// The same shape as [`crate::config::ProgressStyle`]'s, and for the same reason: with the name and
+/// the description in one row, a new style is a variant plus a row — and everything that reads the
+/// table (parsing, the completion list, the toast, the bare `:lyrics` cycle, the help) follows,
+/// because there is nowhere else to write it.
+struct StyleSpec {
+    style: LyricStyle,
+    name: &'static str,
+    describe: &'static str,
+}
+
+impl Named for LyricStyle {
+    const ALL: &'static [Self] = &[
+        Self::Window,
+        Self::OneLine,
+        Self::Ktv,
+        Self::Flow,
+        Self::Plain,
+    ];
+
+    /// The spellings that are not the style's own name: the squashed form the first version of
+    /// the config accepted, and the word the karaoke style is asked for by.
+    const ALIASES: &'static [(&'static str, Self)] = &[
+        ("single", Self::OneLine),
+        ("oneline", Self::OneLine),
+        ("karaoke", Self::Ktv),
+    ];
+
+    fn name(self) -> &'static str {
+        self.spec().name
+    }
+
+    fn describe(self) -> &'static str {
+        self.spec().describe
+    }
+}
+
 impl LyricStyle {
-    /// Every style, in the order the command line offers them.
-    pub const ALL: [Self; 5] = [Self::Window, Self::OneLine, Self::Ktv, Self::Flow, Self::Plain];
+    const SPECS: [StyleSpec; 5] = [
+        StyleSpec {
+            style: Self::Window,
+            name: "window",
+            describe: "滚动窗口 + 卡拉OK填充",
+        },
+        StyleSpec {
+            style: Self::OneLine,
+            name: "one_line",
+            describe: "一次只显示当前一行",
+        },
+        StyleSpec {
+            style: Self::Ktv,
+            name: "ktv",
+            describe: "滚动窗口 + 单色（蓝）卡拉OK填充",
+        },
+        StyleSpec {
+            style: Self::Flow,
+            name: "flow",
+            describe: "渐变沿文字流动，随声音变化",
+        },
+        StyleSpec {
+            style: Self::Plain,
+            name: "plain",
+            describe: "纯滚动列表，无高亮",
+        },
+    ];
 
-    /// The name this style is written as in the config and typed in `:lyrics`.
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Window => "window",
-            Self::OneLine => "one_line",
-            Self::Ktv => "ktv",
-            Self::Flow => "flow",
-            Self::Plain => "plain",
-        }
-    }
-
-    /// Parse a style name, accepting the aliases the config accepts.
-    pub fn parse(name: &str) -> Option<Self> {
-        match name.trim().to_ascii_lowercase().as_str() {
-            "window" => Some(Self::Window),
-            "one_line" | "single" | "oneline" => Some(Self::OneLine),
-            "ktv" | "karaoke" => Some(Self::Ktv),
-            "flow" => Some(Self::Flow),
-            "plain" => Some(Self::Plain),
-            _ => None,
-        }
-    }
-
-    /// The style after this one, wrapping around: what a bare `:lyrics` cycles through.
-    ///
-    /// Derived from [`Self::ALL`] instead of a hand-written chain, so adding a style cannot
-    /// leave the cycle behind — a new variant used to be skippable here without a word.
-    pub fn next(self) -> Self {
-        let at = Self::ALL.iter().position(|style| *style == self).unwrap_or(0);
-        Self::ALL[(at + 1) % Self::ALL.len()]
-    }
-
-    /// Short description, for the help and the command line's completion list.
-    pub fn describe(self) -> &'static str {
-        match self {
-            Self::Window => "滚动窗口 + 卡拉OK填充",
-            Self::OneLine => "一次只显示当前一行",
-            Self::Ktv => "滚动窗口 + 单色（蓝）卡拉OK填充",
-            Self::Flow => "渐变沿文字流动，随声音变化",
-            Self::Plain => "纯滚动列表，无高亮",
-        }
+    fn spec(self) -> &'static StyleSpec {
+        Self::SPECS
+            .iter()
+            .find(|spec| spec.style == self)
+            .expect("every style has a row")
     }
 }
 
@@ -108,7 +135,7 @@ mod tests {
             lyric_style: LyricStyle,
         }
 
-        for style in LyricStyle::ALL {
+        for style in LyricStyle::ALL.iter().copied() {
             let text = toml_edit::ser::to_string_pretty(&Holder { lyric_style: style })
                 .expect("serialize");
             let back: Holder = toml_edit::de::from_str(&text).expect("deserialize");

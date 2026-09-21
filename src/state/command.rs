@@ -1,3 +1,53 @@
+use crate::config::{LyricStyle, NotifySwitch, Pane, ProgressStyle};
+use crate::utils::{GradientPreset, Named, terminal::CursorStyle};
+
+/// The values a command accepts after it: its completion pool, and — since the settings page asks
+/// the same question — the options a row of that page cycles through.
+///
+/// It lives on the command's own row, the way Helix keeps each command's completer beside the
+/// command itself: one row per command is the whole vocabulary, so the `:` line's `Tab`, the
+/// settings page's options and the palette cannot disagree about what a command takes.
+pub type ArgsPool = fn(&[String]) -> Vec<String>;
+
+/// Takes nothing after its name.
+pub fn no_args(_: &[String]) -> Vec<String> {
+    Vec::new()
+}
+
+/// `on` / `off`, the shape every switch command shares.
+pub fn on_off(_: &[String]) -> Vec<String> {
+    vec!["off".to_string(), "on".to_string()]
+}
+
+/// The names of a `Named` enum, in the order it offers them.
+fn names_of<T: Named + Copy>(_: &[String]) -> Vec<String> {
+    T::ALL.iter().map(|item| item.name().to_string()).collect()
+}
+
+fn themes(themes: &[String]) -> Vec<String> {
+    themes.to_vec()
+}
+
+fn layouts(_: &[String]) -> Vec<String> {
+    vec!["default".into(), "minimal".into(), "modern".into()]
+}
+
+fn notify_switches(_: &[String]) -> Vec<String> {
+    NotifySwitch::ALL
+        .iter()
+        .map(|switch| switch.name().to_string())
+        .collect()
+}
+
+/// The values `name` accepts, taken from the row that names it.
+pub fn args_for(name: &str, themes: &[String]) -> Vec<String> {
+    COMMANDS
+        .iter()
+        .find(|command| command.name == name)
+        .map(|command| (command.args)(themes))
+        .unwrap_or_default()
+}
+
 /// One thing the user can ask for, described once and reached three ways: by key, from the `:`
 /// command line, and from the palette.
 ///
@@ -20,6 +70,8 @@ pub struct Command {
     /// Whether it needs an argument. The palette lists these, but Enter opens the command line
     /// with the name filled in rather than running it and reporting a missing argument.
     pub needs_argument: bool,
+    /// The values it accepts after its name — see [`ArgsPool`].
+    pub args: ArgsPool,
     /// Whether the palette lists it at all. Aliases such as `q` are for the command line.
     pub in_palette: bool,
     /// The palette section this entry sits in, `None` for the root list. Sections are the
@@ -31,12 +83,18 @@ pub struct Command {
 
 /// Shorthand for the common case: runs its own name, no argument, listed in the palette, no
 /// section of its own.
-const fn simple(name: &'static str, summary: &'static str, key: Option<&'static str>) -> Command {
+const fn simple(
+    name: &'static str,
+    summary: &'static str,
+    key: Option<&'static str>,
+    args: ArgsPool,
+) -> Command {
     Command {
         name,
         summary,
         key,
         ex: name,
+        args,
         needs_argument: false,
         in_palette: true,
         group: None,
@@ -53,12 +111,14 @@ const fn setting(
     ex: &'static str,
     summary: &'static str,
     group: &'static str,
+    args: ArgsPool,
 ) -> Command {
     Command {
         name,
         summary,
         key: None,
         ex,
+        args,
         needs_argument: false,
         in_palette: true,
         group: Some(group),
@@ -71,24 +131,25 @@ const fn setting(
 /// the theme registry rather than from static text, which is why it is the last one here. Entries
 /// carrying a `group` are the settings, listed in the order their section first appears here.
 pub const COMMANDS: &[Command] = &[
-    simple("help", "快捷键面板", Some("?")),
-    simple("login", "登录页（二维码 / 账号 / 短信 / 签到）", Some("L")),
-    simple("logout", "退出登录", None),
-    simple("sign", "在登录页里每日签到", None),
-    simple("visualizer", "频谱开关", Some("v")),
-    simple("pitch", "音高读数开关", Some("V")),
-    simple("layout", "播放条布局", None),
-    simple("border", "边框模式开关", Some("b")),
-    simple("navpos", "切换导航栏位置", Some("z")),
-    simple("spin", "封面旋转开关", Some("t")),
-    simple("save", "立即写回配置", None),
-    simple("quit", "退出程序", Some("q")),
+    simple("help", "快捷键面板", Some("?"), no_args),
+    simple("login", "登录页（二维码 / 账号 / 短信 / 签到）", Some("L"), no_args),
+    simple("logout", "退出登录", None, no_args),
+    simple("sign", "在登录页里每日签到", None, no_args),
+    simple("visualizer", "频谱开关", Some("v"), on_off),
+    simple("pitch", "音高读数开关", Some("V"), on_off),
+    simple("layout", "播放条布局", None, layouts),
+    simple("border", "边框模式开关", Some("b"), no_args),
+    simple("navpos", "切换导航栏位置", Some("z"), no_args),
+    simple("spin", "封面旋转开关", Some("t"), on_off),
+    simple("save", "立即写回配置", None, no_args),
+    simple("quit", "退出程序", Some("q"), no_args),
     // Aliases the command line accepts; the palette shows the canonical name.
     Command {
         name: "q",
         summary: "退出程序（:quit 的别名）",
         key: None,
         ex: "q",
+        args: no_args,
         needs_argument: false,
         in_palette: false,
         group: None,
@@ -99,6 +160,7 @@ pub const COMMANDS: &[Command] = &[
         summary: "切换主题",
         key: None,
         ex: "theme",
+        args: themes,
         needs_argument: true,
         in_palette: true,
         group: None,
@@ -108,6 +170,7 @@ pub const COMMANDS: &[Command] = &[
         summary: "音量（0-100 或 +5 / -5）",
         key: None,
         ex: "volume",
+        args: no_args,
         needs_argument: true,
         in_palette: true,
         group: None,
@@ -117,6 +180,7 @@ pub const COMMANDS: &[Command] = &[
         summary: "跳转（秒、+15、-30 或 50%）",
         key: None,
         ex: "seek",
+        args: no_args,
         needs_argument: true,
         in_palette: true,
         group: None,
@@ -126,6 +190,7 @@ pub const COMMANDS: &[Command] = &[
         summary: "在登录页里用账号密码登录",
         key: None,
         ex: "signin",
+        args: no_args,
         needs_argument: true,
         in_palette: true,
         group: None,
@@ -135,6 +200,7 @@ pub const COMMANDS: &[Command] = &[
         summary: "在登录页里发送短信验证码",
         key: None,
         ex: "sms",
+        args: no_args,
         needs_argument: true,
         in_palette: true,
         group: None,
@@ -144,6 +210,7 @@ pub const COMMANDS: &[Command] = &[
         summary: "在登录页里用短信验证码登录",
         key: None,
         ex: "smslogin",
+        args: no_args,
         needs_argument: true,
         in_palette: true,
         group: None,
@@ -153,6 +220,7 @@ pub const COMMANDS: &[Command] = &[
         summary: "打开设置页（同 `,`）",
         key: None,
         ex: "settings",
+        args: no_args,
         needs_argument: false,
         in_palette: true,
         group: None,
@@ -162,14 +230,28 @@ pub const COMMANDS: &[Command] = &[
     // terminal ones by the sequence its command writes — so the switch is live rather than
     // waiting for the next start. They are filed by the config block they come from, which is
     // what puts them in a section of the palette instead of the root list.
-    setting("notify", "notify song_change", "切歌时通知当前曲目", "通知"),
-    setting("notify", "notify errors", "播放出错时通知", "通知"),
-    setting("mouse", "mouse", "鼠标捕获开关", "终端"),
-    setting("cursor", "cursor", "输入框光标形状", "终端"),
-    setting("progress", "progress", "进度条样式", "播放条"),
-    setting("lyrics", "lyrics", "歌词显示样式", "歌词"),
-    setting("lyricgradient", "lyricgradient", "歌词渐变预设", "歌词"),
-    setting("saveonplay", "saveonplay", "边听边存开关", "缓存"),
+    // `:pane <面板> [on|off|toggle]` — the panes are a config block of their own, so the row is
+    // filed under them, and it was the one command the table was missing. It is one of the few
+    // that cannot run bare (the panel it names is the whole point), so the palette opens the
+    // command line with `pane ` filled in rather than running it and reporting a missing panel.
+    Command {
+        name: "pane",
+        summary: "面板显示开关",
+        key: None,
+        ex: "pane",
+        needs_argument: true,
+        args: names_of::<Pane>,
+        in_palette: true,
+        group: Some("面板"),
+    },
+    setting("notify", "notify song_change", "切歌时通知当前曲目", "通知", notify_switches),
+    setting("notify", "notify errors", "播放出错时通知", "通知", notify_switches),
+    setting("mouse", "mouse", "鼠标捕获开关", "终端", on_off),
+    setting("cursor", "cursor", "输入框光标形状", "终端", names_of::<CursorStyle>),
+    setting("progress", "progress", "进度条样式", "播放条", names_of::<ProgressStyle>),
+    setting("lyrics", "lyrics", "歌词显示样式", "歌词", names_of::<LyricStyle>),
+    setting("lyricgradient", "lyricgradient", "歌词渐变预设", "歌词", names_of::<GradientPreset>),
+    setting("saveonplay", "saveonplay", "边听边存开关", "缓存", on_off),
 ];
 
 /// Every `:` name, in table order, once each — what completion offers.

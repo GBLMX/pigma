@@ -9,6 +9,8 @@ use ratatui::{
 };
 use ratatui_image::{Resize, StatefulImage};
 
+use crate::utils::Named;
+
 use crate::{
     config::{Pane, PanesConfig, Theme},
     layout::{Axis, clamp},
@@ -580,7 +582,7 @@ mod panel_tests {
             fixtures::panel(&Picker::halfblocks())
         ));
 
-        for style in LyricStyle::ALL {
+        for style in LyricStyle::ALL.iter().copied() {
             let (buffer, inner) = render(&player(), style, 100, 30);
             let (lyrics_area, panel) = panel_split(inner, &PanesConfig::default(), true);
             let panel = panel.expect("a 100×30 page holds the panel");

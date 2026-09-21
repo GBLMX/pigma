@@ -13,6 +13,8 @@ use ratatui::{
     widgets::Paragraph,
 };
 
+use crate::utils::Named;
+
 use super::view::View;
 use crate::config::{LyricStyle, symbols};
 
@@ -505,7 +507,7 @@ mod tests {
     /// Lines are 5s apart from 0, so 22s is inside line4 (20s..25s).
     #[test]
     fn every_style_shows_the_current_line() {
-        for style in LyricStyle::ALL {
+        for style in LyricStyle::ALL.iter().copied() {
             let shown = symbols(&render(style, 22.0, 0));
             assert!(
                 shown.iter().any(|row| row.contains("line4")),
@@ -568,7 +570,7 @@ mod tests {
     /// of a `match` drew the window instead, silently.
     #[test]
     fn every_style_has_a_presentation() {
-        for style in LyricStyle::ALL {
+        for style in LyricStyle::ALL.iter().copied() {
             assert_eq!(
                 PRESENTATIONS
                     .iter()
