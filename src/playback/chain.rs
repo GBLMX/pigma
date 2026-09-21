@@ -11,6 +11,8 @@
 
 use std::{num::NonZero, time::Duration};
 
+use biquad::{Biquad, Coefficients, DirectForm1, ToHertz, Type};
+use ebur128::{EbuR128, Mode};
 use rodio::{ChannelCount, Sample, SampleRate, Source};
 use rubato::{Fft, FixedSync, Resampler as _};
 
@@ -20,6 +22,47 @@ use rubato::{Fft, FixedSync, Resampler as _};
 /// added latency down around what the device buffers anyway, without running the FFT on
 /// something so small that its overhead dominates.
 const CHUNK: usize = 1024;
+
+/// The samples the loudness meter looks at in one go. Momentary loudness is a 400 ms window
+/// internally, so a tenth of a second per look is fine-grained enough to follow a track
+/// without measuring more often than the answer can change.
+const LOUDNESS_BLOCK_MS: u32 = 100;
+
+/// A source of decoded samples on its way to the device. Boxed because each stage is optional
+/// and the player only sees the ends of the chain.
+pub(super) type Processed = Box<dyn Source<Item = Sample> + Send>;
+
+/// Wrap `source` with the stages the configuration asks for, in the order they act:
+/// sample-rate conversion, then the EQ, then loudness.
+///
+/// A stage with nothing to do is not built — no EQ bands means no filter, no loudness target
+/// means no meter, and a file already at the device's rate means no converter — so an
+/// unconfigured chain is the decoder's own samples, untouched.
+pub(super) fn build(
+    source: Processed,
+    device_rate: u32,
+    config: &crate::config::AudioConfig,
+) -> Processed {
+    let mut source = source;
+
+    if config.resample {
+        source = match Resample::new(source, device_rate) {
+            Ok(resampled) => Box::new(resampled),
+            Err(untouched) => untouched,
+        };
+    }
+
+    let rate = source.sample_rate().get();
+    let channels = source.channels().get();
+    if !config.eq.is_empty() {
+        source = Box::new(Equalizer::new(source, &config.eq, rate, channels));
+    }
+    if let Some(loudness) = config.loudness {
+        source = Box::new(Loudness::new(source, loudness, rate, channels));
+    }
+
+    source
+}
 
 /// Sample-rate conversion, from the file's rate to the device's.
 ///
@@ -214,6 +257,234 @@ impl<S: Source<Item = Sample>> Source for Resample<S> {
     }
 }
 
+/// The parametric EQ: one peaking filter per band per channel.
+///
+/// A peaking filter is what "3 dB down at 105 Hz" means; the state has to be kept per channel,
+/// because a single shared filter would mix the left channel's history into the right one.
+pub(super) struct Equalizer<S> {
+    inner: S,
+    filters: Vec<DirectForm1<f32>>,
+    channels: usize,
+    rate: u32,
+    /// Which channel the next sample belongs to.
+    channel: usize,
+}
+
+impl<S: Source<Item = Sample>> Equalizer<S> {
+    fn new(inner: S, bands: &[crate::config::EqBand], rate: u32, channels: u16) -> Self {
+        let channels = usize::from(channels);
+        let mut filters = Vec::with_capacity(bands.len() * channels);
+        for band in bands {
+            let Ok(coefficients) = Coefficients::<f32>::from_params(
+                Type::PeakingEQ(band.gain_db),
+                rate.hz(),
+                band.freq.hz(),
+                band.q,
+            ) else {
+                // A band the filter maths cannot express (a frequency above Nyquist, a zero
+                // width) is one band missing rather than a track that does not play.
+                log::warn!(
+                    "eq: skipping {} Hz ({} dB, q {})",
+                    band.freq,
+                    band.gain_db,
+                    band.q
+                );
+                continue;
+            };
+            for _ in 0..channels {
+                filters.push(DirectForm1::<f32>::new(coefficients));
+            }
+        }
+        Self {
+            inner,
+            filters,
+            channels,
+            rate,
+            channel: 0,
+        }
+    }
+}
+
+impl<S: Source<Item = Sample>> Iterator for Equalizer<S> {
+    type Item = Sample;
+
+    fn next(&mut self) -> Option<Sample> {
+        let sample = self.inner.next()?;
+        if self.filters.is_empty() {
+            return Some(sample);
+        }
+        // The bands are chained: the output of one is the input of the next, for this channel.
+        let mut value = sample;
+        let base = self.channel.min(self.channels - 1);
+        for band in 0..self.filters.len() / self.channels {
+            value = self.filters[band * self.channels + base].run(value);
+        }
+        self.channel = (self.channel + 1) % self.channels;
+        Some(value)
+    }
+}
+
+impl<S: Source<Item = Sample>> Source for Equalizer<S> {
+    fn current_span_len(&self) -> Option<usize> {
+        None
+    }
+    fn channels(&self) -> ChannelCount {
+        self.inner.channels()
+    }
+    fn sample_rate(&self) -> SampleRate {
+        NonZero::new(self.rate).expect("the inner source has a rate")
+    }
+    fn total_duration(&self) -> Option<Duration> {
+        self.inner.total_duration()
+    }
+    fn try_seek(&mut self, position: Duration) -> Result<(), rodio::source::SeekError> {
+        self.inner.try_seek(position)?;
+        // The filters hold the old position's tail; a fresh filter starts clean.
+        for filter in &mut self.filters {
+            filter.reset_state();
+        }
+        self.channel = 0;
+        Ok(())
+    }
+}
+
+/// Loudness normalization (EBU R128): measure the momentary loudness and pull the gain toward
+/// the configured target, a block at a time.
+///
+/// The gain is smoothed rather than set per block: a level that jumps by 10 dB between blocks
+/// is audible as pumping, which is worse than the difference it is correcting.
+pub(super) struct Loudness<S> {
+    inner: S,
+    meter: EbuR128,
+    channels: usize,
+    /// The gain being applied, linear. Starts at 1.0 and walks toward the target.
+    gain: f32,
+    target_lufs: f64,
+    max_gain: f32,
+    block: Vec<f32>,
+    cursor: usize,
+    finished: bool,
+}
+
+impl<S: Source<Item = Sample>> Loudness<S> {
+    fn new(inner: S, config: crate::config::LoudnessConfig, rate: u32, channels: u16) -> Self {
+        let channels = usize::from(channels);
+        let meter = EbuR128::new(channels as u32, rate, Mode::M).ok();
+        let frames = (rate / 1000 * LOUDNESS_BLOCK_MS).max(1) as usize;
+        Self {
+            inner,
+            meter: match meter {
+                Some(meter) => meter,
+                // Without a meter the stage is a pass-through: the samples still play, the
+                // level is just not corrected.
+                None => {
+                    log::warn!("loudness: no meter at {rate} Hz, {channels} channels");
+                    EbuR128::new(1, rate.max(1), Mode::M).expect("a meter for one channel")
+                }
+            },
+            channels,
+            gain: 1.0,
+            target_lufs: f64::from(config.target_lufs),
+            max_gain: 10f32.powf(config.max_gain_db / 20.0),
+            block: vec![0.0; frames * channels],
+            cursor: 0,
+            finished: false,
+        }
+    }
+
+    /// Read one block from the inner source, measure it, and apply the gain it implies.
+    fn refill(&mut self) {
+        let mut read = 0;
+        while read < self.block.len() {
+            match self.inner.next() {
+                Some(sample) => {
+                    self.block[read] = sample;
+                    read += 1;
+                }
+                None => break,
+            }
+        }
+        if read == 0 {
+            self.finished = true;
+            self.block.clear();
+            self.cursor = 0;
+            return;
+        }
+        self.block.truncate(read);
+
+        if self.meter.add_frames_f32(&self.block).is_ok()
+            && let Ok(loudness) = self.meter.loudness_momentary()
+            // Below -70 LUFS the window is silence or near it; correcting for that would just
+            // amplify the noise floor between tracks.
+            && loudness > -70.0
+        {
+            let target = 10f64.powf((self.target_lufs - loudness) / 20.0) as f32;
+            let wanted = target.min(self.max_gain);
+            // A tenth of the way per block: about a second to settle, which is slower than a
+            // note and faster than a track.
+            self.gain += (wanted - self.gain) * 0.1;
+        }
+
+        for sample in &mut self.block {
+            *sample *= self.gain;
+        }
+        self.cursor = 0;
+    }
+}
+
+impl<S: Source<Item = Sample>> Iterator for Loudness<S> {
+    type Item = Sample;
+
+    fn next(&mut self) -> Option<Sample> {
+        loop {
+            if self.cursor < self.block.len() {
+                let sample = self.block[self.cursor];
+                self.cursor += 1;
+                return Some(sample);
+            }
+            if self.finished {
+                return None;
+            }
+            self.refill();
+            if self.finished && self.block.is_empty() {
+                return None;
+            }
+        }
+    }
+}
+
+impl<S: Source<Item = Sample>> Source for Loudness<S> {
+    fn current_span_len(&self) -> Option<usize> {
+        None
+    }
+    fn channels(&self) -> ChannelCount {
+        self.inner.channels()
+    }
+    fn sample_rate(&self) -> SampleRate {
+        self.inner.sample_rate()
+    }
+    fn total_duration(&self) -> Option<Duration> {
+        self.inner.total_duration()
+    }
+    fn try_seek(&mut self, position: Duration) -> Result<(), rodio::source::SeekError> {
+        self.inner.try_seek(position)?;
+        // The measured loudness belongs to the old position, and the gain it produced should
+        // not be applied to the new one before it has been measured.
+        self.gain = 1.0;
+        if let Ok(fresh) = EbuR128::new(
+            self.channels as u32,
+            self.inner.sample_rate().get(),
+            Mode::M,
+        ) {
+            self.meter = fresh;
+        }
+        self.block.clear();
+        self.cursor = 0;
+        self.finished = false;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -266,6 +537,137 @@ mod tests {
                 self.frames as f64 / f64::from(self.rate.get()),
             ))
         }
+    }
+
+    /// A sine at `freq` Hz, `frames` frames of it.
+    #[derive(Debug)]
+    struct Tone {
+        freq: f64,
+        amplitude: f32,
+        phase: f64,
+        rate: SampleRate,
+        channels: ChannelCount,
+        left: usize,
+    }
+
+    impl Tone {
+        fn new(freq: f64, amplitude: f32, seconds: f64, rate: u32, channels: u16) -> Self {
+            let rate_nz = NonZero::new(rate).expect("rate");
+            let frames = (seconds * f64::from(rate)) as usize;
+            Self {
+                freq,
+                amplitude,
+                phase: 0.0,
+                rate: rate_nz,
+                channels: NonZero::new(channels).expect("channels"),
+                left: frames * usize::from(channels),
+            }
+        }
+    }
+
+    impl Iterator for Tone {
+        type Item = Sample;
+
+        fn next(&mut self) -> Option<Sample> {
+            if self.left == 0 {
+                return None;
+            }
+            self.left -= 1;
+            let channels = usize::from(self.channels.get());
+            if self.left % channels == channels - 1 {
+                self.phase += std::f64::consts::TAU * self.freq / f64::from(self.rate.get());
+            }
+            Some((self.phase.sin() as f32) * self.amplitude)
+        }
+    }
+
+    impl Source for Tone {
+        fn current_span_len(&self) -> Option<usize> {
+            None
+        }
+        fn channels(&self) -> ChannelCount {
+            self.channels
+        }
+        fn sample_rate(&self) -> SampleRate {
+            self.rate
+        }
+        fn total_duration(&self) -> Option<Duration> {
+            None
+        }
+    }
+
+    fn rms(samples: &[f32]) -> f32 {
+        if samples.is_empty() {
+            return 0.0;
+        }
+        (samples.iter().map(|s| s * s).sum::<f32>() / samples.len() as f32).sqrt()
+    }
+
+    /// The settled part of a filtered signal: a biquad rings for a few cycles before its
+    /// steady state, and the measurement is about the steady state.
+    fn settled(samples: Vec<f32>) -> Vec<f32> {
+        let skip = samples.len() / 4;
+        samples.into_iter().skip(skip).collect()
+    }
+
+    /// A boost band lifts its own frequency and a cut band lowers it: what "3 dB at 100 Hz"
+    /// has to mean for the reader who wrote it down.
+    #[test]
+    fn a_band_moves_only_its_own_frequency() {
+        let band = |gain_db: f32| crate::config::EqBand {
+            freq: 100.0,
+            gain_db,
+            q: 1.0,
+        };
+        let tone = || Tone::new(100.0, 0.5, 2.0, 48_000, 1);
+        let flat: Vec<f32> = tone().collect();
+        let flat = rms(&settled(flat));
+
+        let boosted: Vec<f32> = Equalizer::new(tone(), &[band(6.0)], 48_000, 1).collect();
+        let cut: Vec<f32> = Equalizer::new(tone(), &[band(-6.0)], 48_000, 1).collect();
+        let boosted = rms(&settled(boosted));
+        let cut = rms(&settled(cut));
+
+        let boost_ratio = boosted / flat;
+        let cut_ratio = cut / flat;
+        assert!(
+            (1.5..2.6).contains(&boost_ratio),
+            "+6 dB should be about twice the amplitude, got {boost_ratio:.2}x"
+        );
+        assert!(
+            (0.3..0.7).contains(&cut_ratio),
+            "-6 dB should be about half the amplitude, got {cut_ratio:.2}x"
+        );
+    }
+
+    /// A quiet track is lifted and a loud one is pulled down: the two directions of
+    /// normalization, which is the whole point of having it.
+    #[test]
+    fn loudness_pulls_both_ends_toward_the_target() {
+        let config = crate::config::LoudnessConfig {
+            target_lufs: -14.0,
+            max_gain_db: 20.0,
+        };
+
+        let quiet: Vec<f32> = Tone::new(1_000.0, 0.005, 4.0, 48_000, 1).collect();
+        let baseline = rms(&quiet);
+        let lifted_samples: Vec<f32> =
+            Loudness::new(Tone::new(1_000.0, 0.005, 4.0, 48_000, 1), config, 48_000, 1).collect();
+        let lifted = rms(&lifted_samples);
+        assert!(
+            lifted > baseline * 2.0,
+            "a -46 dBFS tone should come up toward -14 LUFS: {baseline:.4} -> {lifted:.4}"
+        );
+
+        let loud_samples: Vec<f32> = Tone::new(1_000.0, 0.5, 4.0, 48_000, 1).collect();
+        let loud = rms(&loud_samples);
+        let pulled_samples: Vec<f32> =
+            Loudness::new(Tone::new(1_000.0, 0.5, 4.0, 48_000, 1), config, 48_000, 1).collect();
+        let pulled = rms(&pulled_samples);
+        assert!(
+            pulled < loud * 0.8,
+            "a loud tone should come down: {loud:.4} -> {pulled:.4}"
+        );
     }
 
     /// The conversion reports the device's rate, keeps the channel count, and produces about

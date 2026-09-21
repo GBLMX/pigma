@@ -185,15 +185,10 @@ pub(super) fn run(
                         // at the samples: the spectrum shows what is heard, and so does the
                         // volume the device gets. A file already at the device's rate is not
                         // touched at all, which is the bit-perfect path.
-                        let source: Box<dyn Source<Item = f32> + Send> =
-                            match (dsp.resample, sink.as_ref().and_then(device_rate)) {
-                                (true, Some(rate)) => match chain::Resample::new(source, rate) {
-                                    Ok(resampled) => Box::new(resampled),
-                                    // The device already runs at the file's rate: nothing to do.
-                                    Err(untouched) => untouched,
-                                },
-                                _ => source,
-                            };
+                        let source = match sink.as_ref().and_then(device_rate) {
+                            Some(rate) => chain::build(source, rate, &dsp),
+                            None => source,
+                        };
                         let p = rodio::Player::connect_new(
                             &sink.as_ref().expect("sink ensured").mixer().clone(),
                         );
