@@ -62,10 +62,15 @@ pub(super) fn draw(f: &mut Frame, app: &App, area: Rect) {
                     .unwrap_or_else(|| "   ".into());
                 Cow::Owned(format!("{name:<14}{key}{summary}"))
             }
-            CommandItem::SubMenu { name, .. } => Cow::Owned(format!("{name:<14}   ▸")),
+            CommandItem::SubMenu { name, .. } => Cow::Owned(format!("{name:<14}   {}", crate::config::symbols().submenu)),
         };
 
-        let prefix = if i == panel.selected { "▶ " } else { "  " };
+        let prefix = if i == panel.selected {
+            // Owned: the cursor is a glyph from the symbol table, not a literal.
+            format!("{} ", crate::config::symbols().selected)
+        } else {
+            "  ".to_string()
+        };
         let style = if i == panel.selected {
             Style::default()
                 .fg(colors.accent)

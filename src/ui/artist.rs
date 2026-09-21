@@ -25,7 +25,7 @@ use time::{
 
 use super::{
     BlockStyle, block::CornerBlock, scrollbar::calc_scroll_offset, skeleton::Skeleton, table,
-    title::render_title,
+    title::bordered_title,
 };
 use crate::{
     config::{ColumnDef, Theme},
@@ -94,7 +94,7 @@ pub(super) fn draw(
 /// Waiting for the profile: the band names the artist and says what is happening; the two
 /// panes keep their titles over a skeleton, the same way the main table loads.
 fn draw_loading(f: &mut Frame, state: &ArtistState, bs: &BlockStyle<'_>, lay: &ArtistLayout) {
-    let title = render_title("► 歌手 {name} ◄", &state.name, 0, 0);
+    let title = bordered_title("歌手 {name}", &state.name, 0, 0);
     let inner = panel(f, bs, &title, lay.profile);
     let note = Line::from(Span::styled(
         "正在加载歌手信息…",
@@ -102,8 +102,8 @@ fn draw_loading(f: &mut Frame, state: &ArtistState, bs: &BlockStyle<'_>, lay: &A
     ));
     f.render_widget(Paragraph::new(note).wrap(Wrap { trim: true }), inner);
 
-    skeleton_pane(f, bs, "► 热门曲目 ◄", lay.songs);
-    skeleton_pane(f, bs, "► 专辑 ◄", lay.albums);
+    skeleton_pane(f, bs, &bordered_title("热门曲目", "", 0, 0), lay.songs);
+    skeleton_pane(f, bs, &bordered_title("专辑", "", 0, 0), lay.albums);
 }
 
 /// The profile request itself failed: nothing loaded, so the error is the page. It says what
@@ -116,7 +116,7 @@ fn draw_failed(
     bs: &BlockStyle<'_>,
     lay: &ArtistLayout,
 ) {
-    let title = render_title("► 歌手 {name} · 加载失败 ◄", &state.name, 0, 0);
+    let title = bordered_title("歌手 {name} · 加载失败", &state.name, 0, 0);
     // The whole content area, not just the band: there are no lists to keep room for.
     let inner = panel(f, bs, &title, lay.profile.union(lay.albums));
     let lines = vec![
@@ -154,7 +154,7 @@ fn draw_profile(f: &mut Frame, state: &mut ArtistState, bs: &BlockStyle<'_>, are
     let ArtistData::Ready { detail, .. } = &state.data else {
         return;
     };
-    let title = render_title("► 歌手 {name} ◄", &detail.name, 0, 0);
+    let title = bordered_title("歌手 {name}", &detail.name, 0, 0);
     let inner = panel(f, bs, &title, area);
     if inner.is_empty() {
         return;
@@ -220,7 +220,7 @@ fn draw_profile(f: &mut Frame, state: &mut ArtistState, bs: &BlockStyle<'_>, are
 /// The hot songs, with the cursor on one of them: Enter plays what the cursor is on.
 fn draw_songs(f: &mut Frame, state: &ArtistState, bs: &BlockStyle<'_>, area: Rect) {
     let songs = state.hot_songs();
-    let title = render_title("► 热门曲目 ({count}) ◄", "", songs.len(), 0);
+    let title = bordered_title("热门曲目 ({count})", "", songs.len(), 0);
     let inner = panel(f, bs, &title, area);
     if songs.is_empty() {
         note(f, "（没有热门曲目）", inner, bs.colors);
@@ -264,13 +264,13 @@ fn draw_albums(
     let list = match albums {
         Ok(list) => list,
         Err(error) => {
-            let inner = panel(f, bs, "► 专辑 加载失败 ◄", area);
+            let inner = panel(f, bs, &bordered_title("专辑 加载失败", "", 0, 0), area);
             note(f, &format!("错误: {error}（按 r 重试）"), inner, colors);
             return;
         }
     };
 
-    let title = render_title("► 专辑 ({count}/{total}) ◄", "", list.len(), total);
+    let title = bordered_title("专辑 ({count}/{total})", "", list.len(), total);
     let inner = panel(f, bs, &title, area);
     if list.is_empty() {
         note(f, "（没有专辑）", inner, colors);

@@ -259,6 +259,9 @@ log_level = "debug"
 # [themes.my_theme.popup]     # 弹层: border / title / footer
 # [themes.my_theme.notify]    # 通知分级: info / warn / error
 # 顶层还可写 warn = "#e5c07b"(警示色, 通知的 warn 级用它)
+#
+# 这些节与键都由同目录的 `theme.schema.json` 描述(JSON Schema), 编辑器装上 TOML 插件后
+# 可以按它校验与补全。字形(箭头/标记/图标)不在主题里: 见 [symbols] —— 一处定义, 预设切换。
 
 # =============================================================================
 # 自定义列定义

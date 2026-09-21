@@ -21,15 +21,6 @@ pub enum TaskState {
 }
 
 impl TaskState {
-    /// How it is written in the list.
-    pub fn marker(self) -> &'static str {
-        match self {
-            Self::Running => "…",
-            Self::Done => "✓",
-            Self::Failed => "✗",
-        }
-    }
-
     pub fn is_running(self) -> bool {
         matches!(self, Self::Running)
     }

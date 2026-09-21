@@ -100,8 +100,14 @@ pub(super) fn draw(f: &mut Frame, app: &App, area: Rect) -> usize {
         border: &app.state.border,
         tick: app.state.tick,
     };
+    let title = format!(
+        "{} HELP {}",
+        crate::config::symbols().title_open,
+        crate::config::symbols().title_close
+    );
     let block =
-        CornerBlock::from_color(&style, colors.surface).title("\u{25BA} HELP \u{25C4}", colors);
+        CornerBlock::from_color(&style, colors.surface).title_styled(&title, colors, colors.looks().popup_title)
+        .border_color(colors.looks().popup_border.fg.unwrap_or(colors.border));
     let inner = block.inner(popup_area);
 
     f.render_widget(Clear, popup_area);
@@ -118,7 +124,7 @@ pub(super) fn draw(f: &mut Frame, app: &App, area: Rect) -> usize {
         ..inner
     };
     f.render_widget(
-        Paragraph::new(footer).style(Style::default().fg(colors.muted)),
+        Paragraph::new(footer).style(colors.looks().popup_footer.style()),
         footer_area,
     );
 

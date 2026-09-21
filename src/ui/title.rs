@@ -1,3 +1,19 @@
+/// A heading written between the symbol table's arrows (`► 歌手 … ◄`).
+///
+/// The arrows are drawn here rather than written at the call sites because they are decoration a
+/// terminal may not be able to draw: one key in `[symbols]` switches them (or the whole preset)
+/// for every heading at once.
+pub(super) fn bordered_title(template: &str, name: &str, count: usize, total: usize) -> String {
+    let symbols = crate::config::symbols();
+
+    format!(
+        "{} {} {}",
+        symbols.title_open,
+        render_title(template, name, count, total),
+        symbols.title_close
+    )
+}
+
 pub(super) fn render_title(template: &str, name: &str, count: usize, total: usize) -> String {
     if !template.contains('{') {
         return template.to_owned();

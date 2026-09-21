@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/GBX1219/boxpigma/theme.schema.json",
+  "title": "boxpigma user theme",
+  "description": "A theme written in the config's [themes.<name>] block: a base, the palette it overrides, and the component sections. Editors that read this file validate the theme as it is typed.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "base": {
+      "type": "string",
+      "description": "The theme to start from: a built-in, or another user theme. `default` when unset."
+    },
+    "bg": { "$ref": "#/$defs/color" },
+    "surface": { "$ref": "#/$defs/color" },
+    "text": { "$ref": "#/$defs/color" },
+    "accent": { "$ref": "#/$defs/color" },
+    "muted": { "$ref": "#/$defs/color" },
+    "border": { "$ref": "#/$defs/color" },
+    "error": { "$ref": "#/$defs/color" },
+    "warn": {
+      "$ref": "#/$defs/color",
+      "description": "Amber: a warning is not a failure. The notices' warn level uses it."
+    },
+    "table": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The list-like surfaces.",
+      "properties": {
+        "header": { "$ref": "#/$defs/paint" },
+        "row": { "$ref": "#/$defs/paint" },
+        "selected": { "$ref": "#/$defs/paint" },
+        "secondary": { "$ref": "#/$defs/paint" },
+        "playing": { "$ref": "#/$defs/paint" }
+      }
+    },
+    "tabs": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The queue's tabs.",
+      "properties": {
+        "active": { "$ref": "#/$defs/paint" },
+        "inactive": { "$ref": "#/$defs/paint" }
+      }
+    },
+    "lyrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The lyrics page.",
+      "properties": {
+        "line": { "$ref": "#/$defs/paint" },
+        "sung": { "$ref": "#/$defs/paint" },
+        "translation": { "$ref": "#/$defs/paint" }
+      }
+    },
+    "popup": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The popups: help, :messages, :tasks.",
+      "properties": {
+        "border": { "$ref": "#/$defs/paint" },
+        "title": { "$ref": "#/$defs/paint" },
+        "footer": { "$ref": "#/$defs/paint" }
+      }
+    },
+    "notify": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "How loudly a notice says itself, by level.",
+      "properties": {
+        "info": { "$ref": "#/$defs/paint" },
+        "warn": { "$ref": "#/$defs/paint" },
+        "error": { "$ref": "#/$defs/paint" }
+      }
+    }
+  },
+  "$defs": {
+    "color": {
+      "description": "A hex colour (`#rrggbb`), a name the terminal knows (`red`, `blue`), or an ANSI index.",
+      "oneOf": [
+        { "type": "string" },
+        { "type": "integer", "minimum": 0, "maximum": 255 }
+      ]
+    },
+    "field": {
+      "description": "A colour of the theme itself (`accent`, `muted`, …), `on_accent` for a readable foreground on the accent, or any colour a terminal understands.",
+      "oneOf": [
+        { "type": "string" },
+        { "type": "integer", "minimum": 0, "maximum": 255 }
+      ]
+    },
+    "paint": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "One look: the colours and the modifiers. What is left out comes from the theme's own colours.",
+      "properties": {
+        "fg": { "$ref": "#/$defs/field" },
+        "bg": { "$ref": "#/$defs/field" },
+        "bold": { "type": "boolean" },
+        "italic": { "type": "boolean" },
+        "underline": { "type": "boolean" },
+        "reversed": { "type": "boolean" },
+        "dim": { "type": "boolean" }
+      }
+    }
+  }
+}

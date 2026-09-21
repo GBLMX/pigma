@@ -80,7 +80,7 @@ fn render_box(f: &mut Frame, login: &mut LoginState, bs: &BlockStyle<'_>, area: 
     let box_y = area.y + (area.height.saturating_sub(box_height)) / 2;
 
     let block = CornerBlock::from_color(bs, bs.base).title(
-        " <accent> ► <b>AUTHENTICATION REQUIRED</b></accent>",
+        " <accent> {open} <b>AUTHENTICATION REQUIRED</b></accent>",
         colors,
     );
 
@@ -126,7 +126,7 @@ fn render_inner(f: &mut Frame, login: &mut LoginState, colors: &Theme, area: Rec
 
     if let Some(err) = &login.error {
         let err_line = Line::from(Span::styled(
-            format!(" ✗ {}", err),
+            format!(" {} {}", crate::config::symbols().notice_error, err),
             Style::default().fg(colors.error),
         ));
         f.render_widget(

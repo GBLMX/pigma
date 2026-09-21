@@ -35,8 +35,14 @@ pub(super) fn draw(f: &mut Frame, app: &App, area: Rect) -> usize {
         border: &app.state.border,
         tick: app.state.tick,
     };
+    let title = format!(
+        "{} MESSAGES {}",
+        crate::config::symbols().title_open,
+        crate::config::symbols().title_close
+    );
     let block = CornerBlock::from_color(&style, colors.surface)
-        .title("\u{25BA} MESSAGES \u{25C4}", colors);
+        .title_styled(&title, colors, colors.looks().popup_title)
+        .border_color(colors.looks().popup_border.fg.unwrap_or(colors.border));
     let inner = block.inner(popup_area);
 
     f.render_widget(Clear, popup_area);
@@ -53,7 +59,7 @@ pub(super) fn draw(f: &mut Frame, app: &App, area: Rect) -> usize {
         ..inner
     };
     f.render_widget(
-        Paragraph::new(footer).style(Style::default().fg(colors.muted)),
+        Paragraph::new(footer).style(colors.looks().popup_footer.style()),
         footer_area,
     );
 
@@ -88,10 +94,11 @@ pub(super) fn draw(f: &mut Frame, app: &App, area: Rect) -> usize {
             height: 1,
             ..inner
         };
+        let marks = crate::config::symbols();
         let (mark, color) = match level {
-            Level::Info => ("·", colors.text),
-            Level::Warn => ("!", colors.accent),
-            Level::Error => ("✗", colors.error),
+            Level::Info => (marks.notice_info.as_str(), colors.text),
+            Level::Warn => (marks.notice_warn.as_str(), colors.accent),
+            Level::Error => (marks.notice_error.as_str(), colors.error),
         };
         f.render_widget(
             Paragraph::new(format!("  {mark} {text}")).style(Style::default().fg(color)),
@@ -108,6 +115,49 @@ mod tests {
 
     use super::*;
     use crate::state::notices::Level;
+
+    /// What the theme says about a popup is what the popup draws with: its title colour and its
+    /// frame, which used to be the theme's `border` for every surface in the app at once.
+    #[tokio::test]
+    async fn the_themes_popup_section_is_what_the_popup_draws_with() {
+        use crate::config::Config;
+
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let mut config = Config::default();
+        config.themes.insert(
+            "mine".to_string(),
+            toml_edit::de::from_str(
+                r##"
+base = "default"
+[popup]
+title = { fg = "#123456", bold = true }
+"##,
+            )
+            .expect("a theme file"),
+        );
+        config.default_theme = "mine".to_string();
+
+        let app = App::new(config, false).expect("app");
+        let mut terminal = Terminal::new(TestBackend::new(POPUP_WIDTH, POPUP_HEIGHT)).expect("tty");
+        terminal
+            .draw(|f| {
+                draw(f, &app, f.area());
+            })
+            .expect("draw");
+
+        let wanted: ratatui::style::Color =
+            std::str::FromStr::from_str("#123456").expect("a colour");
+        let buffer = terminal.backend().buffer();
+        let title: Vec<ratatui::style::Color> = (0..POPUP_WIDTH)
+            .filter(|x| buffer[(*x, 0)].symbol() != " ")
+            .filter_map(|x| buffer[(x, 0)].style().fg)
+            .collect();
+
+        assert!(
+            title.contains(&wanted),
+            "the theme's popup title colour is not on the frame: {title:?}"
+        );
+    }
 
     /// The popup shows what the app said, newest first, and the level is what marks a line:
     /// a list that could not tell an error from a confirmation would be a list of noise.

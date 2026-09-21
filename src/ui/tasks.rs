@@ -34,8 +34,14 @@ pub(super) fn draw(f: &mut Frame, app: &App, area: Rect) -> usize {
         border: &app.state.border,
         tick: app.state.tick,
     };
+    let title = format!(
+        "{} TASKS {}",
+        crate::config::symbols().title_open,
+        crate::config::symbols().title_close
+    );
     let block = CornerBlock::from_color(&style, colors.surface)
-        .title("\u{25BA} TASKS \u{25C4}", colors);
+        .title_styled(&title, colors, colors.looks().popup_title)
+        .border_color(colors.looks().popup_border.fg.unwrap_or(colors.border));
     let inner = block.inner(popup_area);
 
     f.render_widget(Clear, popup_area);
@@ -53,7 +59,7 @@ pub(super) fn draw(f: &mut Frame, app: &App, area: Rect) -> usize {
         ..inner
     };
     f.render_widget(
-        Paragraph::new(footer).style(Style::default().fg(colors.muted)),
+        Paragraph::new(footer).style(colors.looks().popup_footer.style()),
         footer_area,
     );
 
@@ -88,13 +94,14 @@ pub(super) fn draw(f: &mut Frame, app: &App, area: Rect) -> usize {
             height: 1,
             ..inner
         };
-        let color = match state {
-            TaskState::Running => colors.accent,
-            TaskState::Done => colors.muted,
-            TaskState::Failed => colors.error,
+        let marks = crate::config::symbols();
+        let (mark, color) = match state {
+            TaskState::Running => (marks.task_running.as_str(), colors.accent),
+            TaskState::Done => (marks.task_done.as_str(), colors.muted),
+            TaskState::Failed => (marks.task_failed.as_str(), colors.error),
         };
         f.render_widget(
-            Paragraph::new(format!("  {} {label}", state.marker())).style(Style::default().fg(color)),
+            Paragraph::new(format!("  {mark} {label}")).style(Style::default().fg(color)),
             line_area,
         );
     }

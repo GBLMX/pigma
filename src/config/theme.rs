@@ -1456,3 +1456,72 @@ row = { fg = "not_a_colour_name" }
         assert_eq!(theme.looks().table_row.fg, Some(Color::Reset));
     }
 }
+
+#[cfg(test)]
+mod schema_tests {
+    use std::collections::BTreeSet;
+
+    use super::*;
+
+    /// The schema shipped beside the config describes every key a theme may write: a field added
+    /// to `Theme` and forgotten here would leave an editor rejecting the theme a user just wrote,
+    /// which is the drift this test exists to catch.
+    #[test]
+    fn the_schema_describes_every_key_a_theme_has() {
+        let schema: serde_json::Value =
+            serde_json::from_str(include_str!("../../theme.schema.json")).expect("the schema parses");
+
+        let written = toml_edit::ser::to_string_pretty(&Theme::default()).expect("a theme writes");
+        let theme: toml_edit::DocumentMut = written.parse().expect("and reads back");
+
+        let properties = schema["properties"]
+            .as_object()
+            .expect("the schema has properties");
+
+        for (key, value) in theme.as_table().iter() {
+            // `name` is the theme's own field — the key it was filed under in `[themes.<name>]` —
+            // and not something a theme file writes, which is why the schema has no `name`.
+            if key == "name" {
+                continue;
+            }
+
+            assert!(
+                properties.contains_key(key),
+                "`{key}` is a theme key the schema does not describe"
+            );
+
+            // A table in the theme (a section) is a section in the schema, with the same keys in
+            // it: what the schema says about one level it has to say about the next.
+            if let Some(section) = value.as_table() {
+                let described = schema
+                    .pointer(&format!("/properties/{key}/properties"))
+                    .and_then(serde_json::Value::as_object)
+                    .unwrap_or_else(|| panic!("`{key}` has no section in the schema"));
+
+                for inner in section.iter().map(|(inner, _)| inner) {
+                    assert!(
+                        described.contains_key(inner),
+                        "`{key}.{inner}` is a theme key the schema does not describe"
+                    );
+                }
+            }
+        }
+
+        // And nothing is described that a theme cannot write.
+        let written: BTreeSet<&str> = theme
+            .as_table()
+            .iter()
+            .map(|(key, _)| key)
+            .filter(|key| *key != "name")
+            .collect();
+        for described in properties.keys() {
+            if described == "$schema" || described == "base" {
+                continue;
+            }
+            assert!(
+                written.contains(described.as_str()),
+                "the schema describes `{described}`, which no theme has"
+            );
+        }
+    }
+}

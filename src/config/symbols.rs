@@ -51,6 +51,21 @@ pub struct SymbolsConfig {
     pub spinner_activity: Option<Vec<String>>,
     /// Main-loop ticks per spinner frame (the UI has always advanced every 3 ticks).
     pub spinner_ticks_per_frame: Option<u64>,
+    /// The arrows a titled surface writes around its title (`► HELP ◄`).
+    pub title_open: Option<String>,
+    pub title_close: Option<String>,
+    /// The chevron of a menu entry that opens another menu.
+    pub submenu: Option<String>,
+    /// The cursor of a selected line.
+    pub selected: Option<String>,
+    /// The marker of a notice, by level.
+    pub notice_info: Option<String>,
+    pub notice_warn: Option<String>,
+    pub notice_error: Option<String>,
+    /// The marker of a task, by state.
+    pub task_running: Option<String>,
+    pub task_done: Option<String>,
+    pub task_failed: Option<String>,
 }
 
 /// The resolved glyph set the UI reads through [`symbols`].
@@ -68,6 +83,16 @@ pub struct Symbols {
     pub visualizer_bars: String,
     pub spinner_activity: Vec<String>,
     pub spinner_ticks_per_frame: u64,
+    pub title_open: String,
+    pub title_close: String,
+    pub submenu: String,
+    pub selected: String,
+    pub notice_info: String,
+    pub notice_warn: String,
+    pub notice_error: String,
+    pub task_running: String,
+    pub task_done: String,
+    pub task_failed: String,
 }
 
 /// Spinner frames before presets existed (`ui::spinner`), kept as the default so the
@@ -113,6 +138,29 @@ impl SymbolPreset {
             (SymbolPreset::Ascii, "volume_mid") => "=",
             (SymbolPreset::Ascii, "volume_high") => "#",
             (SymbolPreset::Ascii, "queue_clear") => "x",
+            // The arrows a title is written between, and the markers of a notice or a task: these
+            // are the ones the UI drew as literals, which is what made them impossible to switch
+            // off on a terminal that cannot draw them.
+            (SymbolPreset::Nerd | SymbolPreset::Unicode, "title_open") => "►",
+            (SymbolPreset::Nerd | SymbolPreset::Unicode, "title_close") => "◄",
+            (SymbolPreset::Nerd | SymbolPreset::Unicode, "submenu") => "▸",
+            (SymbolPreset::Nerd | SymbolPreset::Unicode, "selected") => "▶",
+            (SymbolPreset::Ascii, "title_open") => ">",
+            (SymbolPreset::Ascii, "title_close") => "<",
+            (SymbolPreset::Ascii, "submenu") => ">",
+            (SymbolPreset::Ascii, "selected") => ">",
+            (SymbolPreset::Nerd | SymbolPreset::Unicode, "notice_info") => "·",
+            (SymbolPreset::Nerd | SymbolPreset::Unicode, "notice_warn") => "!",
+            (SymbolPreset::Nerd | SymbolPreset::Unicode, "notice_error") => "✗",
+            (SymbolPreset::Ascii, "notice_info") => ".",
+            (SymbolPreset::Ascii, "notice_warn") => "!",
+            (SymbolPreset::Ascii, "notice_error") => "x",
+            (SymbolPreset::Nerd | SymbolPreset::Unicode, "task_running") => "…",
+            (SymbolPreset::Nerd | SymbolPreset::Unicode, "task_done") => "✓",
+            (SymbolPreset::Nerd | SymbolPreset::Unicode, "task_failed") => "✗",
+            (SymbolPreset::Ascii, "task_running") => "~",
+            (SymbolPreset::Ascii, "task_done") => "+",
+            (SymbolPreset::Ascii, "task_failed") => "x",
             (SymbolPreset::Nerd | SymbolPreset::Unicode, "visualizer_bars") => "▁▂▃▄▅▆▇█",
             (SymbolPreset::Ascii, "visualizer_bars") => " .:-=+*#",
             // Every preset of the marker is the same glyph: it is punctuation rather than an
@@ -169,6 +217,16 @@ impl Symbols {
             volume_high: pick(&config.volume_high, "volume_high"),
             queue_clear: pick(&config.queue_clear, "queue_clear"),
             translation: pick(&config.translation, "translation"),
+            title_open: pick(&config.title_open, "title_open"),
+            title_close: pick(&config.title_close, "title_close"),
+            submenu: pick(&config.submenu, "submenu"),
+            selected: pick(&config.selected, "selected"),
+            notice_info: pick(&config.notice_info, "notice_info"),
+            notice_warn: pick(&config.notice_warn, "notice_warn"),
+            notice_error: pick(&config.notice_error, "notice_error"),
+            task_running: pick(&config.task_running, "task_running"),
+            task_done: pick(&config.task_done, "task_done"),
+            task_failed: pick(&config.task_failed, "task_failed"),
             visualizer_bars: {
                 let bars = pick(&config.visualizer_bars, "visualizer_bars");
                 if bars.chars().count() < 2 {
@@ -369,5 +427,78 @@ mod tests {
         assert_eq!(symbols.volume_icon(0.0), symbols.volume_low);
         assert_eq!(symbols.volume_icon(0.5), symbols.volume_mid);
         assert_eq!(symbols.volume_icon(1.0), symbols.volume_high);
+    }
+}
+
+#[cfg(test)]
+mod glyph_tests {
+    use super::*;
+
+    /// Every glyph the UI reads is non-empty, and the ones the layout counts on are one cell
+    /// wide: an empty or wide glyph moves everything after it, which is the class of bug this
+    /// table exists to make impossible.
+    #[test]
+    fn every_glyph_is_drawable() {
+        for preset in [
+            SymbolPreset::Nerd,
+            SymbolPreset::Unicode,
+            SymbolPreset::Ascii,
+        ] {
+            let symbols = Symbols::resolve(&SymbolsConfig {
+                preset,
+                ..SymbolsConfig::default()
+            });
+
+            for (key, glyph) in [
+                ("title_open", &symbols.title_open),
+                ("title_close", &symbols.title_close),
+                ("submenu", &symbols.submenu),
+                ("selected", &symbols.selected),
+                ("notice_info", &symbols.notice_info),
+                ("notice_warn", &symbols.notice_warn),
+                ("notice_error", &symbols.notice_error),
+                ("task_running", &symbols.task_running),
+                ("task_done", &symbols.task_done),
+                ("task_failed", &symbols.task_failed),
+                ("volume_low", &symbols.volume_low),
+                ("volume_mid", &symbols.volume_mid),
+                ("volume_high", &symbols.volume_high),
+                ("queue_clear", &symbols.queue_clear),
+                ("translation", &symbols.translation),
+            ] {
+                assert!(!glyph.is_empty(), "{preset:?}: {key} is empty");
+                assert_eq!(
+                    unicode_width::UnicodeWidthStr::width(glyph.as_str()),
+                    1,
+                    "{preset:?}: {key} is not one cell wide"
+                );
+            }
+        }
+    }
+
+    /// A preset that is not the default still draws a complete set: every key has a value in it,
+    /// which is what makes `preset = "ascii"` a thing a terminal without a patched font can use.
+    #[test]
+    fn every_preset_answers_every_key() {
+        for preset in [
+            SymbolPreset::Nerd,
+            SymbolPreset::Unicode,
+            SymbolPreset::Ascii,
+        ] {
+            for key in [
+                "title_open",
+                "title_close",
+                "submenu",
+                "selected",
+                "notice_info",
+                "notice_warn",
+                "notice_error",
+                "task_running",
+                "task_done",
+                "task_failed",
+            ] {
+                assert_ne!(preset.glyph(key), "?", "{preset:?} has no {key}");
+            }
+        }
     }
 }

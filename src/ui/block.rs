@@ -5,7 +5,7 @@ use ratatui::{
     widgets::{Block, Widget},
 };
 
-use crate::utils::GradientPreset;
+use crate::{config::theme::Look, utils::GradientPreset};
 
 pub struct CornerBlock<'a> {
     block: Block<'a>,
@@ -129,6 +129,30 @@ impl<'a> CornerBlock<'a> {
     pub(super) fn set_borderless(mut self, horizontal_padding: u16, no_border: bool) -> Self {
         self.horizontal_padding = horizontal_padding;
         self.no_border = no_border;
+        self
+    }
+
+    /// The frame's own colour, for a surface that is not the window's frame — a popup, whose
+    /// border the theme names separately from the app's.
+    pub(super) fn border_color(mut self, color: Color) -> Self {
+        self.block = self
+            .block
+            .border_style(Style::default().fg(color));
+
+        self
+    }
+
+    /// The title drawn with `look` rather than the muted default: what a theme says about a
+    /// popup's title, applied where the title is set.
+    pub(super) fn title_styled(mut self, title: &'a str, colors: &'a Theme, look: Look) -> Self {
+        let title_line = ratatui::text::Line::from(styled_text::parse_styled(title, colors));
+        self.block = self.block.title(title_line).title_style(look.style());
+        if self.no_border {
+            let h = self.horizontal_padding;
+            self.block = self.block.padding(Padding::new(h, h, 0, 0));
+        }
+        self.has_title = true;
+
         self
     }
 
