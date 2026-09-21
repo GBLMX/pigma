@@ -865,6 +865,45 @@ mod tests {
         );
     }
 
+    /// The song-scoped pages (`:simi`, `:simiplaylist`) are opened *from* wherever the song is,
+    /// so the way back is that page and not the main table — which is where the content table's
+    /// own walk ends.
+    #[tokio::test]
+    async fn a_song_context_remembers_the_page_it_was_opened_from() {
+        let mut app = app();
+        app.state.navigation.page = Page::Playlist;
+
+        app.state.events.send(NavigationEvent::OpenSongContext {
+            song_id: 5,
+            similar: true,
+        });
+        app.handle_events().await.expect("events");
+
+        assert_eq!(
+            app.state.navigation.page,
+            Page::Main,
+            "content is drawn on the table's page"
+        );
+        assert_eq!(
+            app.state.navigation.return_page,
+            Some(Page::Playlist),
+            "the page that asked is the way back"
+        );
+        assert_eq!(
+            app.state.navigation.nav.subtitle.as_deref(),
+            Some("相似歌曲"),
+            "and the page says which list it is"
+        );
+
+        press_key(&mut app, KeyCode::Esc);
+        app.handle_events().await.expect("events");
+        assert_eq!(
+            app.state.navigation.page,
+            Page::Playlist,
+            "`Esc` went back to the queue, not to the table"
+        );
+    }
+
     /// The settings page has three ways in — keys, `Tab`, and the mouse — and they agree about
     /// where the cursor is. The `Tab` pane switch and the click handling are the two the page grew
     /// after it was first drawn.

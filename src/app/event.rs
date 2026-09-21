@@ -306,6 +306,9 @@ impl App {
                     self.playback.state.cached = true;
                 }
             }
+            PlaybackEvent::PlaySongs { key, songs, index } => {
+                self.playback.play_songs(&key, songs, index);
+            }
             PlaybackEvent::QueueAppend { key, songs } => {
                 self.playback.append_songs_to_key(&key, songs);
             }
@@ -353,6 +356,9 @@ impl App {
             NavigationEvent::SearchDeactivated => self.handle_search_deactivate(),
             NavigationEvent::ContentRestore => self.handle_content_restore(),
             NavigationEvent::OpenAlbum { id, name } => self.open_album(id, name),
+            NavigationEvent::OpenSongContext { song_id, similar } => {
+                self.open_song_context(song_id, similar)
+            }
             NavigationEvent::CellAction(row, col) => {
                 if let Err(e) = self.handle_cell_action(row, col) {
                     log::error!("CellAction error: {e}");

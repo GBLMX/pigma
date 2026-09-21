@@ -167,14 +167,16 @@ impl ApiService {
                 match uid {
                     // The ranking is a list of songs in the order it ranks them; the counts it
                     // is built from are what the order means, so the table shows the order.
-                    Some(uid) => content_result(self.client.user_record(uid, week).await, |records| {
-                        ContentState::Songs(
-                            records
-                                .into_iter()
-                                .map(|record| std::sync::Arc::new(record.song))
-                                .collect(),
-                        )
-                    }),
+                    Some(uid) => {
+                        content_result(self.client.user_record(uid, week).await, |records| {
+                            ContentState::Songs(
+                                records
+                                    .into_iter()
+                                    .map(|record| std::sync::Arc::new(record.song))
+                                    .collect(),
+                            )
+                        })
+                    }
                     None => (ContentState::Error("未登录".into()), None),
                 }
             }
@@ -501,6 +503,43 @@ impl ApiService {
         }
     }
 
+    /// Songs similar to one already known. The seed is the song, so this is what a queue can
+    /// keep going with once the list it started from runs out.
+    pub async fn simi_song(&self, song_id: u64) -> ContentState {
+        content_result(
+            self.client.simi_song(song_id, SIMI_LIMIT, 0).await,
+            |songs| ContentState::Songs(arc_songs(songs)),
+        )
+        .0
+    }
+
+    /// Playlists that contain one song: where else the song lives.
+    pub async fn simi_playlists(&self, song_id: u64) -> ContentState {
+        content_result(
+            self.client.simi_playlist(song_id, SIMI_LIMIT, 0).await,
+            ContentState::SongLists,
+        )
+        .0
+    }
+
+    /// One page of the private FM: radio seeded by the listener rather than by a song.
+    pub async fn personal_fm(&self) -> Result<Vec<Arc<ncm_api::SongInfo>>, String> {
+        self.client
+            .personal_fm()
+            .await
+            .map(arc_songs)
+            .map_err(|e| e.to_string())
+    }
+
+    /// Tell the service to keep a song out of the FM from now on.
+    pub async fn fm_trash(&self, song_id: u64) -> Result<(), String> {
+        self.client
+            .fm_trash(song_id)
+            .await
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+
     /// Load artist songs.
     pub async fn load_artist_songs(&self, artist_id: u64, limit: u16) -> ContentState {
         match self
@@ -705,6 +744,10 @@ fn find_liked_playlist(lists: &[ncm_api::SongList]) -> Option<u64> {
 /// Map a client result into a `(ContentState, None)` pair: success maps the
 /// value through `map`, failure becomes `ContentState::Error`. Keeps the
 /// `Ok -> state / Err -> Error` boilerplate in one place.
+/// How many rows the song-scoped lists ask for. They are panes and pages rather than the main
+/// table, so one page of them is the whole list.
+const SIMI_LIMIT: u16 = 50;
+
 fn content_result<T>(
     result: Result<T, ncm_api::NcmError>,
     map: impl FnOnce(T) -> ContentState,

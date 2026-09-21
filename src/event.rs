@@ -102,6 +102,14 @@ pub enum PlaybackEvent {
         key: String,
         songs: Vec<Arc<SongInfo>>,
     },
+    /// Play these songs as the queue and start the one at `index`. A list that was fetched
+    /// somewhere other than the content table — the private FM — arrives this way, so the
+    /// fetch can happen off the main thread and the playing still does not.
+    PlaySongs {
+        key: String,
+        songs: Vec<Arc<SongInfo>>,
+        index: usize,
+    },
     /// The full song list for `playlist_id` has been queued; subsequent Enter
     /// presses on the same playlist can jump within the queue without reloading.
     QueueLoadDone {
@@ -128,6 +136,13 @@ pub enum NavigationEvent {
     SearchActivated,
     SearchDeactivated,
     ContentRestore,
+    /// Open the neighbourhood of one song as content: the songs similar to it, or the playlists
+    /// that contain it. It is opened *from* wherever the song is playing, so the page that asked
+    /// is the way back.
+    OpenSongContext {
+        song_id: u64,
+        similar: bool,
+    },
     /// Open one album as table content. The artist page is the only sender: an album row is
     /// not a row of the main table, so opening it is a load this app has to start itself.
     OpenAlbum {

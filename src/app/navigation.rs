@@ -32,6 +32,38 @@ impl App {
         });
     }
 
+    /// Open a song's neighbourhood as content.
+    ///
+    /// Unlike the navigation's own items this starts from a *song*, so it can be asked for from
+    /// anywhere — the table, a queue, the artist page — and the page that asked is remembered:
+    /// `Esc` returns there instead of to the main table.
+    pub(super) fn open_song_context(&mut self, song_id: u64, similar: bool) {
+        self.state.navigation.return_page = Some(self.state.navigation.page);
+        self.state.navigation.clear_breadcrumb();
+        self.state.navigation.content_is_search = false;
+        self.state.navigation.set_content(ContentState::Loading);
+        self.state.navigation.nav.subtitle = Some(
+            if similar {
+                "相似歌曲"
+            } else {
+                "包含这首歌的歌单"
+            }
+            .into(),
+        );
+        self.state.navigation.page = Page::Main;
+        self.state.navigation.generation += 1;
+        let service = self.service.clone();
+        let sender = self.state.events.sender();
+        tokio::spawn(async move {
+            let state = if similar {
+                service.simi_song(song_id).await
+            } else {
+                service.simi_playlists(song_id).await
+            };
+            send_event(&sender, NavigationEvent::ContentLoaded(state).into());
+        });
+    }
+
     /// Reload the content for the current navigation item.
     ///
     /// With `force = true`, skip the content cache, refetch directly from the API,

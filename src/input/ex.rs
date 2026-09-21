@@ -23,7 +23,7 @@ use crate::{
     app::App,
     cli::parse_volume,
     config::{Config, LyricStyle, NotifyConfig, Pane, ProgressStyle},
-    event::{AppEvent, AuthEvent, NavigationEvent},
+    event::{AppEvent, AuthEvent, NavigationEvent, PlaybackEvent},
     ipc::MsgAction,
     state::{LoginMethod, Page},
     text_input::TextInput,
@@ -102,6 +102,14 @@ pub(crate) enum ExCommand {
     Logout,
     /// The daily 云贝 check-in.
     Sign,
+    /// Open the songs similar to what is playing: the queue's own continuation.
+    Simi,
+    /// Open the playlists that contain what is playing.
+    SimiPlaylists,
+    /// Play the private FM: radio seeded by the listener, not by a song.
+    Fm,
+    /// Keep the current FM song out of the FM from now on.
+    FmTrash,
 }
 
 impl ExCommand {
@@ -170,6 +178,10 @@ impl ExCommand {
                 let (phone, code) = required_pair("手机号", "验证码")?;
                 Ok(Self::SmsLogin { phone, code })
             }
+            "simi" | "similar" => Ok(Self::Simi),
+            "simiplaylist" | "songlists" => Ok(Self::SimiPlaylists),
+            "fm" => Ok(Self::Fm),
+            "fmtrash" | "fm-trash" => Ok(Self::FmTrash),
             "theme" => Ok(Self::Theme(optional_argument(&args)?)),
             "lyrics" => Ok(Self::LyricStyle(optional_argument(&args)?)),
             "progress" => Ok(Self::ProgressStyle(optional_argument(&args)?)),
@@ -583,6 +595,72 @@ fn close(app: &mut App) {
 }
 
 /// Run a command line, reporting the outcome the way vim reports errors.
+/// `:simi` and `:simiplaylist`: the neighbourhood of what is playing. Both are about a song,
+/// so with nothing playing there is nothing to ask about — a message, not a silent no-op.
+fn open_song_neighbourhood(app: &mut App, similar: bool) {
+    let Some(song) = app.playback.current_song() else {
+        app.notice(
+            crate::state::notices::Level::Warn,
+            "没有正在播放的歌曲".to_string(),
+        );
+        return;
+    };
+    app.state.events.send(NavigationEvent::OpenSongContext {
+        song_id: song.id,
+        similar,
+    });
+}
+
+/// `:fm`: fetch a page of the private FM and play it. The fetch is off the main thread and the
+/// playing is not, which is why the songs travel back as an event.
+fn play_private_fm(app: &mut App) {
+    let service = app.service.clone();
+    let sender = app.state.events.sender();
+    tokio::spawn(async move {
+        match service.personal_fm().await {
+            Ok(songs) if !songs.is_empty() => {
+                let _ = sender.send(
+                    PlaybackEvent::PlaySongs {
+                        key: "私人FM".to_string(),
+                        songs,
+                        index: 0,
+                    }
+                    .into(),
+                );
+            }
+            // An empty FM is the service's answer, not a failure: nothing to say about it.
+            Ok(_) => {}
+            Err(error) => {
+                let _ = sender.send(AppEvent::Toast(format!("私人FM: {error}")).into());
+            }
+        }
+    });
+}
+
+/// `:fmtrash`: stop the FM from offering the song it just played again.
+fn trash_current_fm_song(app: &mut App) {
+    let Some(song) = app.playback.current_song() else {
+        app.notice(
+            crate::state::notices::Level::Warn,
+            "没有正在播放的歌曲".to_string(),
+        );
+        return;
+    };
+    let service = app.service.clone();
+    let sender = app.state.events.sender();
+    let name = song.name.clone();
+    tokio::spawn(async move {
+        match service.fm_trash(song.id).await {
+            Ok(()) => {
+                let _ = sender.send(AppEvent::Toast(format!("已从私人FM移除: {name}")).into());
+            }
+            Err(error) => {
+                let _ = sender.send(AppEvent::Toast(format!("私人FM 移除失败: {error}")).into());
+            }
+        }
+    });
+}
+
 fn run(app: &mut App, line: &str) {
     match ExCommand::parse(line) {
         Err(error) => app.notice(crate::state::notices::Level::Error, format!("E: {error}")),
@@ -596,6 +674,10 @@ fn run(app: &mut App, line: &str) {
 
 pub(crate) fn execute(app: &mut App, command: ExCommand) -> Result<(), String> {
     match command {
+        ExCommand::Simi => open_song_neighbourhood(app, true),
+        ExCommand::SimiPlaylists => open_song_neighbourhood(app, false),
+        ExCommand::Fm => play_private_fm(app),
+        ExCommand::FmTrash => trash_current_fm_song(app),
         ExCommand::Quit => {
             app.state.events.send(AppEvent::Quit);
         }
@@ -886,6 +968,11 @@ mod tests {
 
     #[test]
     fn commands_parse_into_their_arguments() {
+        assert_eq!(ExCommand::parse("simi"), Ok(ExCommand::Simi));
+        assert_eq!(ExCommand::parse("similar"), Ok(ExCommand::Simi));
+        assert_eq!(ExCommand::parse("songlists"), Ok(ExCommand::SimiPlaylists));
+        assert_eq!(ExCommand::parse("fm"), Ok(ExCommand::Fm));
+        assert_eq!(ExCommand::parse("fm-trash"), Ok(ExCommand::FmTrash));
         assert_eq!(ExCommand::parse("q"), Ok(ExCommand::Quit));
         assert_eq!(ExCommand::parse("quit"), Ok(ExCommand::Quit));
         assert_eq!(ExCommand::parse("save"), Ok(ExCommand::Save));
