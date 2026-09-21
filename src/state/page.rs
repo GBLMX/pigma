@@ -113,7 +113,7 @@ impl Page {
                     layout: layout::content,
                     content: ui::draw_queue,
                 },
-                keys: None,
+                keys: Some(crate::input::pages::playlist_keys),
             },
             Page::Artist => &PageSpec {
                 name: "歌手详情 / 主界面",
@@ -127,7 +127,7 @@ impl Page {
                     layout: layout::content,
                     content: ui::draw_artist,
                 },
-                keys: None,
+                keys: Some(crate::input::pages::artist_keys),
             },
             Page::Settings => &PageSpec {
                 name: "设置 / 主界面",

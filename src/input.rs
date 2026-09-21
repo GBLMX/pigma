@@ -9,6 +9,7 @@ mod hit;
 mod login;
 mod main;
 mod navigation;
+pub(crate) mod pages;
 mod panes;
 mod search;
 mod splash;

@@ -7,8 +7,7 @@ use super::{
     content::{
         cell_enter_action, check_load_more, content_item_count, content_select_first,
         content_select_last, content_select_next, content_select_prev, playlist_play_selected,
-        playlist_select_first, playlist_select_last, playlist_select_next, playlist_select_prev,
-        row_enter_action,
+        playlist_select_next, playlist_select_prev, row_enter_action,
     },
     hit,
     navigation::{emit_nav_select, navigate_nav_down, navigate_nav_up},
@@ -20,7 +19,6 @@ use crate::{
     event::{NavigationEvent, PlaybackEvent},
     playback::mode_icon,
     state::{ArtistIo, ContentState, Page, TableMode},
-    text_input::TextInput,
     ui::playerbar,
 };
 
@@ -60,78 +58,20 @@ pub(super) fn handle_main_key(app: &mut App, key_event: KeyEvent) -> color_eyre:
 
     match key_event.code {
         KeyCode::Esc => {
-            if matches!(
-                app.state.navigation.page,
-                Page::Artist | Page::Settings
-            ) {
-                // Neither page is part of the content breadcrumb stack — the artist page is
-                // opened from a row rather than by walking the table, and the settings page by
-                // its own key — so leaving one is a page change, not a restore, and there is no
-                // breadcrumb for `ContentRestore` to pop.
-                app.state.events.send(NavigationEvent::Navigate(Page::Main));
-            } else {
-                app.state.events.send(NavigationEvent::ContentRestore);
-            }
-        }
-        KeyCode::Tab if app.state.navigation.page == Page::Playlist => {
-            if let Some(key) = app.playback.switch_queue(true) {
-                app.state.navigation.playlist_selected =
-                    app.playback.queue_current_index().unwrap_or(0);
-                app.toast(format!("▣ 队列: {key}"));
-            }
-        }
-        KeyCode::BackTab if app.state.navigation.page == Page::Playlist => {
-            if let Some(key) = app.playback.switch_queue(false) {
-                app.state.navigation.playlist_selected =
-                    app.playback.queue_current_index().unwrap_or(0);
-                app.toast(format!("▣ 队列: {key}"));
-            }
+            // Pages that are not in the breadcrumb stack handle `Esc` in their own layer, before
+            // this map runs; what is left here is the restore every other page shares.
+            app.state.events.send(NavigationEvent::ContentRestore);
         }
         KeyCode::Tab => navigate_nav_down(app),
         KeyCode::BackTab => navigate_nav_up(app),
-        KeyCode::Up | KeyCode::Char('k' | 'K') => {
-            if app.state.navigation.page == Page::Artist {
-                app.state.navigation.artist.select_prev();
-            } else if app.state.navigation.page == Page::Playlist {
-                playlist_select_prev(app);
-            } else {
-                content_select_prev(app);
-            }
-        }
-        KeyCode::Down | KeyCode::Char('j' | 'J') => {
-            if app.state.navigation.page == Page::Artist {
-                app.state.navigation.artist.select_next();
-            } else if app.state.navigation.page == Page::Playlist {
-                playlist_select_next(app);
-            } else {
-                content_select_next(app);
-            }
-        }
-        KeyCode::Char('g') => {
-            if app.state.navigation.page == Page::Artist {
-                app.state.navigation.artist.select_first();
-            } else if app.state.navigation.page == Page::Playlist {
-                playlist_select_first(app);
-            } else {
-                content_select_first(app);
-            }
-        }
-        KeyCode::Char('G') => {
-            if app.state.navigation.page == Page::Artist {
-                app.state.navigation.artist.select_last();
-            } else if app.state.navigation.page == Page::Playlist {
-                playlist_select_last(app);
-            } else {
-                content_select_last(app);
-            }
-        }
+        // The keys a page owns are handled by that page's own layer before this map runs (see
+        // `input::pages` and `PageSpec::keys`), so what is left here is what every page shares.
+        KeyCode::Up | KeyCode::Char('k' | 'K') => content_select_prev(app),
+        KeyCode::Down | KeyCode::Char('j' | 'J') => content_select_next(app),
+        KeyCode::Char('g') => content_select_first(app),
+        KeyCode::Char('G') => content_select_last(app),
         KeyCode::Enter => {
-            if app.state.navigation.page == Page::Artist {
-                // Enter plays the hot song under the page's cursor.
-                artist_play_selected(app);
-            } else if app.state.navigation.page == Page::Playlist {
-                playlist_play_selected(app);
-            } else if !open_artist_from_table(app) {
+            if !open_artist_from_table(app) {
                 // Not an artist row: the table's own Enter, cell mode or row mode.
                 if app.state.navigation.table_mode == TableMode::Cell {
                     cell_enter_action(app);
@@ -182,13 +122,7 @@ pub(super) fn handle_main_key(app: &mut App, key_event: KeyEvent) -> color_eyre:
             open_page_key(app, 'f');
         }
         KeyCode::Char('/') => {
-            if app.state.navigation.page == Page::Playlist {
-                app.state.navigation.search.filter_queue_only = true;
-                let songs = app.playback.queue_songs();
-                app.state.navigation.search.unfiltered_songs = Some(songs.to_vec());
-                app.state.navigation.search.active = true;
-                app.state.navigation.search.input = TextInput::new();
-            } else if app.state.navigation.page == Page::Lyrics {
+            if app.state.navigation.page == Page::Lyrics {
                 return Ok(());
             } else {
                 app.state.events.send(NavigationEvent::SearchActivated);
@@ -260,9 +194,7 @@ pub(super) fn handle_main_key(app: &mut App, key_event: KeyEvent) -> color_eyre:
             }
         }
         KeyCode::Char('r' | 'R') => {
-            if app.state.navigation.page == Page::Artist {
-                reload_artist(app);
-            } else if matches!(app.state.navigation.page, Page::Main | Page::Lyrics) {
+            if matches!(app.state.navigation.page, Page::Main | Page::Lyrics) {
                 app.reload_current_nav();
             }
         }
@@ -641,7 +573,7 @@ fn open_artist_from_table(app: &mut App) -> bool {
 
 /// Load the artist the page is showing again (`r`). The page keeps its header, so this is the
 /// retry a failed page offers.
-fn reload_artist(app: &mut App) {
+pub(super) fn reload_artist(app: &mut App) {
     let io = artist_io(app);
     app.state.navigation.artist.reload(io);
 }
@@ -662,7 +594,7 @@ fn artist_io(app: &App) -> ArtistIo {
 /// The page's songs live in the page rather than in the content table, and
 /// `PlaybackEvent::SongPlay` resolves a song against the open table — it would find nothing
 /// here — so the queue is built from the page's own list.
-fn artist_play_selected(app: &mut App) {
+pub(super) fn artist_play_selected(app: &mut App) {
     let (key, index) = {
         let artist = &app.state.navigation.artist;
         let songs = artist.hot_songs();
