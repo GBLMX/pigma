@@ -27,6 +27,8 @@ pub enum Page {
     /// hot-artists table rather than about the app, which is why it has no key: see
     /// [`Page::spec`].
     Artist,
+    /// Every switch the app has, in one list (`:settings`, or `,`).
+    Settings,
     Login,
 }
 
@@ -56,13 +58,14 @@ pub enum PageRender {
 
 impl Page {
     /// Every page, in table order.
-    pub const ALL: [Page; 6] = [
+    pub const ALL: [Page; 7] = [
         Page::Splash,
         Page::Main,
         Page::Lyrics,
         Page::Playlist,
         Page::Artist,
         Page::Login,
+        Page::Settings,
     ];
 
     /// The page's row in the table.
@@ -108,6 +111,14 @@ impl Page {
                 render: PageRender::Shell {
                     layout: layout::content,
                     content: ui::draw_artist,
+                },
+            },
+            Page::Settings => &PageSpec {
+                name: "设置 / 主界面",
+                key: Some(','),
+                render: PageRender::Shell {
+                    layout: layout::content,
+                    content: ui::draw_settings,
                 },
             },
             Page::Login => &PageSpec {

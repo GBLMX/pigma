@@ -26,16 +26,28 @@ use crate::{
 
 pub(super) fn handle_main_key(app: &mut App, key_event: KeyEvent) -> color_eyre::Result<()> {
     // `Ctrl` + an arrow moves a pane edge, the way dragging one does; nothing else uses it.
+    // The settings page's rows are what ↑↓/←→/空格 mean while it is up, before the global key map
+    // can read them as navigation.
+    if app.state.navigation.page == Page::Settings
+        && crate::ui::settings::handle_key(app, key_event.code)
+    {
+        return Ok(());
+    }
+
     if super::panes::handle_key(app, key_event) {
         return Ok(());
     }
 
     match key_event.code {
         KeyCode::Esc => {
-            if app.state.navigation.page == Page::Artist {
-                // The artist page is not part of the content breadcrumb stack — it is opened
-                // from a row rather than by walking the table — so leaving it is a page change,
-                // not a restore, and there is no breadcrumb for `ContentRestore` to pop.
+            if matches!(
+                app.state.navigation.page,
+                Page::Artist | Page::Settings
+            ) {
+                // Neither page is part of the content breadcrumb stack — the artist page is
+                // opened from a row rather than by walking the table, and the settings page by
+                // its own key — so leaving one is a page change, not a restore, and there is no
+                // breadcrumb for `ContentRestore` to pop.
                 app.state.events.send(NavigationEvent::Navigate(Page::Main));
             } else {
                 app.state.events.send(NavigationEvent::ContentRestore);
@@ -130,6 +142,9 @@ pub(super) fn handle_main_key(app: &mut App, key_event: KeyEvent) -> color_eyre:
             }
         }
         KeyCode::Char('l') => open_page_key(app, 'l'),
+        // `,` is the settings page, the way it is in most of these TUIs; `:settings` says the
+        // same thing for anyone who would rather type it.
+        KeyCode::Char(',') => open_page_key(app, ','),
         KeyCode::Char('p' | 'P') => {
             app.playback.prev();
         }

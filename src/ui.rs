@@ -13,6 +13,7 @@ mod lyrics;
 mod navigation;
 pub(crate) mod playerbar;
 mod queue;
+pub(crate) mod settings;
 mod scrollbar;
 mod skeleton;
 mod spinner;
@@ -388,6 +389,18 @@ pub(crate) fn draw_queue(f: &mut Frame, app: &mut App, areas: &layout::LayoutAre
         &mut app.state.queue_hits,
         areas.content,
     );
+}
+
+/// The settings page: every switch the app has, in the content area.
+pub(crate) fn draw_settings(f: &mut Frame, app: &mut App, areas: &layout::LayoutAreas) {
+    let bs = style(
+        &app.config,
+        &app.theme_registry,
+        &app.state.border,
+        app.terminal_background,
+        app.state.tick,
+    );
+    settings::draw(f, &app.config, app.state.settings.selected, &bs, areas.content);
 }
 
 /// The artist page: one singer's profile, hot songs and albums, in the content area.

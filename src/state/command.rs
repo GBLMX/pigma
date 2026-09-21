@@ -148,6 +148,15 @@ pub const COMMANDS: &[Command] = &[
         in_palette: true,
         group: None,
     },
+    Command {
+        name: "settings",
+        summary: "打开设置页（同 `,`）",
+        key: None,
+        ex: "settings",
+        needs_argument: false,
+        in_palette: true,
+        group: None,
+    },
     // The settings a user flips mid-session. Each one is read from the config at the moment it
     // is used — the notify switches when an event fires, the lyrics ones on every frame, the
     // terminal ones by the sequence its command writes — so the switch is live rather than

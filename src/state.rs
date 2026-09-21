@@ -98,6 +98,8 @@ pub struct State {
     /// Where the song is in its lyrics: the current line, and the flow's colour. The page draws
     /// from it and hands it back at the end of the frame.
     pub lyrics: LyricsState,
+    /// Which row of the settings page the cursor is on.
+    pub settings: crate::ui::settings::SettingsState,
     /// The frame's draggable pane edges, rebuilt by the draw pass (`ui::draw`) and consumed by
     /// mouse input — the same contract as `nav_hits`: an edge belongs to the frame that drew it.
     pub pane_dividers: crate::layout::Dividers,

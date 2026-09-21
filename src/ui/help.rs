@@ -44,6 +44,7 @@ static HELP_ITEMS: LazyLock<Vec<HelpRow>> = LazyLock::new(|| {
     ]);
     items.extend(page_row(Page::Lyrics));
     items.extend(page_row(Page::Playlist));
+    items.extend(page_row(Page::Settings));
     items.extend([
         row("/", "搜索 / 过滤"),
         row("s", "喜欢选中歌曲"),

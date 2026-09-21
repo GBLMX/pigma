@@ -53,6 +53,8 @@ pub(crate) enum ExCommand {
     Translation(Option<bool>),
     /// The progress bar's look; `None` cycles, like the bare `:lyrics`.
     ProgressStyle(Option<String>),
+    /// Open the settings page: the switches as a list rather than one command per line.
+    Settings,
     /// Turn the record on the player bar; `None` toggles, like the `t` key.
     Spin(Option<bool>),
     /// Write to the download cache while playing; `None` toggles. The engine copied the
@@ -201,6 +203,7 @@ impl ExCommand {
                 "歌词渐变",
             )?)),
             "pitch" => Ok(Self::Pitch(optional_on_off(args.first().copied())?)),
+            "settings" => Ok(Self::Settings),
             "pane" => match args.as_slice() {
                 [] => Err(format!("`pane` 需要一个面板（{}）", Pane::names().join(" / "))),
                 [name, rest @ ..] => match rest {
@@ -458,6 +461,13 @@ fn split_head(line: &str) -> (String, &str) {
     }
 }
 
+/// The values a command accepts after it — its own completion list, so a row on the settings
+/// page offers exactly what the command line would.
+pub(crate) fn options_for(command: &str, themes: &[String]) -> Vec<String> {
+    let themes: Vec<&str> = themes.iter().map(String::as_str).collect();
+    candidate_names(&format!("{command} "), "", &themes)
+}
+
 /// Completions for the word being typed: command names, theme names after `:theme`, and the
 /// fixed lists the value-taking commands draw from.
 fn candidate_names(head: &str, typed: &str, themes: &[&str]) -> Vec<String> {
@@ -689,6 +699,9 @@ pub(crate) fn execute(app: &mut App, command: ExCommand) -> Result<(), String> {
             app.config.lyric_style = style;
             app.config.save();
             app.toast(format!("歌词样式: {} — {}", style.name(), style.describe()));
+        }
+        ExCommand::Settings => {
+            app.state.navigation.page = Page::Settings;
         }
         ExCommand::ProgressStyle(None) => {
             // Bare, it cycles — the same shape as the bare `:lyrics`.
@@ -1241,6 +1254,7 @@ mod tests {
                 "signin",
                 "sms",
                 "smslogin",
+                "settings",
                 "saveonplay"
             ]
         );

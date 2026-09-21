@@ -244,6 +244,7 @@ impl App {
             tick: 0,
             last_tick: Instant::now(),
             lyrics: crate::state::lyrics::LyricsState::default(),
+            settings: crate::ui::settings::SettingsState::default(),
             pane_dividers: crate::layout::Dividers::default(),
             pane_drag: None,
             last_pane_click: None,

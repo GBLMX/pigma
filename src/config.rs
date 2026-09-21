@@ -423,7 +423,7 @@ impl Config {
         }
     }
 
-    fn to_toml(&self) -> String {
+    pub(crate) fn to_toml(&self) -> String {
         let Ok(pretty) = toml_edit::ser::to_string_pretty(self) else {
             log::error!("failed to serialize config to TOML");
             return String::new();
