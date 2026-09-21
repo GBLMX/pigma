@@ -9,6 +9,7 @@ mod hit;
 mod login;
 mod main;
 mod navigation;
+mod panes;
 mod search;
 mod splash;
 mod table;

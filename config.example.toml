@@ -50,10 +50,18 @@ lyric_gradient = "rainbow"
 # 歌词显示样式:
 #   "window"   —— 滚动窗口(默认):当前行上下若干行 + 卡拉OK填充
 #   "one_line" —— 一次一行:只显示当前行、居中(也接受 "single")
-#   "flow"     —— 颜色流动:渐变沿文字流动并随帧推进,上下行用同色系渐隐
+#   "ktv"      —— 同上滚动窗口,但填充是单色而不是渐变,即 KTV 字幕机的样子(也接受 "karaoke")
+#   "flow"     —— 颜色流动:渐变沿文字流动,快慢跟着当前这句唱多久,上下行用同色系渐隐
 #   "plain"    —— 纯滚动列表,无高亮
-# 也可在应用里 `:lyrics <样式>` 切换(输入时 Tab 可补全)
+# 也可在应用里 `:lyrics <样式>` 切换(输入时 Tab 可补全,裸调用轮流切换)
 lyric_style = "window"
+
+# `ktv` 样式的填充色: 主题字段(accent/text/muted/border/error/...),或颜色本身(blue、lightblue、#4da6ff、ANSI 序号)
+lyric_ktv_color = "#4da6ff"
+
+# 原文下面是否再画一行译文(英文歌的中文翻译等),译文行前会带一个标记以示区别
+# 也可用 `y` 键或 `:translation on|off` 当场开关
+lyric_translation = true
 
 # 代理地址, 支持 http:// https:// socks5://
 proxy = "http://127.0.0.1:7890"
@@ -91,6 +99,25 @@ providers = ["kuwo", "kugou", "bilivideo", "youtube"]
 timeout_ms = 10000
 
 # =============================================================================
+# 面板尺寸
+# =============================================================================
+# 外框（最外层框架）不动；动的是框内的面板。鼠标拖面板内边界改尺寸，
+# 双击同一条边界把该面板折叠掉、再双击还原（尺寸会记住）。
+# 键盘：Ctrl+↑/↓ 拖顶栏/播放条的边界，Ctrl+←/→ 拖侧栏边界（每次 2 格）。
+# 也可用 `:pane <面板> [on|off|toggle]`（面板: topbar / navigation / playerbar / mv，Tab 可补全）。
+[panes]
+# 顶栏行数
+topbar = 3
+# 导航栏尺寸: 左右两侧时是列宽(列)，上下时固定 3 行(横条高度由条目决定)
+navigation = 26
+# 播放条行数
+playerbar = 5
+# 歌词页 MV 海报栏列宽，0 表示按海报自动
+mv = 0
+# 折叠掉的面板（尺寸保留，还原时原样回来）
+# collapsed = ["topbar"]
+
+# =============================================================================
 # 边框配置
 # =============================================================================
 [border]
@@ -113,6 +140,12 @@ border_gradient_speed = 0.005
 # modern 仅有封面
 layout = "modern"
 
+# 进度条样式: "thick"(粗线实心,默认) / "segment"(斜线分段 + 彩虹渐变) / "line"(细线 + 主题渐变)
+#             "blocks"(方块 + turbo 渐变) / "plain"(单字形,无渐变)
+# 也可在应用里 `:progress <样式>` 切换(裸调用轮流切换, Tab 可补全)
+progress_style = "thick"
+
+# 下面三行覆盖样式给出的默认值: 不设置即用样式的符号
 # 进度条填充符号
 filled_symbol = "━"
 # 进度条未填充符号
@@ -123,7 +156,7 @@ filled_color = "accent"
 unfilled_color = "text"
 # 已缓存到本地时进度条轨道颜色
 unfilled_color_cached = "warning"
-# 渐变预设: 设为空或未知名称即关闭渐变
+# 进度条渐变: 不设置 = 跟随 progress_style; 设为空串 = 强制关闭渐变; 写预设名 = 强制该渐变
 # 可选: "warm", "cubehelix", "rainbow", "turbo", "spectral", "viridis"
 gradient_preset = ""
 

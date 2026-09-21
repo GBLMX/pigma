@@ -124,7 +124,7 @@ RSS 大致是**二进制体积 + 约 3 MB**（1.0 的二进制 11.1 MB），换�
 - **修复**：下载缓存条目只在流完成后记录 · 默认日志级别改为 INFO · 清空的 `sections`/`columns` 序列化不再 panic · eapi 非 2xx 只告警 · IPC socket 权限收窄到属主 · `.gitignore` 忽略调试残留 · 搜索、封面、音频流补齐连接与读超时（音频流刻意**不加**总超时，否则会截断正在播放的下载）
 - **播放**：解析失败按类型分类（网络失败重试一次、无版权/无地址直接走兜底源），不再靠错误字符串前缀判断
 - **外观**：符号预设（`nerd`／`unicode`／`ascii`，不装 Nerd Font 也能用）· 按终端能力降级真彩色 · 依据终端背景自动选明/暗主题（Linux/macOS 问终端 OSC 11，Windows 读控制台调色板）· **背景也由主题绘制**（此前只给文字上色，浅色主题在深色终端上会变成零星灰字）· 内置 20 套主题 + `[themes.<名>]` 继承式自定义 · 高亮行的前景色按对比度自动选取，浅色主题下也读得出来
-- **新增**：频谱可视化 · 音高读数（自实现 YIN，无新增依赖）· 鼠标交互（点击 seek／切区／播放控制／模式／喜欢／静音）· vim 风格 `:` 命令行与 Tab 补全（密码/短信登录、退出登录、签到）· 听歌打卡（播满约 30 秒即上报，与官方客户端口径一致；短于 30 秒的歌以播完为准）· **歌词四种显示样式**（`:lyrics window|one_line|flow|plain`）· 歌词严格按解码位置对轴 · 终端开关：`mouse`／`cursor_style`／`[notify]` 桌面通知 · 随仓库提供的性能基准
+- **新增**：频谱可视化 · 音高读数（自实现 YIN，无新增依赖）· 鼠标交互（点击 seek／切区／播放控制／模式／喜欢／静音）· vim 风格 `:` 命令行与 Tab 补全（密码/短信登录、退出登录、签到）· 听歌打卡（播满约 30 秒即上报，与官方客户端口径一致；短于 30 秒的歌以播完为准）· **面板可拖拽可开关**（框内顶栏/侧栏/播放条/MV 栏：鼠标拖边界改尺寸、双击折叠还原、`Ctrl+方向键` 同义，尺寸与折叠态写回配置；**外框不动**）· **进度条样式预设**（`:progress`，一种样式一个词，逐键仍可覆盖）· **歌词五种显示样式**（`:lyrics window|one_line|ktv|flow|plain`，`ktv` 是单色卡拉OK填充、颜色由 `lyric_ktv_color` 定）· 译文与原文一眼分得开（译文行带标记，`y` ／`:translation` 开关）· 歌词严格按解码位置对轴 · 终端开关：`mouse`／`cursor_style`／`[notify]` 桌面通知 · 随仓库提供的性能基准
 - **终端协议**：kitty 图形协议封面（可用 `[playerbar] image_protocol` 强制）· 同步刷新（整帧一次性呈现，也是 kitty 放图的规范要求）· kitty 键盘协议（`Esc` 不再被读成 `Alt+<key>`）· 括号粘贴 · 封面协议以**终端的回答**为准，tmux 内自动回退（Windows 的 ConPTY 不回答该查询，故按环境判定，见 [Windows](#windows)）· kitty 的桌面通知用其自有的 `OSC 99`（标题与正文分开、Base64 负载、`f=` 声明应用名），其余终端保持 `OSC 9` 逐字节不变
 
 **注意：**
@@ -149,7 +149,7 @@ RSS 大致是**二进制体积 + 约 3 MB**（1.0 的二进制 11.1 MB），换�
 **界面**
 
 - [x] 自定义渲染的导航列表与内容列表、表头自定义、数据分页加载
-- [x] 歌词四种显示样式（窗口 / 一次一行 / 颜色流动 / 纯列表）+ 渐变逐字高亮 + 严格按解码位置对轴
+- [x] 歌词五种显示样式（窗口 / 一次一行 / KTV 单色填充 / 颜色流动 / 纯列表）+ 渐变逐字高亮 + 严格按解码位置对轴 + 译文标记与翻译开关
 - [x] 重写 playerbar（含封面）· 主题背景完整绘制 · 高亮行对比度自动保证
 - [x] MV 海报面板（歌词页随歌自动加载海报与标题 / 歌手 / 时长 · 发布日期 / 简介；无 MV、取不到、或页面放不下就**整块不画**，页面与之前逐字节一致）· 顶栏圆形头像（登录后显示）· 黑胶旋转（`[playerbar] spinning_cover`，默认关闭）
 - [x] 频谱可视化（`v`）· 音高读数（`V`，自实现 YIN，无新增依赖）
@@ -300,6 +300,8 @@ cargo build --release
 | g/G           |                列表顶部/底部                 |
 | v             |        频谱显示开关（同 `:visualizer on`）     |
 | V             |          音高读数开关（同 `:pitch on`）        |
+| y             |       歌词翻译开关（同 `:translation on`）     |
+| `ctrl+↑/↓/←/→` |  拖面板边界：顶栏/播放条、侧栏尺寸（同鼠标拖拽）  |
 | :             |      命令模式（vim 风格，Tab 补全，见下节）     |
 
 ### 命令模式（vim 风格）
@@ -324,7 +326,10 @@ cargo build --release
 | `:layout default\|modern\|minimal` | 播放条布局（`modern` 下频谱只有封面列的 8 格宽，另两种布局是整行） |
 | `:pitch on\|off` | 音高读数开关（同 `V` 键） |
 | `:spin on\|off` | 播放条封面旋转开关（同 `t` 键；默认关闭，暂停即停在当前角度） |
-| `:lyrics window\|one_line\|flow\|plain` | 歌词显示样式（`Tab` 会列出四种与各自说明） |
+| `:translation on\|off` | 歌词翻译开关（同 `y` 键；关掉后只剩原文） |
+| `:progress thick\|segment\|line\|blocks\|plain` | 进度条样式（`Tab` 列出五种；裸调用轮流切换，如 `segment` 是斜线 + 彩虹渐变） |
+| `:pane <面板> [on\|off\|toggle]` | 显示/隐藏面板（`topbar` / `navigation` / `playerbar` / `mv`；`Tab` 补全；裸为 toggle） |
+| `:lyrics window\|one_line\|ktv\|flow\|plain` | 歌词显示样式（`Tab` 会列出五种与各自说明） |
 | `:notify song_change\|errors on\|off` | 切歌提示 / 播放错误提示开关 |
 | `:mouse on\|off` | 鼠标捕获开关（影响滚轮与双击；当场写终端转义序列） |
 | `:cursor default\|block\|underline\|bar` | 终端光标形状（当场生效） |
@@ -496,11 +501,16 @@ Send-boxpigma '{"cmd":"msg","action":{"action":"volume","absolute":0.75}}'  # �
 | `config_version` | 配置版本；旧文件加载时自动升级，并把原文件备份为 `config.toml.bak-v0` |
 | `default_theme` / `light_theme` | 暗色/浅色槽位的主题名；可写 `"random"` 每次启动随机挑一个 |
 | `background` | `auto`（跟随终端背景）/ 强制 `dark` 或 `light` |
+| `[panes]` | 面板尺寸与折叠（`topbar` / `navigation` / `playerbar` / `mv` 的格数，`collapsed` 列出折叠掉的面板；鼠标拖框内边界改尺寸、双击折叠/还原） |
+| `paint_background` | 是否用主题背景盖住整帧：`auto`（默认，只在主题背景与终端背景不一致时才盖 —— 一致时盖了也看不见，却会把终端的半透明/亚克力遮住）/ `always` / `never` |
 | `[logger] log_level` | `error` / `warn` / `info` / `debug` / `trace` |
 | `[themes.<名字>]` | 继承式自定义主题：写 `base` + 要覆盖的颜色 |
 | `[[sections]]` / `[[columns]]` | 导航区与内容列表的字段、宽度与覆盖规则 |
-| `[playerbar]` | 布局（`default` / `modern` / `minimal`）、进度条样式与渐变、封面与 `image_protocol`、`spinning_cover`（播放时封面缓慢旋转：20 秒一圈、每圈 72 个角度，约 3.6 次/秒重编码；默认关闭，暂停即停在当前角度） |
-| `[lyrics]` | 歌词显示样式与渐变 |
+| `[playerbar]` | 布局（`default` / `modern` / `minimal`）、进度条样式与渐变（`progress_style` 一句话选样式，`filled_symbol` / `unfilled_symbol` / `gradient_preset` 覆盖它；`gradient_preset` 不设置=跟样式、`""`=强制关闭）、封面与 `image_protocol`、`spinning_cover`（播放时封面缓慢旋转：20 秒一圈、每圈 72 个角度，约 3.6 次/秒重编码；默认关闭，暂停即停在当前角度） |
+| `lyric_style` / `lyric_gradient` | 歌词显示样式（`window` / `one_line` / `ktv` / `flow` / `plain`）与扫光渐变 |
+| `lyric_ktv_color` | `ktv` 样式的填充色：主题字段（`accent` / `text` …）或颜色本身（`blue` / `#4da6ff` / ANSI 序号） |
+| `lyric_translation` | 原文下面是否画译文（同 `y` ／`:translation on\|off`） |
+| `[symbols]` | 字形预设与逐键覆盖（`translation` 是译文行前的标记，默认 `>`） |
 | `[terminal]` | 鼠标捕获与光标形状 |
 | `[notify]` | 桌面通知开关（切歌 / 出错） |
 | `[cache]` | 内容缓存与 save-on-play |

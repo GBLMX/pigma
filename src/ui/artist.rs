@@ -350,7 +350,7 @@ fn release_date(publish_time_ms: u64) -> String {
 
 /// A pane's block, drawn; returns the area left for its body.
 fn panel(f: &mut Frame, bs: &BlockStyle<'_>, title: &str, area: Rect) -> Rect {
-    let block = CornerBlock::from_color(bs, bs.colors.bg).title(title, bs.colors);
+    let block = CornerBlock::from_color(bs, bs.base).title(title, bs.colors);
     let inner = block.inner(area);
     f.render_widget(block, area);
     inner
@@ -361,7 +361,7 @@ fn panel(f: &mut Frame, bs: &BlockStyle<'_>, title: &str, area: Rect) -> Rect {
 fn skeleton_pane(f: &mut Frame, bs: &BlockStyle<'_>, title: &str, area: Rect) {
     let inner = panel(f, bs, title, area);
     f.render_widget(
-        Skeleton::new().bg(bs.colors.bg).surface(bs.colors.surface),
+        Skeleton::new().bg(bs.base).surface(bs.colors.surface),
         inner,
     );
 }
@@ -395,6 +395,7 @@ mod tests {
         let border = BorderConfig::default();
         let bs = BlockStyle {
             colors: &colors,
+            base: colors.bg,
             border: &border,
             tick: 0,
         };

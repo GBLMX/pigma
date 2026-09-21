@@ -11,7 +11,7 @@ use ratatui::{Frame, layout::Rect};
 
 use crate::{
     app::App,
-    config::NavPosition,
+    config::{NavPosition, PanesConfig},
     layout::{self, LayoutAreas},
     ui,
 };
@@ -49,7 +49,7 @@ pub enum PageRender {
     /// The page draws inside the shared shell: `ui::draw` runs `layout` and paints the
     /// topbar and player bar, then hands the page's own area to `content`.
     Shell {
-        layout: fn(Rect, NavPosition) -> LayoutAreas,
+        layout: fn(Rect, &PanesConfig, NavPosition) -> LayoutAreas,
         content: fn(&mut Frame, &mut App, &LayoutAreas),
     },
 }

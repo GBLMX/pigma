@@ -149,7 +149,7 @@ pub(super) fn render_content(
             0
         }
         ContentState::Loading => {
-            f.render_widget(Skeleton::new().bg(colors.bg).surface(colors.surface), area);
+            f.render_widget(Skeleton::new().bg(bs.base).surface(colors.surface), area);
             0
         }
         ContentState::Error(e) => {

@@ -23,7 +23,7 @@ pub(super) fn draw(
 ) {
     let colors = bs.colors;
     let muted_style = Style::default().fg(colors.muted);
-    let block = CornerBlock::from_color(bs, bs.colors.bg).title(title, bs.colors);
+    let block = CornerBlock::from_color(bs, bs.base).title(title, bs.colors);
     let inner = block.inner(area);
     f.render_widget(block, area);
 

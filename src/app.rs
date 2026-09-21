@@ -53,6 +53,11 @@ pub struct App {
     pub state: State,
     pub playback: PlaybackEngine,
     pub theme_registry: ThemeRegistry,
+    /// The terminal's own background, probed once at startup: what `background = auto` picks the
+    /// theme slot from, and what decides whether the page paints its own background over the
+    /// terminal's at all (see
+    /// [`BackgroundFill`](crate::utils::terminal::BackgroundFill)).
+    pub terminal_background: crate::utils::terminal::Background,
     pub service: ApiService,
     pub picker: Picker,
     /// HTTP client for one-shot cover downloads (honours the proxy config); bounded by
@@ -116,6 +121,9 @@ impl App {
         let tx = events.sender();
 
         let theme_registry = ThemeRegistry::new(config.themes.clone());
+        // Read once here: `with_terminal` is false in tests and in the CLI paths, where nothing
+        // probed the terminal, and the probe's own default is what the page gets.
+        let terminal_background = *BACKGROUND;
 
         // `random` is a request, not a theme, so it is settled here — once. `resolve_theme` runs
         // on every frame; rolling there would repaint the interface in a new theme each frame.
@@ -230,6 +238,10 @@ impl App {
             offline: false,
             tick: 0,
             last_tick: Instant::now(),
+            pane_dividers: crate::layout::Dividers::default(),
+            pane_drag: None,
+            last_pane_click: None,
+            shell_area: ratatui::layout::Rect::default(),
             toast_msg: String::new(),
             toast_time: None,
             playerbar_area: Rect::default(),
@@ -277,6 +289,7 @@ impl App {
             ),
             state,
             theme_registry,
+            terminal_background,
             picker,
             cover_http,
             finder,

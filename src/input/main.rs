@@ -25,6 +25,11 @@ use crate::{
 };
 
 pub(super) fn handle_main_key(app: &mut App, key_event: KeyEvent) -> color_eyre::Result<()> {
+    // `Ctrl` + an arrow moves a pane edge, the way dragging one does; nothing else uses it.
+    if super::panes::handle_key(app, key_event) {
+        return Ok(());
+    }
+
     match key_event.code {
         KeyCode::Esc => {
             if app.state.navigation.page == Page::Artist {
@@ -273,6 +278,12 @@ fn open_page_key(app: &mut App, key: char) {
 }
 
 pub(super) fn handle_main_mouse(app: &mut App, kind: MouseEventKind, col: u16, row: u16) {
+    // The pane edges first: they are the frame's own furniture, so a drag on one is not a click
+    // on whatever the pane is showing.
+    if super::panes::handle_mouse(app, kind, col, row) {
+        return;
+    }
+
     if kind == MouseEventKind::Down(MouseButton::Left) {
         handle_click(app, col, row);
         return;

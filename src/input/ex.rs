@@ -22,12 +22,12 @@ use crossterm::{
 use crate::{
     app::App,
     cli::parse_volume,
-    config::{Config, LyricStyle, NotifyConfig},
+    config::{Config, LyricStyle, NotifyConfig, Pane},
     event::{AppEvent, AuthEvent, NavigationEvent},
     ipc::MsgAction,
     state::{LoginMethod, Page},
     text_input::TextInput,
-    utils::{GradientPreset, terminal::CursorStyle},
+    utils::{GradientPreset, Named, terminal::CursorStyle},
 };
 
 /// What a command line asks for.
@@ -66,6 +66,11 @@ pub(crate) enum ExCommand {
     Cursor(Option<CursorStyle>),
     /// Preset of the lyrics highlight gradient; `None` cycles through the presets.
     LyricGradient(Option<GradientPreset>),
+    /// Show, hide or resize a pane: `:pane navigation off`, `:pane playerbar toggle`.
+    Pane {
+        name: String,
+        action: Option<String>,
+    },
     /// `None` toggles, like the `V` key.
     Pitch(Option<bool>),
     /// `None` cycles.
@@ -188,6 +193,20 @@ impl ExCommand {
                 "歌词渐变",
             )?)),
             "pitch" => Ok(Self::Pitch(optional_on_off(args.first().copied())?)),
+            "pane" => match args.as_slice() {
+                [] => Err(format!("`pane` 需要一个面板（{}）", Pane::names().join(" / "))),
+                [name, rest @ ..] => match rest {
+                    [] => Ok(Self::Pane {
+                        name: (*name).to_string(),
+                        action: None,
+                    }),
+                    [action] => Ok(Self::Pane {
+                        name: (*name).to_string(),
+                        action: Some((*action).to_string()),
+                    }),
+                    _ => Err("`pane` 只接受一个面板与 on/off/toggle".to_string()),
+                },
+            },
             "layout" => Ok(Self::Layout(optional_argument(&args)?)),
             other => Err(format!("未知命令: {other}")),
         }
@@ -447,6 +466,7 @@ fn candidate_names(head: &str, typed: &str, themes: &[&str]) -> Vec<String> {
                 .collect(),
             "cursor" => CURSOR_STYLES.iter().map(|(name, _)| *name).collect(),
             "lyricgradient" => GRADIENTS.iter().map(|(name, _)| *name).collect(),
+            "pane" => Pane::names(),
             "layout" => vec!["default", "minimal", "modern"],
             "lyrics" => LyricStyle::ALL.iter().map(|s| s.name()).collect(),
             _ => Vec::new(),
@@ -687,6 +707,32 @@ pub(crate) fn execute(app: &mut App, command: ExCommand) -> Result<(), String> {
         ExCommand::Pitch(on) => {
             let on = on.unwrap_or(!app.config.playerbar.visible.pitch);
             app.set_pitch(on);
+        }
+        ExCommand::Pane { name, action } => {
+            let Some(pane) = Pane::parse(&name) else {
+                let known: Vec<&str> = Pane::names();
+                return Err(format!("未知面板: {name}（可用: {}）", known.join(" / ")));
+            };
+            match action.as_deref() {
+                None | Some("toggle") => app.config.panes.toggle(pane),
+                Some("on") => app.config.panes.restore(pane),
+                Some("off") => app.config.panes.collapse(pane),
+                Some(other) => {
+                    return Err(format!("未知动作: {other}（可用: on / off / toggle）"));
+                }
+            }
+            app.config.save();
+
+            let size = app.config.panes.size(pane);
+            let state = if app.config.panes.visible(pane) {
+                match pane {
+                    Pane::Navigation | Pane::Mv => format!("{size} 列"),
+                    _ => format!("{size} 行"),
+                }
+            } else {
+                "关".to_string()
+            };
+            app.toast(format!("{}: {}", pane.describe(), state));
         }
         ExCommand::Layout(None) => {
             let next = match app.config.playerbar.layout {

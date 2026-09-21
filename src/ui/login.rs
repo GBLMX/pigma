@@ -79,7 +79,7 @@ fn render_box(f: &mut Frame, login: &mut LoginState, bs: &BlockStyle<'_>, area: 
     let box_height = (8 + content_rows).min(area.height);
     let box_y = area.y + (area.height.saturating_sub(box_height)) / 2;
 
-    let block = CornerBlock::from_color(bs, colors.bg).title(
+    let block = CornerBlock::from_color(bs, bs.base).title(
         " <accent> ► <b>AUTHENTICATION REQUIRED</b></accent>",
         colors,
     );
@@ -496,6 +496,7 @@ mod tests {
         let border = BorderConfig::default();
         let bs = BlockStyle {
             colors: &colors,
+            base: colors.bg,
             border: &border,
             tick: 0,
         };

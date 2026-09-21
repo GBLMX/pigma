@@ -25,10 +25,16 @@ mod topbar;
 
 use std::{sync::Arc, time::Duration};
 
-use ratatui::{Frame, layout::Rect, style::Style, widgets::Fill};
+use ratatui::{
+    Frame,
+    layout::Rect,
+    style::{Color, Style},
+    widgets::Fill,
+};
 
 use crate::{
     app::App,
+    utils::terminal::Background,
     config::{BorderConfig, Config, NavPosition, ThemeRegistry},
     layout,
     state::PageRender,
@@ -62,24 +68,30 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     // still selected a navigation item).
     app.state.navigation.nav.nav_hits.clear();
     app.state.nav_area = Rect::default();
+    // The frame's draggable pane edges are rebuilt with the frame, like every other hit area.
+    app.state.pane_dividers.clear();
+    app.state.shell_area = area;
 
     let bs = style(
         &app.config,
         &app.theme_registry,
         &app.state.border,
+        app.terminal_background,
         app.state.tick,
     );
 
-    // Paint the theme's background over the whole frame before anything else.
+    // Paint the background behind everything, before anything else, and let `base` decide which
+    // background that is.
     //
-    // Without this, every cell the theme does not explicitly paint keeps the terminal's own
-    // colours — so a light theme in a dark terminal renders as thin light-grey text on a dark
-    // screen: half a theme, which reads as no theme at all (and is what the loading list after
-    // a song switch looked like). Themes are the app's visual identity, background included.
-    f.render_widget(
-        Fill::new(" ").style(Style::default().bg(bs.colors.bg)),
-        f.area(),
-    );
+    // Without a fill at all, every cell the theme does not explicitly paint keeps the terminal's
+    // own colours — so a light theme in a dark terminal renders as thin light-grey text on a dark
+    // screen: half a theme, which reads as no theme at all (and is what the loading list after a
+    // song switch looked like). A background the terminal already has, though, is a fill nobody
+    // can see doing something everybody can: it covers the terminal's own background, and with it
+    // whatever the user put there — a translucent background, Windows Terminal's acrylic. So
+    // `base` is the theme's background only when the two disagree, and `Reset` (the terminal's
+    // own, and a no-op write into a fresh buffer) otherwise: see `BackgroundFill`.
+    f.render_widget(Fill::new(" ").style(Style::default().bg(bs.base)), f.area());
 
     match app.state.navigation.page.spec().render {
         PageRender::Standalone(draw_page) => draw_page(f, app, area),
@@ -87,7 +99,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             layout: page_layout,
             content: page_content,
         } => {
-            let lay = page_layout(area, app.config.navigation_position);
+            let lay = page_layout(area, &app.config.panes, app.config.navigation_position);
+            app.state.pane_dividers = lay.dividers;
 
             topbar::draw(
                 f,
@@ -143,7 +156,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     toast::draw_toast(f, app, app.current_theme());
 }
 
-/// The styling a view draws with: the resolved theme, the border mode and the tick.
+/// The styling a view draws with: the resolved theme, the background to paint behind content,
+/// the border mode and the tick.
 ///
 /// Taken field by field instead of as `&App`: a view that draws into the app borrows it
 /// mutably, and one borrow of the whole app would rule that out.
@@ -151,10 +165,26 @@ fn style<'a>(
     config: &Config,
     themes: &'a ThemeRegistry,
     border: &'a BorderConfig,
+    terminal_background: Background,
     tick: u64,
 ) -> BlockStyle<'a> {
+    let colors = App::resolve_theme(config, themes);
+
+    // Whether the theme's background goes on top of the terminal's is decided once, here: the
+    // answer is what every widget paints behind its content (`BlockStyle::base`), so a
+    // translucent terminal stays translucent from the frame to the last row.
+    let base = if config
+        .paint_background
+        .paints(colors.background(), terminal_background)
+    {
+        colors.bg
+    } else {
+        Color::Reset
+    };
+
     BlockStyle {
-        colors: App::resolve_theme(config, themes),
+        colors,
+        base,
         border,
         tick,
     }
@@ -166,6 +196,7 @@ pub(crate) fn draw_splash(f: &mut Frame, app: &mut App, area: Rect) {
         &app.config,
         &app.theme_registry,
         &app.state.border,
+        app.terminal_background,
         app.state.tick,
     );
     let lay = layout::splash(area, splash::LOGO.len() as u16);
@@ -178,6 +209,7 @@ pub(crate) fn draw_login(f: &mut Frame, app: &mut App, area: Rect) {
         &app.config,
         &app.theme_registry,
         &app.state.border,
+        app.terminal_background,
         app.state.tick,
     );
     let lay = layout::login(area);
@@ -191,6 +223,7 @@ pub(crate) fn draw_main(f: &mut Frame, app: &mut App, areas: &layout::LayoutArea
         &app.config,
         &app.theme_registry,
         &app.state.border,
+        app.terminal_background,
         app.state.tick,
     );
     match app.config.navigation_position {
@@ -258,7 +291,7 @@ pub(crate) fn draw_main(f: &mut Frame, app: &mut App, areas: &layout::LayoutArea
             title
         }
     };
-    let block = CornerBlock::from_color(&bs, bs.colors.bg).title(&title, bs.colors);
+    let block = CornerBlock::from_color(&bs, bs.base).title(&title, bs.colors);
     let inner = block.inner(areas.content);
     f.render_widget(block, areas.content);
 
@@ -286,6 +319,7 @@ pub(crate) fn draw_lyrics(f: &mut Frame, app: &mut App, areas: &layout::LayoutAr
         &app.config,
         &app.theme_registry,
         &app.state.border,
+        app.terminal_background,
         app.state.tick,
     );
     lyrics::draw(
@@ -305,6 +339,7 @@ pub(crate) fn draw_queue(f: &mut Frame, app: &mut App, areas: &layout::LayoutAre
         &app.config,
         &app.theme_registry,
         &app.state.border,
+        app.terminal_background,
         app.state.tick,
     );
     queue::draw_queue_table(
@@ -329,6 +364,7 @@ pub(crate) fn draw_artist(f: &mut Frame, app: &mut App, areas: &layout::LayoutAr
         &app.config,
         &app.theme_registry,
         &app.state.border,
+        app.terminal_background,
         app.state.tick,
     );
     let lay = layout::artist(areas.content);
@@ -458,58 +494,141 @@ mod contrast_audit {
 /// The theme has to own the background, not just the text colours.
 #[cfg(test)]
 mod theme_background {
-    use ratatui::{Terminal, backend::TestBackend, style::Color};
+    use ratatui::{
+        Terminal,
+        backend::TestBackend,
+        buffer::Buffer,
+        style::Color,
+    };
 
-    use crate::{app::App, config::Config};
+    use crate::{
+        app::App,
+        config::Config,
+        utils::terminal::{Background, BackgroundFill},
+    };
 
-    /// Every cell that draws something must sit on the theme's background.
+    /// A frame drawn on a terminal whose own background is `terminal`, with `fill` deciding
+    /// whether the theme's background is painted over it — and the theme's own background colour.
     ///
-    /// Spreading foreground colours over the terminal's own background is half a theme, and it
-    /// reads as none: a light theme in a dark terminal came out as thin light-grey text on a
-    /// dark screen, which is what the list looked like right after a song switch.
-    #[tokio::test]
-    async fn drawn_cells_never_borrow_the_terminals_background() {
+    /// The theme is a *light* one (`github-light`, whichever slot the config resolves to), so
+    /// "the theme and the terminal agree" is a state a test can set on any machine.
+    fn frame(fill: BackgroundFill, terminal: Background) -> (Buffer, Color) {
         let _ = rustls::crypto::ring::default_provider().install_default();
-        for name in ["default", "github-light", "gruvbox-light", "tokyo-night"] {
-            let config = Config {
-                default_theme: name.to_string(),
-                ..Config::default()
-            };
-            let mut app = match App::new(config, false) {
-                Ok(app) => app,
-                Err(e) => panic!("{name}: {e}"),
-            };
-            // The main page with its content still loading: what a song switch shows.
-            app.state.navigation.page = crate::state::Page::Main;
-            app.state.navigation.content = crate::state::ContentState::Loading.into();
+        let config = Config {
+            default_theme: "github-light".to_string(),
+            paint_background: fill,
+            ..Config::default()
+        };
+        let mut app = App::new(config, false).expect("app");
+        app.terminal_background = terminal;
+        // The main page with its content still loading: what a song switch shows.
+        app.state.navigation.page = crate::state::Page::Main;
+        app.state.navigation.content = crate::state::ContentState::Loading.into();
 
-            let mut terminal = Terminal::new(TestBackend::new(80, 20)).expect("backend");
-            terminal.draw(|f| super::draw(f, &mut app)).expect("draw");
-            let buffer = terminal.backend().buffer().clone();
+        let theme = app
+            .theme_registry
+            .get("github-light")
+            .expect("a built-in theme")
+            .clone();
+        assert_eq!(
+            theme.background(),
+            Background::Light,
+            "the fixture's theme must be the light one"
+        );
 
-            let mut borrowed = Vec::new();
-            for y in 0..buffer.area.height {
-                for x in 0..buffer.area.width {
-                    let cell = &buffer[(x, y)];
-                    // Blank cells are skipped: the transparent borders are deliberate, and they
-                    // draw nothing.
-                    if cell.symbol().trim().is_empty() {
-                        continue;
-                    }
-                    if cell.bg == Color::Reset {
-                        borrowed.push((x, y, cell.symbol().to_string()));
-                    }
+        let mut terminal = Terminal::new(TestBackend::new(80, 20)).expect("backend");
+        terminal.draw(|f| super::draw(f, &mut app)).expect("draw");
+
+        (terminal.backend().buffer().clone(), theme.bg)
+    }
+
+    /// Cells that leave the background to the terminal: what a translucent terminal shows
+    /// through, and what acrylic blurs.
+    ///
+    /// The blank cell a wide glyph leaves behind it (`未` and the half-cell ratatui writes after
+    /// it) is deliberately not counted: it carries no style of its own because the terminal
+    /// paints it as part of the glyph, so nobody sees the terminal's background through it.
+    fn transparent(buffer: &Buffer) -> Vec<(u16, u16, String)> {
+        use unicode_width::UnicodeWidthStr;
+
+        let mut cells = Vec::new();
+        for y in 0..buffer.area.height {
+            for x in 0..buffer.area.width {
+                if buffer[(x, y)].bg != Color::Reset {
+                    continue;
+                }
+                let after_wide = x > 0 && UnicodeWidthStr::width(buffer[(x - 1, y)].symbol()) > 1;
+                if !after_wide {
+                    cells.push((x, y, buffer[(x, y)].symbol().to_string()));
                 }
             }
-            assert!(
-                borrowed.is_empty(),
-                "{name}: {} cells draw on the terminal's background, e.g. {:?}",
-                borrowed.len(),
-                &borrowed[..borrowed.len().min(6)]
-            );
         }
+        cells
+    }
+
+    /// `always`: the theme's background over every cell, which is the fix for a light theme in a
+    /// dark terminal — thin light-grey text on a dark screen without it.
+    #[tokio::test]
+    async fn always_paints_the_theme_over_every_cell() {
+        let (buffer, _) = frame(BackgroundFill::Always, Background::Dark);
+
+        let showing = transparent(&buffer);
+        assert!(
+            showing.is_empty(),
+            "{} cells still show the terminal's background, e.g. {:?}",
+            showing.len(),
+            &showing[..showing.len().min(6)]
+        );
+    }
+
+    /// The default: with the theme's own background already the terminal's, the fill is
+    /// invisible while what it hides — the terminal's transparency — is not. So the base stays
+    /// the terminal's, and the surfaces the theme *does* paint are still painted.
+    #[tokio::test]
+    async fn auto_leaves_a_matching_background_to_the_terminal() {
+        let (buffer, bg) = frame(BackgroundFill::Auto, Background::Light);
+
+        assert!(
+            !transparent(&buffer).is_empty(),
+            "a matching theme painted over the terminal's own background anyway"
+        );
+        assert!(
+            buffer
+                .content
+                .iter()
+                .any(|cell| cell.bg != Color::Reset && cell.bg != bg),
+            "nothing was painted at all: transparency is not the same as no theme"
+        );
+    }
+
+    /// …and when the two disagree, the fill is what keeps the page readable.
+    #[tokio::test]
+    async fn auto_paints_when_the_theme_and_the_terminal_disagree() {
+        let (buffer, _) = frame(BackgroundFill::Auto, Background::Dark);
+
+        let showing = transparent(&buffer);
+        assert!(
+            showing.is_empty(),
+            "a light theme on a dark terminal has to paint its background, but {} cells \
+             still show the terminal's, e.g. {:?}",
+            showing.len(),
+            &showing[..showing.len().min(6)]
+        );
+    }
+
+    /// `never`: the terminal keeps its background whatever the theme says — the mode for someone
+    /// who wants their blur more than the theme's background.
+    #[tokio::test]
+    async fn never_leaves_the_terminal_alone() {
+        let (buffer, _) = frame(BackgroundFill::Never, Background::Dark);
+
+        assert!(
+            !transparent(&buffer).is_empty(),
+            "the background was painted anyway"
+        );
     }
 }
+
 /// `cargo test --release --lib -- --ignored --nocapture frame_bench`
 ///
 /// What an **idle** frame costs. The other benches answer "does the work that runs *while music

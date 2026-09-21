@@ -7,6 +7,7 @@ mod column;
 mod lyrics;
 mod navigation;
 mod notify;
+mod panes;
 mod playerbar;
 mod symbols;
 pub mod theme;
@@ -20,6 +21,7 @@ pub use column::*;
 pub use lyrics::*;
 pub use navigation::*;
 pub use notify::*;
+pub use panes::*;
 pub use playerbar::*;
 use serde::{Deserialize, Serialize};
 pub use symbols::*;
@@ -28,7 +30,10 @@ pub use titles::*;
 
 use crate::{
     logger::Logger,
-    utils::{self, GradientPreset, terminal::BackgroundMode},
+    utils::{
+        self, GradientPreset,
+        terminal::{BackgroundFill, BackgroundMode},
+    },
 };
 
 /// `#[serde(default)]` for a field whose natural default is "on".
@@ -59,6 +64,14 @@ pub struct Config {
     /// Theme used when the terminal background is light; `default_theme` is the dark slot.
     #[serde(default)]
     pub light_theme: Option<String>,
+    /// The panes inside the frame: their sizes, and which are collapsed.
+    #[serde(default)]
+    pub panes: PanesConfig,
+    /// Whether the app paints the theme's background over the whole frame: `auto` (only when it
+    /// differs from the terminal's, which keeps a translucent or acrylic terminal background),
+    /// `always`, or `never`.
+    #[serde(default)]
+    pub paint_background: BackgroundFill,
     /// Which background the theme slots are chosen for: `auto` (follow the terminal),
     /// `dark`, or `light`.
     #[serde(default)]
@@ -84,7 +97,15 @@ pub struct Config {
     /// Lyrics highlight gradient style: warm / cubehelix / rainbow / spectral / viridis / turbo.
     #[serde(default)]
     pub lyric_gradient: GradientPreset,
-    /// How the lyrics page draws: `window`, `one_line`, `flow` or `plain`.
+    /// Colour of the sung part in the `ktv` lyrics style: a theme field (`accent`, `text`, …)
+    /// or a colour of its own (`blue`, `lightblue`, `#4da6ff`, an ANSI index).
+    #[serde(default = "default_lyric_ktv_color")]
+    pub lyric_ktv_color: String,
+    /// Draw the translated lyric lines under the original ones (`y`, `:translation on|off`).
+    /// Only songs whose lyrics come with a translation have any to draw.
+    #[serde(default = "default_true")]
+    pub lyric_translation: bool,
+    /// How the lyrics page draws: `window`, `one_line`, `ktv`, `flow` or `plain`.
     #[serde(default)]
     pub lyric_style: LyricStyle,
     /// Capture the mouse: clicks on the player bar, the tabs and the lists. Turning it off
@@ -125,6 +146,11 @@ pub struct Config {
     /// Default format for `boxpigma status`: `plain` or `json`.
     #[serde(default = "default_cli_status_format")]
     pub cli_status_format: String,
+}
+
+/// The karaoke blue: what a KTV screen paints over the words once they have been sung.
+fn default_lyric_ktv_color() -> String {
+    "#4da6ff".into()
 }
 
 fn default_proxy() -> String {
@@ -229,12 +255,16 @@ impl Default for Config {
             config_version: CONFIG_VERSION,
             default_theme: Theme::default().name,
             light_theme: None,
+            panes: PanesConfig::default(),
+            paint_background: BackgroundFill::default(),
             background: BackgroundMode::default(),
             symbols: SymbolsConfig::default(),
             border: BorderConfig::default(),
             seek_interval_secs: 15,
             lyric_gradient: GradientPreset::default(),
             lyric_style: LyricStyle::default(),
+            lyric_ktv_color: default_lyric_ktv_color(),
+            lyric_translation: true,
             mouse: true,
             cursor_style: crate::utils::terminal::CursorStyle::default(),
             notify: NotifyConfig::default(),

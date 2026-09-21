@@ -404,6 +404,39 @@ impl BackgroundMode {
     }
 }
 
+/// Whether the app paints its own background over the terminal's.
+///
+/// The app paints the whole frame with the theme's background so that a theme reads as a theme:
+/// without it, every cell the theme does not explicitly paint keeps the terminal's colours, and
+/// a light theme in a dark terminal becomes thin light-grey text on a dark screen. What that
+/// fill also covers is the terminal's own background — a translucent one, Windows Terminal's
+/// acrylic — which is a thing the user *can* see, unlike a fill that matches the terminal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BackgroundFill {
+    /// Paint it only when the theme's background and the terminal's disagree — the case the fill
+    /// exists for. When they agree the fill is invisible while the transparency it hides is not.
+    #[default]
+    Auto,
+    /// Always paint it.
+    Always,
+    /// Never paint it: the terminal's background, and its blur, show through everywhere the
+    /// theme does not deliberately paint a surface. On a terminal whose background does not
+    /// match the theme, text is then as readable as the user's choice makes it.
+    Never,
+}
+
+impl BackgroundFill {
+    /// Whether the frame should be filled, given the theme's background and the terminal's.
+    pub fn paints(self, theme: Background, terminal: Background) -> bool {
+        match self {
+            Self::Always => true,
+            Self::Never => false,
+            Self::Auto => theme != terminal,
+        }
+    }
+}
+
 /// Terminals that advertise true color in their own font/graphics era even when
 /// `COLORTERM` is missing (older builds, ssh sessions without the variable).
 const TRUE_COLOR_PROGRAMS: [&str; 6] = [
@@ -542,12 +575,12 @@ pub fn parse_osc11_luminance(reply: &str) -> Option<f64> {
 ///
 /// One implementation for the two ways a background arrives — the terminal's OSC 11 answer
 /// and, on Windows, the console's colour table.
-fn rgb_luminance(r: f64, g: f64, b: f64) -> f64 {
+pub(crate) fn rgb_luminance(r: f64, g: f64, b: f64) -> f64 {
     0.2126 * r + 0.7152 * g + 0.0722 * b
 }
 
 /// What a luminance says about the background.
-fn background_from_luminance(luminance: f64) -> Background {
+pub(crate) fn background_from_luminance(luminance: f64) -> Background {
     if luminance > 0.5 {
         Background::Light
     } else {

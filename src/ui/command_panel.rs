@@ -29,6 +29,9 @@ pub(super) fn draw(f: &mut Frame, app: &App, area: Rect) {
 
     let style = BlockStyle {
         colors,
+        // A popup paints its own surface, so what is behind it never shows: the base is the
+        // surface it is drawn on, not the theme's background.
+        base: colors.surface,
         border: &app.state.border,
         tick: app.state.tick,
     };

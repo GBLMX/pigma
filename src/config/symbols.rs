@@ -38,6 +38,13 @@ pub struct SymbolsConfig {
     pub volume_high: Option<String>,
     /// Shown when the playback queue is emptied.
     pub queue_clear: Option<String>,
+    /// Written before a translated lyric line, so it reads as the translation of the line above
+    /// it and not as another lyric.
+    ///
+    /// ASCII by default: the arrows and box-drawing glyphs that would read better are
+    /// ambiguous-width, and a terminal in a CJK locale draws those two cells wide, which the
+    /// lyrics layout does not budget for.
+    pub translation: Option<String>,
     /// Spectrum bar characters, lowest first (at least two).
     pub visualizer_bars: Option<String>,
     /// Spinner frames, one per animation step; an empty list is ignored.
@@ -55,6 +62,8 @@ pub struct Symbols {
     pub volume_mid: String,
     pub volume_high: String,
     pub queue_clear: String,
+    /// Written before a translated lyric line.
+    pub translation: String,
     /// Spectrum bar characters from shortest to tallest.
     pub visualizer_bars: String,
     pub spinner_activity: Vec<String>,
@@ -106,6 +115,9 @@ impl SymbolPreset {
             (SymbolPreset::Ascii, "queue_clear") => "x",
             (SymbolPreset::Nerd | SymbolPreset::Unicode, "visualizer_bars") => "▁▂▃▄▅▆▇█",
             (SymbolPreset::Ascii, "visualizer_bars") => " .:-=+*#",
+            // Every preset of the marker is the same glyph: it is punctuation rather than an
+            // icon, and the safe ones are the ASCII ones (see `SymbolsConfig::translation`).
+            (_, "translation") => ">",
             _ => "?",
         }
     }
@@ -156,6 +168,7 @@ impl Symbols {
             volume_mid: pick(&config.volume_mid, "volume_mid"),
             volume_high: pick(&config.volume_high, "volume_high"),
             queue_clear: pick(&config.queue_clear, "queue_clear"),
+            translation: pick(&config.translation, "translation"),
             visualizer_bars: {
                 let bars = pick(&config.visualizer_bars, "visualizer_bars");
                 if bars.chars().count() < 2 {

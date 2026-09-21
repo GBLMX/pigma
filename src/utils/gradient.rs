@@ -2,6 +2,8 @@ use std::{fmt, str::FromStr};
 
 use serde::{Deserialize, Deserializer, Serialize};
 
+use crate::utils::Named;
+
 /// Lyric highlight gradient presets.
 ///
 /// Faithfully reproduces the colorgrad preset algorithms.
@@ -39,20 +41,33 @@ impl FromStr for GradientPreset {
     type Err = GradientPresetError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.eq_ignore_ascii_case("warm") {
-            Ok(Self::Warm)
-        } else if s.eq_ignore_ascii_case("cubehelix") {
-            Ok(Self::Cubehelix)
-        } else if s.eq_ignore_ascii_case("rainbow") {
-            Ok(Self::Rainbow)
-        } else if s.eq_ignore_ascii_case("turbo") {
-            Ok(Self::Turbo)
-        } else if s.eq_ignore_ascii_case("spectral") {
-            Ok(Self::Spectral)
-        } else if s.eq_ignore_ascii_case("viridis") {
-            Ok(Self::Viridis)
-        } else {
-            Err(GradientPresetError(s.to_owned()))
+        Self::parse(s).ok_or_else(|| GradientPresetError(s.to_owned()))
+    }
+}
+
+impl crate::utils::Named for GradientPreset {
+    /// Every preset, in the order the command line offers them.
+    const ALL: &'static [Self] = &[
+        Self::Rainbow,
+        Self::Warm,
+        Self::Cubehelix,
+        Self::Turbo,
+        Self::Spectral,
+        Self::Viridis,
+    ];
+
+    /// The name this preset is written as in the config and typed in `:lyricgradient`.
+    ///
+    /// The names used to live in a second table beside `:lyricgradient`'s, because the enum could
+    /// parse a name but not say its own; the parse reads this now, so the two cannot drift.
+    fn name(self) -> &'static str {
+        match self {
+            Self::Rainbow => "rainbow",
+            Self::Warm => "warm",
+            Self::Cubehelix => "cubehelix",
+            Self::Turbo => "turbo",
+            Self::Spectral => "spectral",
+            Self::Viridis => "viridis",
         }
     }
 }

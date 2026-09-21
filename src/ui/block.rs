@@ -330,6 +330,16 @@ use crate::config::{BorderConfig, Theme};
 
 pub struct BlockStyle<'a> {
     pub colors: &'a Theme,
+    /// The colour painted behind content — the theme's background, or `Reset` when the
+    /// terminal's own background already *is* it.
+    ///
+    /// One decision, made once per frame (see
+    /// [`BackgroundFill`](crate::utils::terminal::BackgroundFill)), reaches every widget through
+    /// this field: a page that fills its area with `colors.bg` instead paints over a translucent
+    /// terminal and loses its blur, so anything that fills a background uses this and gets
+    /// transparency for free. The colours that are *ink* on top of a surface (`accent`'s
+    /// foreground, the theme's own `bg` used as text on an accent block) are still `colors.bg`.
+    pub base: Color,
     pub border: &'a BorderConfig,
     pub tick: u64,
 }

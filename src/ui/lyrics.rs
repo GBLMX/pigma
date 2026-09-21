@@ -54,6 +54,9 @@ struct View<'a> {
     cur_ms: f64,
     colors: &'a Theme,
     gradient: GradientPreset,
+    /// The song's length in milliseconds, when the player knows it. It is what says where the
+    /// last line ends — nothing else in the file does.
+    total_ms: Option<f64>,
     /// Free-running frame counter, used as the clock for the animated styles.
     tick: u64,
 }
@@ -68,7 +71,7 @@ pub(super) fn draw(
     area: Rect,
 ) {
     let colors = bs.colors;
-    let block = CornerBlock::from_color(bs, bs.colors.bg).title(title, bs.colors);
+    let block = CornerBlock::from_color(bs, bs.base).title(title, bs.colors);
     let inner = block.inner(area);
     f.render_widget(block.block_padding(Padding::vertical(1)), area);
 
@@ -116,6 +119,11 @@ pub(super) fn draw(
         cur_ms,
         colors,
         gradient,
+        total_ms: player
+            .current_song
+            .as_ref()
+            .map(|song| song.duration as f64)
+            .filter(|ms| *ms > 0.0),
         tick: bs.tick,
     };
 
@@ -260,6 +268,11 @@ impl<'a> View<'a> {
         if text.is_empty() { "·" } else { text }
     }
 
+    /// How long the line at `i` lasts, in milliseconds: see [`line_duration_ms`].
+    fn line_duration(&self, i: usize) -> f64 {
+        line_duration_ms(self.lyrics, i, self.total_ms)
+    }
+
     /// The translation of a line, when there is one to show.
     fn translation(&self, i: usize) -> Option<&'a str> {
         self.translated?
@@ -284,11 +297,7 @@ fn draw_window(f: &mut Frame, view: &View<'_>, inner: Rect) {
     let mut lines: Vec<Line> = Vec::new();
     for i in start..end {
         if i == view.cur {
-            lines.push(karaoke_line(
-                view,
-                i,
-                view.lyrics[i + 1].time.as_millis() as f64,
-            ));
+            lines.push(karaoke_line(view, i));
         } else {
             // Theme colours, not fixed greys: a hardcoded grey cannot follow a light theme.
             let d = i.abs_diff(view.cur);
@@ -333,11 +342,7 @@ fn draw_one_line(f: &mut Frame, view: &View<'_>, inner: Rect) {
         lines.push(Line::default());
     }
 
-    let next_ms = view
-        .lyrics
-        .get(view.cur + 1)
-        .map(|l| l.time.as_millis() as f64);
-    lines.push(karaoke_line(view, view.cur, next_ms.unwrap_or_default()));
+    lines.push(karaoke_line(view, view.cur));
 
     if let Some(translation) = view.translation(view.cur) {
         lines.push(
@@ -398,14 +403,38 @@ fn draw_plain(f: &mut Frame, view: &View<'_>, inner: Rect) {
     f.render_widget(Paragraph::new(lines), inner);
 }
 
+/// A line's length in milliseconds: when the next one starts, or — for the last line, which has
+/// no next one — what is left of the song, when the player knows how long that is.
+///
+/// An `.lrc` says when a line *starts* and nothing about when it ends, so "until the next line"
+/// is the only duration the file itself offers. The animations that follow a line need a positive
+/// one all the same: the last line gets the rest of the song, or [`LAST_LINE_FALLBACK_MS`] when
+/// even that is unknown.
+///
+/// This is what replaced the old "the next line's start, or zero for the last line":
+/// `unwrap_or_default()` on the last line made the fill jump straight to complete, and the window
+/// passed `lyrics[i + 1]` straight through, which panicked at the end of every song.
+fn line_duration_ms(lyrics: &[LyricLine], i: usize, total_ms: Option<f64>) -> f64 {
+    const LAST_LINE_FALLBACK_MS: f64 = 4_000.0;
+
+    let start = lyrics[i].time.as_millis() as f64;
+    if lyrics.get(i + 1).is_some() {
+        return (lyrics[i + 1].time.as_millis() as f64 - start).max(1.0);
+    }
+    match total_ms {
+        Some(total) if total > start => (total - start).max(1.0),
+        _ => LAST_LINE_FALLBACK_MS,
+    }
+}
+
 /// The karaoke fill: what has been sung is painted with the gradient, the rest gets the same
 /// gradient reversed, and the boundary character marks where the voice is.
-fn karaoke_line<'a>(view: &View<'a>, i: usize, next_ms: f64) -> Line<'a> {
+fn karaoke_line<'a>(view: &View<'a>, i: usize) -> Line<'a> {
     let text = view.text(i);
     let line_ms = view.lyrics[i].time.as_millis() as f64;
     let gradient = view.gradient;
 
-    let seg_dur = (next_ms - line_ms).max(1.0);
+    let seg_dur = view.line_duration(i);
     let seg_progress = ((view.cur_ms - line_ms) / seg_dur).clamp(0.0, 1.0);
     let total = text.chars().count();
     let split_at = (total as f64 * seg_progress).floor() as usize;
@@ -504,6 +533,7 @@ mod tests {
         // the flow are distinguishable from the surrounding text.
         let bs = BlockStyle {
             colors: &theme,
+            base: theme.bg,
             border: &crate::config::BorderConfig::default(),
             tick,
         };
@@ -720,11 +750,12 @@ mod panel_tests {
         let theme = Theme::default();
         let bs = BlockStyle {
             colors: &theme,
+            base: theme.bg,
             border: &BorderConfig::default(),
             tick: 0,
         };
         let frame = Rect::new(0, 0, width, height);
-        let inner = CornerBlock::from_color(&bs, bs.colors.bg)
+        let inner = CornerBlock::from_color(&bs, bs.base)
             .title(TITLE, bs.colors)
             .inner(frame);
 

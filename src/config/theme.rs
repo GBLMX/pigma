@@ -8,7 +8,10 @@ use palette::{LinLuma, Srgb, color_difference::Wcag21RelativeContrast, white_poi
 use ratatui::style::Color;
 use serde::{Deserialize, Serialize};
 
-use crate::utils::terminal::{COLOR_MODE, ColorMode, rgb_to_16, rgb_to_256};
+use crate::utils::terminal::{
+    Background, COLOR_MODE, ColorMode, background_from_luminance, rgb_luminance, rgb_to_16,
+    rgb_to_256,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -360,6 +363,47 @@ impl Theme {
             muted: downsample_color(self.muted, mode),
             border: downsample_color(self.border, mode),
             error: downsample_color(self.error, mode),
+        }
+    }
+
+    /// Whether this theme's own background is light.
+    ///
+    /// The slot the theme came from is the config's business; this is what its colours actually
+    /// say, which is what decides whether the page needs its background painted over the
+    /// terminal's (see [`BackgroundFill`](crate::utils::terminal::BackgroundFill)). The threshold
+    /// is the terminal probe's, so the two answers are comparable.
+    pub fn background(&self) -> Background {
+        match self.bg {
+            Color::Rgb(r, g, b) => background_from_luminance(rgb_luminance(
+                f64::from(r) / 255.0,
+                f64::from(g) / 255.0,
+                f64::from(b) / 255.0,
+            )),
+            // A palette colour or `Reset` says nothing measurable about the screen it lands on;
+            // the probe's own fallback is the same assumption.
+            _ => Background::Dark,
+        }
+    }
+
+    /// Resolve a colour written in the config: a theme field, or a colour of its own.
+    ///
+    /// [`Self::field_color`] is what the playerbar's colours use, because a progress bar should
+    /// follow the theme. The lyrics' `ktv` fill is the opposite case — karaoke screens paint
+    /// blue and the requested default is blue — so this accepts either spelling: a field name is
+    /// read from the theme, anything else goes through `Color::from_str` (a name like `blue` or
+    /// `lightblue`, `#rrggbb`, an ANSI index). An unreadable name falls back to the accent and is
+    /// reported once, the same way an unknown field name is.
+    pub fn resolve_color(&self, spec: &str) -> Color {
+        match spec {
+            "bg" | "surface" | "text" | "accent" | "muted" | "border" | "error" => {
+                self.field_color(spec)
+            }
+            spec => Color::from_str(spec).unwrap_or_else(|_| {
+                if report_unknown_field_once(spec) {
+                    log::warn!("Unknown colour: \"{spec}\", falling back to accent");
+                }
+                self.accent
+            }),
         }
     }
 

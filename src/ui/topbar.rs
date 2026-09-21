@@ -31,7 +31,7 @@ pub(super) fn draw(
     area: Rect,
 ) {
     let colors = bs.colors;
-    let block = CornerBlock::from_color(bs, bs.colors.bg);
+    let block = CornerBlock::from_color(bs, bs.base);
     let inner = block.inner(area);
     f.render_widget(block, area);
 
@@ -369,6 +369,7 @@ mod portrait {
         let border = BorderConfig::default();
         let bs = BlockStyle {
             colors: &colors,
+            base: colors.bg,
             border: &border,
             tick: 0,
         };

@@ -50,7 +50,7 @@ pub(super) fn render_breadcrumb(f: &mut Frame, nav: &NavState, bs: &BlockStyle<'
         line
     };
 
-    let block = CornerBlock::from_color(bs, bs.colors.bg);
+    let block = CornerBlock::from_color(bs, bs.base);
     let inner = block.inner(area);
     f.render_widget(block, area);
     f.render_widget(Paragraph::new(line), inner);

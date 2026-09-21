@@ -57,7 +57,7 @@ pub(super) fn draw_queue_table(
     } else {
         render_title(title_template, key, count, 0)
     };
-    let block = CornerBlock::from_color(bs, bs.colors.bg).title(&title, bs.colors);
+    let block = CornerBlock::from_color(bs, bs.base).title(&title, bs.colors);
     let inner = block.inner(area);
     f.render_widget(block, area);
 

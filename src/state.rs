@@ -71,6 +71,16 @@ impl Default for PaginationInfo {
     }
 }
 
+/// A pane edge being dragged by the mouse.
+#[derive(Debug, Clone, Copy)]
+pub struct PaneDrag {
+    pub divider: crate::layout::Divider,
+    /// The pane's size when the drag started.
+    pub start_size: u16,
+    pub col: u16,
+    pub row: u16,
+}
+
 pub struct State {
     pub running: bool,
     pub events: EventHandler,
@@ -83,6 +93,15 @@ pub struct State {
     pub offline: bool,
     pub tick: u64,
     pub last_tick: Instant,
+    /// The frame's draggable pane edges, rebuilt by the draw pass (`ui::draw`) and consumed by
+    /// mouse input — the same contract as `nav_hits`: an edge belongs to the frame that drew it.
+    pub pane_dividers: crate::layout::Dividers,
+    /// The pane edge being dragged, if any.
+    pub pane_drag: Option<PaneDrag>,
+    /// The edge that was clicked last, for the double click that collapses its pane.
+    pub last_pane_click: Option<(crate::layout::Divider, Instant)>,
+    /// The area the shell layout was given last frame: the room pane sizes are clamped to.
+    pub shell_area: Rect,
     pub toast_msg: String,
     pub toast_time: Option<Instant>,
     /// Layout rect of the player bar, cached by the draw pass (`ui::draw`) and
