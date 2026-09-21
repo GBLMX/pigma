@@ -1,5 +1,5 @@
-//! The artist page: one singer's profile, hot songs and albums, drawn inside the shell's
-//! content area.
+//! The artist page: one singer's profile, hot songs, albums and similar artists, drawn inside
+//! the shell's content area.
 //!
 //! Every state the page can be in draws something. Loading says which artist it is waiting
 //! for (and keeps the panes' titles, so the page does not look empty), and a failure carries
@@ -8,7 +8,7 @@
 
 use std::sync::LazyLock;
 
-use ncm_api::{ArtistAlbum, ArtistDetail, SongInfo};
+use ncm_api::{ArtistAlbum, ArtistDetail, SingerInfo, SongInfo};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
@@ -64,6 +64,11 @@ static ALBUM_COLUMNS: LazyLock<Vec<ColumnDef>> = LazyLock::new(|| {
     ]
 });
 
+/// The similar-artist pane's single column. It shares a column with the albums, so it carries
+/// the one thing a reader picks an artist by.
+static SIMILAR_COLUMNS: LazyLock<Vec<ColumnDef>> =
+    LazyLock::new(|| vec![column("歌手", "name", None, Some(12))]);
+
 const RELEASE_FMT: &[FormatItem<'static>] = format_description!("[year]-[month]-[day]");
 
 /// A column of one of the page's own tables. `field` is only a name here — the page builds its
@@ -96,8 +101,8 @@ pub(super) fn draw(
     }
 }
 
-/// Waiting for the profile: the band names the artist and says what is happening; the two
-/// panes keep their titles over a skeleton, the same way the main table loads.
+/// Waiting for the profile: the band names the artist and says what is happening; the lists
+/// keep their titles over a skeleton, the same way the main table loads.
 fn draw_loading(f: &mut Frame, state: &ArtistState, bs: &BlockStyle<'_>, lay: &ArtistLayout) {
     let title = bordered_title("歌手 {name}", &state.name, 0, 0);
     let inner = panel(f, bs, &title, lay.profile, false);
@@ -115,6 +120,13 @@ fn draw_loading(f: &mut Frame, state: &ArtistState, bs: &BlockStyle<'_>, lay: &A
         false,
     );
     skeleton_pane(f, bs, &bordered_title("专辑", "", 0, 0), lay.albums, false);
+    skeleton_pane(
+        f,
+        bs,
+        &bordered_title("相似歌手", "", 0, 0),
+        lay.similar,
+        false,
+    );
 }
 
 /// The profile request itself failed: nothing loaded, so the error is the page. It says what
@@ -129,7 +141,13 @@ fn draw_failed(
 ) {
     let title = bordered_title("歌手 {name} · 加载失败", &state.name, 0, 0);
     // The whole content area, not just the band: there are no lists to keep room for.
-    let inner = panel(f, bs, &title, lay.profile.union(lay.albums), false);
+    let inner = panel(
+        f,
+        bs,
+        &title,
+        lay.profile.union(lay.albums).union(lay.similar),
+        false,
+    );
     let lines = vec![
         Line::from(Span::styled(
             format!("错误: {error}"),
@@ -144,7 +162,7 @@ fn draw_failed(
     f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), inner);
 }
 
-/// The loaded page: the profile band over the hot songs and the albums.
+/// The loaded page: the profile band over the hot songs, the albums and the similar artists.
 fn draw_ready(
     f: &mut Frame,
     state: &mut ArtistState,
@@ -156,10 +174,16 @@ fn draw_ready(
     // take the pieces the panes need before it runs.
     draw_profile(f, state, bs, lay.profile);
 
-    let ArtistData::Ready { detail, albums } = &state.data else {
+    let ArtistData::Ready {
+        detail,
+        albums,
+        similar,
+    } = &state.data
+    else {
         return;
     };
-    let (pane, album_selected) = (state.pane, state.album_selected);
+    let (pane, album_selected, similar_selected) =
+        (state.pane, state.album_selected, state.similar_selected);
     draw_songs(f, state, bs, lay.songs, hits);
     draw_albums(
         f,
@@ -171,6 +195,7 @@ fn draw_ready(
         lay.albums,
         hits,
     );
+    draw_similar(f, similar, pane, similar_selected, bs, lay.similar, hits);
 }
 
 /// The profile band: the portrait when it is decoded, then the name, the aliases, the sizes
@@ -367,6 +392,92 @@ fn draw_albums(
         list.len(),
         sel,
     );
+}
+
+/// The similar artists: the artists the service puts beside this one. Enter opens the artist
+/// under the cursor — the same page, one artist further out — and a failed request says so in
+/// the pane rather than emptying the page.
+#[allow(clippy::too_many_arguments)]
+fn draw_similar(
+    f: &mut Frame,
+    similar: &Result<Vec<SingerInfo>, String>,
+    pane: ArtistPane,
+    selected: usize,
+    bs: &BlockStyle<'_>,
+    area: Rect,
+    hits: &mut ArtistHits,
+) {
+    let colors = bs.colors;
+    let list = match similar {
+        Ok(list) => list,
+        Err(error) => {
+            let inner = panel(
+                f,
+                bs,
+                &bordered_title("相似歌手 加载失败", "", 0, 0),
+                area,
+                false,
+            );
+            *hits = ArtistHits {
+                similar: inner,
+                ..*hits
+            };
+            note(f, &format!("错误: {error}（按 r 重试）"), inner, colors);
+            return;
+        }
+    };
+
+    let focused = pane == ArtistPane::Similar;
+    let title = bordered_title("相似歌手 ({count})", "", list.len(), 0);
+    let inner = panel(f, bs, &title, area, focused);
+    *hits = ArtistHits {
+        similar: inner,
+        ..*hits
+    };
+    if list.is_empty() {
+        note(f, "（没有相似歌手）", inner, colors);
+        return;
+    }
+
+    // Walked exactly like the other two lists: a cursor, a window that follows it, and a
+    // highlight that only lights up while this pane is the one the keys are talking to.
+    let sel = selected.min(list.len() - 1);
+    let visible = inner.height.saturating_sub(1).max(1) as usize;
+    let offset = calc_scroll_offset(sel, visible, list.len());
+    let end = (offset + visible).min(list.len());
+    *hits = ArtistHits {
+        similar: inner,
+        similar_offset: offset,
+        ..*hits
+    };
+    let mut table_state = TableState::default();
+    table_state.select(focused.then_some(sel - offset));
+
+    table::render_table(
+        f,
+        &SIMILAR_COLUMNS,
+        singer_rows(&list[offset..end], colors),
+        &mut table_state,
+        TableMode::Row,
+        colors,
+        inner,
+        list.len(),
+        sel,
+    );
+}
+
+/// The visible similar-artist rows. The service sends an id and a portrait too; the pane is
+/// about names, and it shares a column with the albums.
+fn singer_rows<'a>(singers: &'a [SingerInfo], colors: &Theme) -> Vec<Row<'a>> {
+    singers
+        .iter()
+        .map(|singer| {
+            Row::new(vec![
+                Cell::from(singer.name.as_str()).style(Style::default().fg(colors.muted)),
+            ])
+            .height(1)
+        })
+        .collect()
 }
 
 /// The visible hot-song rows. Borrowed fields stay borrowed; only the length is formatted.
@@ -575,6 +686,7 @@ mod tests {
         state.data = ArtistData::Ready {
             detail,
             albums: Ok(albums),
+            similar: Ok(Vec::new()),
         };
         state
     }

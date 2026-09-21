@@ -120,4 +120,18 @@ impl NcmClient {
             .ok_or_else(|| NcmError::parse(String::from("list not found"), &value))?;
         parse_singer_info(list, &["artists"]).map_err(|e| NcmError::parse(e, &value))
     }
+
+    /// Artists similar to one already known — what an artist page can offer beside the artist.
+    ///
+    /// * `id` — artist ID
+    pub async fn simi_artist(&self, id: u64) -> Result<Vec<SingerInfo>, NcmError> {
+        let id_str = id.to_string();
+        let params = vec![("artistid", id_str.as_str())];
+        let result = self
+            .request_weapi("/weapi/discovery/simiArtist", &params)
+            .await?;
+        let value: Value = serde_json::from_str(&result)?;
+        Self::check_api_code(&value)?;
+        parse_singer_info(&value, &["artists"]).map_err(|e| NcmError::parse(e, &value))
+    }
 }

@@ -348,4 +348,32 @@ impl NcmClient {
         Self::check_api_code(&value)?;
         parse_song_list(&value, &["playlists"]).map_err(|e| NcmError::parse(e, &value))
     }
+
+    /// Playlists that contain a song — the other half of "where else does this live", next to
+    /// the song's own similar list.
+    ///
+    /// * `id` — song ID
+    /// * `limit` — count
+    /// * `offset` — offset
+    pub async fn simi_playlist(
+        &self,
+        id: u64,
+        limit: u16,
+        offset: u16,
+    ) -> Result<Vec<SongList>, NcmError> {
+        let id_str = id.to_string();
+        let limit_str = limit.to_string();
+        let offset_str = offset.to_string();
+        let params = vec![
+            ("songid", id_str.as_str()),
+            ("limit", limit_str.as_str()),
+            ("offset", offset_str.as_str()),
+        ];
+        let result = self
+            .request_weapi("/weapi/discovery/simiPlaylist", &params)
+            .await?;
+        let value: Value = serde_json::from_str(&result)?;
+        Self::check_api_code(&value)?;
+        parse_song_list(&value, &["playlists"]).map_err(|e| NcmError::parse(e, &value))
+    }
 }

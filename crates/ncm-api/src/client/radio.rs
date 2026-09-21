@@ -56,4 +56,13 @@ impl NcmClient {
         Self::check_api_code(&value)?;
         parse_radio_programs(&value).map_err(|e| NcmError::parse(e, &value))
     }
+
+    /// Radio stations the service recommends, as opposed to the ones already subscribed to:
+    /// the list a reader browses when they have not subscribed to anything yet.
+    pub async fn djradio_recommend(&self) -> Result<Vec<SongList>, NcmError> {
+        let result = self.request_weapi("/weapi/djradio/recommend", &[]).await?;
+        let value: Value = serde_json::from_str(&result)?;
+        Self::check_api_code(&value)?;
+        parse_song_list(&value, &["djRadios"]).map_err(|e| NcmError::parse(e, &value))
+    }
 }

@@ -29,10 +29,11 @@ pub(crate) fn artist_keys(app: &mut App, key_event: KeyEvent) -> bool {
         // rather than by walking the table — so leaving it is a page change, not a restore, and
         // there is no breadcrumb for `ContentRestore` to pop.
         KeyCode::Esc => app.state.events.send(NavigationEvent::Navigate(Page::Main)),
-        // There are two lists and one cursor, so `Tab` and `Shift+Tab` do the same thing: they
-        // hand the cursor to the other list. `←`/`→` are not used for it — the app's seek
-        // bindings own those, and a page that quietly re-bound them would be a trap.
-        KeyCode::Tab | KeyCode::BackTab => app.state.navigation.artist.toggle_focus(),
+        // One cursor, three lists: `Tab` walks them and `Shift+Tab` walks back. `←`/`→` are
+        // not used for it — the app's seek bindings own those, and a page that quietly
+        // re-bound them would be a trap.
+        KeyCode::Tab => app.state.navigation.artist.focus_next(),
+        KeyCode::BackTab => app.state.navigation.artist.focus_prev(),
         KeyCode::Up | KeyCode::Char('k' | 'K') => app.state.navigation.artist.select_prev(),
         KeyCode::Down | KeyCode::Char('j' | 'J') => app.state.navigation.artist.select_next(),
         KeyCode::Char('g') => app.state.navigation.artist.select_first(),
@@ -212,6 +213,18 @@ mod tests {
         app.state.navigation.artist.data = crate::state::ArtistData::Ready {
             detail,
             albums: Ok(albums),
+            similar: Ok(vec![
+                ncm_api::SingerInfo {
+                    id: 21,
+                    name: "similar-a".into(),
+                    pic_url: String::new(),
+                },
+                ncm_api::SingerInfo {
+                    id: 22,
+                    name: "similar-b".into(),
+                    pic_url: String::new(),
+                },
+            ]),
         };
     }
 
@@ -330,6 +343,86 @@ mod tests {
             app.state.navigation.artist.album_selected, 0,
             "the wheel walked the pane it was over"
         );
+
+        // The third pane answers the same way: it takes the focus and the row under the click.
+        let similar = app.state.artist_hits.similar;
+        assert!(similar.height > 1, "the frame drew the similar pane");
+        crate::input::handle_mouse_event(
+            &mut app,
+            MouseEventKind::Down(MouseButton::Left),
+            similar.x + 1,
+            similar.y + 2,
+        );
+        assert_eq!(
+            app.state.navigation.artist.pane,
+            crate::state::ArtistPane::Similar
+        );
+        assert_eq!(app.state.navigation.artist.similar_selected, 1);
+    }
+
+    /// The page has three lists and one cursor: `Tab` walks them in reading order and
+    /// `Shift+Tab` walks back, and every list keeps its own cursor while it is left.
+    #[tokio::test]
+    async fn tab_walks_the_pages_three_lists() {
+        use crate::state::ArtistPane as Pane;
+
+        let mut app = app(Page::Artist);
+        artist_with_data(&mut app);
+
+        press(&mut app, KeyCode::Tab);
+        assert_eq!(app.state.navigation.artist.pane, Pane::Albums);
+        press(&mut app, KeyCode::Tab);
+        assert_eq!(app.state.navigation.artist.pane, Pane::Similar);
+
+        press(&mut app, KeyCode::Char('j'));
+        assert_eq!(
+            app.state.navigation.artist.similar_selected, 1,
+            "`j` walks the similar artists"
+        );
+
+        press(&mut app, KeyCode::Tab);
+        assert_eq!(
+            app.state.navigation.artist.pane,
+            Pane::Songs,
+            "the walk wraps round"
+        );
+        press(&mut app, KeyCode::BackTab);
+        assert_eq!(
+            app.state.navigation.artist.pane,
+            Pane::Similar,
+            "and `Shift+Tab` goes back the other way"
+        );
+        assert_eq!(
+            app.state.navigation.artist.similar_selected, 1,
+            "to the row it was left on"
+        );
+    }
+
+    /// Enter on a similar artist opens that artist: the same page, reloaded for whoever the
+    /// cursor was on.
+    #[tokio::test]
+    async fn enter_on_a_similar_artist_opens_that_artist() {
+        let mut app = app(Page::Artist);
+        artist_with_data(&mut app);
+        app.state.navigation.artist.id = 7;
+        app.state.navigation.artist.name = "阿七".into();
+
+        press(&mut app, KeyCode::Tab);
+        press(&mut app, KeyCode::Tab);
+        press(&mut app, KeyCode::Char('j'));
+        press(&mut app, KeyCode::Enter);
+        app.handle_events().await.expect("events");
+
+        assert_eq!(
+            app.state.navigation.page,
+            Page::Artist,
+            "the same page, one artist further out"
+        );
+        assert_eq!(
+            app.state.navigation.artist.id, 22,
+            "the row under the cursor"
+        );
+        assert_eq!(app.state.navigation.artist.name, "similar-b");
     }
 
     /// A long album list scrolls, and what scrolled is what a click lands on: the window the

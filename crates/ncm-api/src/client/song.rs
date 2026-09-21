@@ -80,4 +80,35 @@ impl NcmClient {
         Self::check_api_code(&value)?;
         parse_lyrics(&value).map_err(|e| NcmError::parse(e, &value))
     }
+
+    /// Songs similar to one already known.
+    ///
+    /// The seed is the song, not the listener: this is what a queue can keep going with once
+    /// the list it started from runs out.
+    ///
+    /// * `id` — seed song ID
+    /// * `limit` — count
+    /// * `offset` — offset
+    pub async fn simi_song(
+        &self,
+        id: u64,
+        limit: u16,
+        offset: u16,
+    ) -> Result<Vec<SongInfo>, NcmError> {
+        let id_str = id.to_string();
+        let limit_str = limit.to_string();
+        let offset_str = offset.to_string();
+        let params = vec![
+            ("songid", id_str.as_str()),
+            ("limit", limit_str.as_str()),
+            ("offset", offset_str.as_str()),
+        ];
+        let result = self
+            .request_weapi("/weapi/v1/discovery/simiSong", &params)
+            .await?;
+        let value: Value = serde_json::from_str(&result)?;
+        Self::check_api_code(&value)?;
+        parse_song_info_array(&value, &["songs"], SongContext::Simi)
+            .map_err(|e| NcmError::parse(e, &value))
+    }
 }

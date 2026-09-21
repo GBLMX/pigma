@@ -29,6 +29,25 @@ impl NcmClient {
         Ok(songs)
     }
 
+    /// The listener's play ranking: what they actually played, and how often.
+    ///
+    /// `recent_songs` is the same idea without the count — a list of what was played last. This
+    /// one is what a taste profile is built from, so it carries the counts and the two windows
+    /// the service keeps them in.
+    ///
+    /// * `uid` — user ID
+    /// * `week` — `true` for the last week, `false` for all time
+    pub async fn user_record(&self, uid: u64, week: bool) -> Result<Vec<PlayRecord>, NcmError> {
+        let uid_str = uid.to_string();
+        let type_str = if week { "1" } else { "0" };
+        let params = vec![("uid", uid_str.as_str()), ("type", type_str)];
+        let result = self.request_weapi("/weapi/v1/play/record", &params).await?;
+        let value: Value = serde_json::from_str(&result)?;
+        Self::check_api_code(&value)?;
+        let path = if week { "weekData" } else { "allData" };
+        parse_play_records(&value, path).map_err(|e| NcmError::parse(e, &value))
+    }
+
     /// Get songs from the user's cloud disk
     pub async fn user_cloud_disk(
         &self,

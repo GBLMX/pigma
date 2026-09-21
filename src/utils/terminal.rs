@@ -1050,9 +1050,8 @@ mod tests {
         assert_eq!(palette_rgb(255), (238, 238, 238), "the grey ramp's end");
         assert_eq!(palette_rgb(15), ANSI_16[15], "the ANSI colours come first");
 
-        let classify = |color| {
-            background_from_luminance(color_luminance(color).expect("a measurable colour"))
-        };
+        let classify =
+            |color| background_from_luminance(color_luminance(color).expect("a measurable colour"));
         assert_eq!(classify(Color::Indexed(231)), Background::Light);
         assert_eq!(classify(Color::Indexed(232)), Background::Dark);
         assert_eq!(classify(Color::White), Background::Light);

@@ -1,4 +1,8 @@
-use super::song::{SongCopyright, SongInfo};
+use super::{
+    SongContext,
+    song::{SongCopyright, SongInfo, parse_song_info},
+    value_get,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -304,6 +308,91 @@ mod tests {
 
         let v2 = json!({});
         assert!(parse_unikey(&v2).is_err());
+    }
+}
+
+/// One row of a play ranking: a song and how much it was played.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlayRecord {
+    pub song: SongInfo,
+    /// Times played inside the window the request asked for.
+    pub play_count: u64,
+    /// The service's own score for the row — what the ranking is ordered by.
+    pub score: u64,
+}
+
+/// Parse one of the two play rankings `/weapi/v1/play/record` answers with: `path` is `allData`
+/// or `weekData`. The response carries both and which one is wanted is decided by the request,
+/// not by the payload, so the caller names it. Some deployments wrap the two in `data`.
+///
+/// A row whose `song` is missing is the service's own gap — a deleted track keeps its count —
+/// so it is skipped rather than failing the page the way a malformed row would.
+pub(crate) fn parse_play_records(value: &Value, path: &str) -> Result<Vec<PlayRecord>, String> {
+    let rows = ["", "data"]
+        .iter()
+        .find_map(|prefix| {
+            let path: Vec<&str> = if prefix.is_empty() {
+                vec![path]
+            } else {
+                vec![prefix, path]
+            };
+            value_get(value, &path).and_then(Value::as_array)
+        })
+        .ok_or_else(|| format!("{path} not found"))?;
+
+    let mut records = Vec::with_capacity(rows.len());
+    for row in rows {
+        let Some(song) = row.get("song").filter(|song| !song.is_null()) else {
+            continue;
+        };
+        records.push(PlayRecord {
+            song: parse_song_info(song, SongContext::Record)?,
+            play_count: row.get("playCount").and_then(Value::as_u64).unwrap_or(0),
+            score: row.get("score").and_then(Value::as_u64).unwrap_or(0),
+        });
+    }
+    Ok(records)
+}
+
+#[cfg(test)]
+mod play_record_tests {
+    use super::*;
+    use serde_json::json;
+
+    /// The two shapes the endpoint uses, and the gap it leaves behind: a ranking row without a
+    /// song must not take the whole page down with it.
+    #[test]
+    fn a_ranking_keeps_its_counts_and_skips_its_gaps() {
+        let value = json!({
+            "weekData": [
+                {
+                    "playCount": 12,
+                    "score": 90,
+                    "song": { "id": 1, "name": "A", "ar": [{ "name": "X" }], "al": { "name": "B", "id": 2 }, "dt": 1000 }
+                },
+                { "playCount": 3, "score": 100, "song": null }
+            ]
+        });
+        let records = parse_play_records(&value, "weekData").expect("parsed");
+        assert_eq!(records.len(), 1, "the row without a song is a gap");
+        assert_eq!(records[0].play_count, 12);
+        assert_eq!(records[0].score, 90);
+        assert_eq!(records[0].song.name, "A");
+        assert!(
+            parse_play_records(&value, "allData").is_err(),
+            "the other window is not in this payload"
+        );
+
+        let wrapped = json!({ "data": { "allData": [
+            { "playCount": 1, "score": 2, "song": { "id": 3, "name": "C", "ar": [], "al": {}, "dt": 1000 } }
+        ] } });
+        assert_eq!(
+            parse_play_records(&wrapped, "allData")
+                .expect("parsed")
+                .len(),
+            1,
+            "the wrapped shape is the same ranking"
+        );
     }
 }
 

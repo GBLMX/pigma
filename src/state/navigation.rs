@@ -1,6 +1,6 @@
 use std::{cell::RefCell, sync::Arc};
 
-use ncm_api::{ArtistAlbum, ArtistDetail, LoginInfo, NcmClient, SongInfo};
+use ncm_api::{ArtistAlbum, ArtistDetail, LoginInfo, NcmClient, SingerInfo, SongInfo};
 use ratatui::{
     layout::Rect,
     widgets::{ListState, TableState},
@@ -269,6 +269,8 @@ pub enum ArtistData {
     Ready {
         detail: ArtistDetail,
         albums: Result<Vec<ArtistAlbum>, String>,
+        /// The similar-artist request is a third one, and fails on its own the same way.
+        similar: Result<Vec<SingerInfo>, String>,
     },
     /// The profile request itself failed. `r` reloads it and `Esc` leaves the page, so a
     /// failure never strands the reader here.
@@ -283,19 +285,28 @@ pub enum ArtistPane {
     #[default]
     Songs,
     Albums,
+    /// Artists similar to the one the page shows.
+    Similar,
 }
 
+/// The panes in the order `Tab` walks them: what the page reads left to right.
+const PANES: [ArtistPane; 3] = [ArtistPane::Songs, ArtistPane::Albums, ArtistPane::Similar];
+
 impl ArtistPane {
-    /// The other pane: what `Tab` switches to.
-    fn other(self) -> Self {
-        match self {
-            Self::Songs => Self::Albums,
-            Self::Albums => Self::Songs,
-        }
+    /// The next pane in that order, wrapping.
+    fn next(self) -> Self {
+        let at = PANES.iter().position(|pane| *pane == self).unwrap_or(0);
+        PANES[(at + 1) % PANES.len()]
+    }
+
+    /// The previous one, wrapping the other way.
+    fn prev(self) -> Self {
+        let at = PANES.iter().position(|pane| *pane == self).unwrap_or(0);
+        PANES[(at + PANES.len() - 1) % PANES.len()]
     }
 }
 
-/// Where the page's two tables were last drawn, and which row each of them started at. The
+/// Where the page's tables were last drawn, and which row each of them started at. The
 /// draw pass publishes this the same way the main table publishes `content_inner`, so a click
 /// can be turned into a row without re-deriving the layout (which depends on the terminal
 /// size, and on the profile band's height).
@@ -307,6 +318,9 @@ pub struct ArtistHits {
     /// Album table body, and the first album index in it.
     pub albums: Rect,
     pub albums_offset: usize,
+    /// Similar-artist table body, and the first artist index in it.
+    pub similar: Rect,
+    pub similar_offset: usize,
 }
 
 /// The artist page's own state.
@@ -329,7 +343,9 @@ pub struct ArtistState {
     /// Cursor over the albums of a loaded profile. The pane is walked like the songs are, so
     /// an album can be opened from it.
     pub album_selected: usize,
-    /// Which of the two lists the keyboard is walking.
+    /// Cursor over the similar artists of a loaded profile. Enter on one opens that artist.
+    pub similar_selected: usize,
+    /// Which of the lists the keyboard is walking.
     pub pane: ArtistPane,
     /// The portrait decoded for the terminal's image protocol. `None` until it arrives, and
     /// it stays `None` when the download or the decoding failed — the page reads fine
@@ -346,6 +362,7 @@ enum ArtistMsg {
     Ready {
         detail: ArtistDetail,
         albums: Result<Vec<ArtistAlbum>, String>,
+        similar: Result<Vec<SingerInfo>, String>,
     },
     Failed(String),
     Avatar(StatefulProtocol),
@@ -360,6 +377,7 @@ impl Default for ArtistState {
             data: ArtistData::Loading,
             song_selected: 0,
             album_selected: 0,
+            similar_selected: 0,
             pane: ArtistPane::default(),
             avatar: None,
             rx: None,
@@ -388,6 +406,7 @@ impl ArtistState {
         self.data = ArtistData::Loading;
         self.song_selected = 0;
         self.album_selected = 0;
+        self.similar_selected = 0;
         self.pane = ArtistPane::default();
         self.avatar = None;
 
@@ -406,16 +425,23 @@ impl ArtistState {
                     return;
                 }
             };
-            let albums = io
-                .client
-                .artist_albums(id, 0, ARTIST_ALBUM_LIMIT)
-                .await
-                .map_err(|e| e.to_string());
+            // The two side lists are independent requests: either can fail — and say so in
+            // its own pane — without the profile above them being lost.
+            let (albums, similar) = tokio::join!(
+                io.client.artist_albums(id, 0, ARTIST_ALBUM_LIMIT),
+                io.client.simi_artist(id),
+            );
+            let albums = albums.map_err(|e| e.to_string());
+            let similar = similar.map_err(|e| e.to_string());
 
             // The text goes out first: the portrait is a second download, and the page is
             // usable — and already worth reading — without it.
             let portrait = detail.pic_url.clone();
-            let _ = tx.send(ArtistMsg::Ready { detail, albums });
+            let _ = tx.send(ArtistMsg::Ready {
+                detail,
+                albums,
+                similar,
+            });
             let _ = io.repaint.send(AppEvent::Repaint.into());
             if let Some(protocol) = load_portrait(&io, &portrait).await {
                 let _ = tx.send(ArtistMsg::Avatar(protocol));
@@ -448,14 +474,22 @@ impl ArtistState {
 
     fn apply(&mut self, msg: ArtistMsg) {
         match msg {
-            ArtistMsg::Ready { detail, albums } => {
+            ArtistMsg::Ready {
+                detail,
+                albums,
+                similar,
+            } => {
                 // The profile is the better source for both: the row's copy of them can be
                 // stale, and the artist may have been renamed since the list was fetched.
                 self.name = detail.name.clone();
                 if !detail.pic_url.is_empty() {
                     self.pic_url = detail.pic_url.clone();
                 }
-                self.data = ArtistData::Ready { detail, albums };
+                self.data = ArtistData::Ready {
+                    detail,
+                    albums,
+                    similar,
+                };
             }
             ArtistMsg::Failed(error) => self.data = ArtistData::Failed(error),
             ArtistMsg::Avatar(protocol) => self.avatar = Some(protocol),
@@ -486,9 +520,24 @@ impl ArtistState {
         }
     }
 
+    /// The similar artists of the loaded profile, with the same gaps as [`Self::albums`].
+    pub fn similar(&self) -> &[SingerInfo] {
+        match &self.data {
+            ArtistData::Ready {
+                similar: Ok(list), ..
+            } => list,
+            _ => &[],
+        }
+    }
+
     /// The album the cursor is on.
     pub fn selected_album(&self) -> Option<&ArtistAlbum> {
         self.albums().get(self.album_selected)
+    }
+
+    /// The similar artist the cursor is on.
+    pub fn selected_similar(&self) -> Option<&SingerInfo> {
+        self.similar().get(self.similar_selected)
     }
 
     /// The list the cursor is walking, and how long it is.
@@ -496,6 +545,7 @@ impl ArtistState {
         let len = match self.pane {
             ArtistPane::Songs => self.hot_songs().len(),
             ArtistPane::Albums => self.albums().len(),
+            ArtistPane::Similar => self.similar().len(),
         };
         (self.pane, len)
     }
@@ -505,6 +555,7 @@ impl ArtistState {
         match self.pane {
             ArtistPane::Songs => self.song_selected,
             ArtistPane::Albums => self.album_selected,
+            ArtistPane::Similar => self.similar_selected,
         }
     }
 
@@ -512,6 +563,17 @@ impl ArtistState {
         match self.pane {
             ArtistPane::Songs => self.song_selected = index,
             ArtistPane::Albums => self.album_selected = index,
+            ArtistPane::Similar => self.similar_selected = index,
+        }
+    }
+
+    /// How far down `pane` the cursor is: what a click has to compare against to know whether
+    /// it landed on the row that was already chosen.
+    pub fn cursor_in(&self, pane: ArtistPane) -> usize {
+        match pane {
+            ArtistPane::Songs => self.song_selected,
+            ArtistPane::Albums => self.album_selected,
+            ArtistPane::Similar => self.similar_selected,
         }
     }
 
@@ -547,12 +609,16 @@ impl ArtistState {
         self.set_cursor(index);
     }
 
-    /// `Tab` between the two lists. There are only two, so this is also `Shift+Tab`: both
-    /// keys land here and both swap the pane. The cursor of the list being left is kept, so
+    /// `Tab`: hand the cursor to the next list. The cursor of the list being left is kept, so
     /// `Tab`-ing back returns to the row that was left; switching needs no clamping, because
     /// the draws clamp.
-    pub fn toggle_focus(&mut self) {
-        self.pane = self.pane.other();
+    pub fn focus_next(&mut self) {
+        self.pane = self.pane.next();
+    }
+
+    /// `Shift+Tab`: the same, the other way round.
+    pub fn focus_prev(&mut self) {
+        self.pane = self.pane.prev();
     }
 }
 

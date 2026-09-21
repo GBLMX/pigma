@@ -15,7 +15,7 @@ pub use discovery::{BannersInfo, HotSearchItem, SearchResult, TargetType, TopLis
 pub use playlist::{PlayListDetail, PlayListDetailDynamic, SongList};
 pub use singer::{ArtistAlbum, ArtistDetail, SingerInfo};
 pub use song::{Lyrics, SongCopyright, SongInfo, SongUrl};
-pub use user::{CloudDiskResult, CloudUploadResult, LoginInfo, Msg};
+pub use user::{CloudDiskResult, CloudUploadResult, LoginInfo, Msg, PlayRecord};
 pub use video::{MvInfo, MvResolution, MvUrl};
 
 pub(crate) use album::{parse_album_detail, parse_album_detail_dynamic};
@@ -28,7 +28,7 @@ pub(crate) use song::{
 };
 pub(crate) use user::{
     parse_cloud_disk_songs, parse_cloud_upload, parse_daily_task, parse_login_info, parse_msg,
-    parse_unikey,
+    parse_play_records, parse_unikey,
 };
 pub(crate) use video::{parse_mv_detail, parse_mv_url};
 
@@ -109,6 +109,10 @@ pub(crate) enum SongContext {
     Search,
     Singer,
     SingerSongs,
+    /// `/weapi/v1/discovery/simiSong`: plain song objects, like the page's own lists.
+    Simi,
+    /// `/weapi/v1/play/record`: the `song` inside a play-ranking row.
+    Record,
 }
 
 // --- Shared parsing utilities ---

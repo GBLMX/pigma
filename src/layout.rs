@@ -386,43 +386,51 @@ pub fn content(area: Rect, panes: &PanesConfig, _nav_position: NavPosition) -> L
 }
 
 /// The artist page inside the shell's content area: the profile band on top, then the hot
-/// songs and the albums.
+/// songs, the albums and the similar artists.
 pub struct ArtistLayout {
     pub profile: Rect,
     pub songs: Rect,
     pub albums: Rect,
+    pub similar: Rect,
 }
 
 /// Height of the profile band: a portrait, the name and sizes lines, and a few lines of
-/// biography. It is fixed rather than proportional so the two lists below it stay where they
-/// were when a biography is long — the band clips its text instead of growing.
+/// biography. It is fixed rather than proportional so the lists below it stay where they were
+/// when a biography is long — the band clips its text instead of growing.
 const PROFILE_HEIGHT: u16 = 9;
 
-/// Width from which the two lists share the area instead of stacking. Below it, four columns
-/// for the songs and two for the albums is not enough to read either of them.
+/// Width from which the songs keep a column of their own instead of every list stacking.
+/// Below it, three tables would each be too narrow to read.
 const SIDE_BY_SIDE_WIDTH: u16 = 100;
 
-/// The artist page. The lists split the space under the band: side by side on a wide terminal
-/// (songs first, since they are what a reader comes for) and stacked when there is no room for
-/// two tables next to each other.
+/// The artist page. The hot songs — what a reader comes for — keep a column of their own, and
+/// the two secondary lists share the other one, stacked: on a wide terminal that is two columns
+/// side by side, and on a narrow one all three stack. The songs are the wider half either way.
 pub fn artist(area: Rect) -> ArtistLayout {
     let [profile, lists] =
         Layout::vertical([Constraint::Length(PROFILE_HEIGHT), Constraint::Min(2)]).areas(area);
 
-    let (songs, albums) = if area.width >= SIDE_BY_SIDE_WIDTH {
-        let [songs, albums] =
+    let (songs, albums, similar) = if area.width >= SIDE_BY_SIDE_WIDTH {
+        let [songs, side] =
             Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)])
                 .areas(lists);
-        (songs, albums)
+        let [albums, similar] =
+            Layout::vertical([Constraint::Percentage(50), Constraint::Percentage(50)]).areas(side);
+        (songs, albums, similar)
     } else {
-        let [songs, albums] =
-            Layout::vertical([Constraint::Percentage(60), Constraint::Percentage(40)]).areas(lists);
-        (songs, albums)
+        let [songs, albums, similar] = Layout::vertical([
+            Constraint::Percentage(50),
+            Constraint::Percentage(25),
+            Constraint::Percentage(25),
+        ])
+        .areas(lists);
+        (songs, albums, similar)
     };
 
     ArtistLayout {
         profile,
         songs,
         albums,
+        similar,
     }
 }

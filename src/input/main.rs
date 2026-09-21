@@ -615,14 +615,7 @@ fn open_artist_from_table(app: &mut App) -> bool {
     let Some((id, name, pic_url)) = selected_artist(app) else {
         return false;
     };
-    let io = artist_io(app);
-    app.state.navigation.artist.open(id, name, pic_url, io);
-    // The artist page is opened from the table, so it is a step of its own: content opened
-    // from it returns here, but nothing returns to it.
-    app.state.navigation.return_page = None;
-    app.state
-        .events
-        .send(NavigationEvent::Navigate(Page::Artist));
+    open_artist(app, id, name, pic_url);
     true
 }
 
@@ -698,15 +691,39 @@ fn artist_row_at(app: &App, col: u16, row: u16) -> Option<(ArtistPane, usize)> {
     ) {
         return Some((ArtistPane::Songs, index));
     }
-    hit::table_row(
+    if let Some(index) = hit::table_row(
         hits.albums,
         1,
         hits.albums_offset,
         artist.albums().len(),
         col,
         row,
+    ) {
+        return Some((ArtistPane::Albums, index));
+    }
+    hit::table_row(
+        hits.similar,
+        1,
+        hits.similar_offset,
+        artist.similar().len(),
+        col,
+        row,
     )
-    .map(|index| (ArtistPane::Albums, index))
+    .map(|index| (ArtistPane::Similar, index))
+}
+
+/// Open the artist page on one artist. Both ways in land here: a row of the hot-artist table,
+/// and a row of the page's own similar-artist pane — which is why the page is a page and not a
+/// step of the table's walk.
+fn open_artist(app: &mut App, id: u64, name: String, pic_url: String) {
+    let io = artist_io(app);
+    app.state.navigation.artist.open(id, name, pic_url, io);
+    // The artist page is opened by name, so it is a step of its own: content opened from it
+    // returns here, but nothing returns to it.
+    app.state.navigation.return_page = None;
+    app.state
+        .events
+        .send(NavigationEvent::Navigate(Page::Artist));
 }
 
 /// A click on the artist page puts the cursor on the row it landed on, in the pane it landed
@@ -717,11 +734,7 @@ fn click_artist(app: &mut App, col: u16, row: u16) {
         return;
     };
     let artist = &mut app.state.navigation.artist;
-    let repeat = artist.pane == pane
-        && match pane {
-            ArtistPane::Songs => artist.song_selected == index,
-            ArtistPane::Albums => artist.album_selected == index,
-        };
+    let repeat = artist.pane == pane && artist.cursor_in(pane) == index;
     artist.select_in(pane, index);
     if repeat {
         artist_activate(app);
@@ -733,6 +746,18 @@ fn click_artist(app: &mut App, col: u16, row: u16) {
 pub(super) fn artist_activate(app: &mut App) {
     match app.state.navigation.artist.pane {
         ArtistPane::Songs => artist_play_selected(app),
+        ArtistPane::Similar => {
+            let Some((id, name, pic_url)) = app
+                .state
+                .navigation
+                .artist
+                .selected_similar()
+                .map(|singer| (singer.id, singer.name.clone(), singer.pic_url.clone()))
+            else {
+                return;
+            };
+            open_artist(app, id, name, pic_url);
+        }
         ArtistPane::Albums => {
             let Some((id, name)) = app
                 .state
