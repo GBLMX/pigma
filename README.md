@@ -361,6 +361,9 @@ Add-Content $PROFILE '. "$HOME/.config/powershell/boxpigma.ps1"'
 | `boxpigma msg switch-list <endpoint>` | 动态切换守护进程的队列到指定端点（如 `recommend_songs`、`toplist`），歌单端点可用 `--playlist N` 选第 N 个 |
 | `boxpigma msg volume 75` | 绝对音量（0-100） |
 | `boxpigma msg volume +5` / `-10` | 相对 ±%（与 TUI 的 `+` / `-` 一致，支持负数） |
+| `boxpigma msg seek +15` | 向后跳 15 秒（`-30` 向前；与 TUI 的 `:seek` 同一套语法与校验） |
+| `boxpigma msg seek 50%` | 跳到播放进度的一半（也可以直接给秒数：`boxpigma msg seek 90`） |
+| `boxpigma msg clear` | 清空当前播放队列（等价于 TUI 的 `:clear`） |
 
 `boxpigma status` 的 `--template` 支持占位符：`{name}` `{artist}` `{album}` `{current}`/`{position}`
 `{duration}` `{volume}` `{status}` `{mode}` `{id}` `{liked}`。
@@ -476,6 +479,20 @@ Send-boxpigma '{"cmd":"msg","action":{"action":"volume","absolute":0.75}}'  # �
 }
 ```
 
+**systemd 用户单元**：
+
+  - 参考 [`systemd/boxpigma.service`](./systemd/boxpigma.service)。`SIGTERM` 走守护进程自己的保存逻辑（队列与播放位置落盘后干净退出），所以 `systemctl --user stop` / 注销登录都不会丢进度。
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp systemd/boxpigma.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now boxpigma
+journalctl --user -u boxpigma -f     # 日志
+```
+
+  单元默认 `ExecStart=%h/.local/bin/current/boxpigma -d liked`，对应安装脚本的布局；包管理器装的是 `/usr/bin/boxpigma`，`cargo install` 装的是 `%h/.cargo/bin/boxpigma`，改 `ExecStart` 那一行即可（`-d <端点>` 也可以一起改，见上表）。想让它在你**未登录**时也常驻：`loginctl enable-linger "$USER"`。
+
 ## Configuration
 
 配置文件在 `~/.config/boxpigma/config.toml`。**带注释的权威参考是随仓库发布的 [`config.example.toml`](./config.example.toml)**，本节只列最常用的几项。
@@ -552,9 +569,9 @@ cargo +nightly fmt
 ## Plan
 
 - [x] waybar 集成：`waybar/` 下的状态模块脚本与 `config.jsonc` / `style.css` 片段，README 有成段说明
-- [ ] systemd：给守护进程补一个 unit 示例（`systemctl --user`）
+- [x] systemd：给守护进程补一个 unit 示例（`systemctl --user`）
 - [x] 守护进程的端点展开（`-d <endpoint[:N]>`，如 `toplist:3`）
-- [ ] `boxpigma msg` 更多动作（seek、queue 操作等）
+- [x] `boxpigma msg` 更多动作（seek、queue 操作等）
 
 ## License
 

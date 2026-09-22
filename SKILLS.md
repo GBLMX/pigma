@@ -122,6 +122,8 @@ boxpigma msg [OPTIONS] <ACTION> [VALUE]
 | `list` | | 列出当前播放队列（`▶` 标记当前曲目；`--json` 输出原始 `QueueSnapshot`） |
 | `switch-list <ENDPOINT>` | `switch` | 动态切换队列到指定端点；歌单端点用 `--playlist N` 选第 N 个（1 起始） |
 | `volume <VALUE>` | | `75`=绝对音量 0-100；`+5`/`-10`=相对 ±% |
+| `seek <VALUE>` | | `+15`=向后 15 秒、`-30`=向前、`50%`=跳到一半、`90`=跳到第 90 秒；与 TUI 的 `:seek` 共用同一套语法，值不合法时**在客户端就被拒**（不会传到实例里变成一条用户看不见的提示） |
+| `clear` | | 清空当前播放队列（等价于 TUI 的 `:clear`） |
 | `mode` | | 切换播放模式 |
 | `like` | | 喜欢当前曲目 |
 | `dislike` | | 不喜欢当前曲目 |
@@ -139,6 +141,8 @@ boxpigma msg toggle_play
 boxpigma msg next
 boxpigma msg volume 75
 boxpigma msg volume +5
+boxpigma msg seek +15           # 向后跳 15 秒（同一套语法：+15 / -30 / 50% / 90）
+boxpigma msg clear              # 清空当前播放队列
 boxpigma msg list               # 列出当前播放队列
 boxpigma msg switch-list toplist --playlist 2
 boxpigma msg toggle_like
@@ -165,9 +169,11 @@ boxpigma msg caps                  # 别名，等价
   "version": "1.4.0",
   "actions": [
     { "name": "capabilities", "aliases": ["caps"], "takes_value": false, "summary": "Print this contract: API version, program version, actions, endpoint" },
+    { "name": "clear", "aliases": [], "takes_value": false, "summary": "Clear the playback queue (the `:clear` command)" },
     { "name": "dislike", "aliases": [], "takes_value": false, "summary": "Dislike the current song" },
     { "name": "next", "aliases": [], "takes_value": false, "summary": "Go to the next song" },
     { "name": "previous", "aliases": ["prev"], "takes_value": false, "summary": "Go to the previous song" },
+    { "name": "seek", "aliases": [], "takes_value": true, "summary": "Jump in the track (`+15`, `-30`, `50%` or a second; same as `:seek`)" },
     { "name": "volume", "aliases": [], "takes_value": true, "summary": "Set the volume (0-100) or adjust it (+5/-5)" }
   ],
   "socket": "/home/you/.cache/boxpigma/boxpigma.sock"
