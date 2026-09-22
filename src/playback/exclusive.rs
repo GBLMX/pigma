@@ -524,6 +524,12 @@ mod tests {
 
     /// Opening a real device in exclusive mode: the one check this environment cannot make
     /// for the listener, so it is a test that asks for the device explicitly.
+    ///
+    /// Windows only: exclusive output is WASAPI's, and `probe` says exactly that everywhere
+    /// else. Without the gate the benchmark run `cargo test --release --lib -- --ignored`
+    /// — the one the perf numbers are reproduced with — fails on Linux for a platform
+    /// feature rather than for the code under it.
+    #[cfg(windows)]
     #[test]
     #[ignore = "opens the default output device in exclusive mode"]
     fn the_default_device_opens_exclusively() {
