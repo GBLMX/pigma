@@ -15,7 +15,7 @@
 use std::io::{self, Write};
 
 use crossterm::{
-    event::{DisableMouseCapture, EnableMouseCapture, KeyCode, KeyEvent},
+    event::{DisableMouseCapture, EnableMouseCapture},
     execute,
 };
 
@@ -25,6 +25,7 @@ use crate::{
     config::{Config, LyricStyle, NotifyConfig, Pane, ProgressStyle},
     event::{AppEvent, AuthEvent, NavigationEvent, PlaybackEvent},
     ipc::MsgAction,
+    key::{KeyCode, KeyPress},
     state::{LoginMethod, Page},
     text_input::TextInput,
     utils::{GradientPreset, Named, terminal::CursorStyle},
@@ -537,7 +538,7 @@ pub(crate) fn open(app: &mut App) {
 }
 
 /// Handle a key while the prompt is open; returns whether the key was consumed.
-pub(super) fn handle_ex_key(app: &mut App, key_event: KeyEvent) -> bool {
+pub(super) fn handle_ex_key(app: &mut App, key_event: KeyPress) -> bool {
     if !app.state.prompt.active {
         return false;
     }

@@ -7,12 +7,12 @@
 //! that is *about* something rather than about the app (an artist, say) gets `key: None` and
 //! is opened by whatever knows what it is about: the row that names it.
 
-use crossterm::event::KeyEvent;
 use ratatui::{Frame, layout::Rect};
 
 use crate::{
     app::App,
     config::{NavPosition, PanesConfig},
+    key::KeyPress,
     layout::{self, LayoutAreas},
     ui,
 };
@@ -52,7 +52,7 @@ pub struct PageSpec {
 }
 
 /// One page's key layer: handles the key if it is the page's, and says whether it did.
-pub type PageKeys = fn(&mut App, KeyEvent) -> bool;
+pub type PageKeys = fn(&mut App, KeyPress) -> bool;
 
 /// How a page draws: the whole frame, or its own area inside the shared shell.
 #[derive(Clone, Copy)]

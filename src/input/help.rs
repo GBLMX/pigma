@@ -1,12 +1,15 @@
-use crossterm::event::{KeyCode, KeyEvent, MouseEventKind};
+use crossterm::event::MouseEventKind;
 
-use crate::app::App;
+use crate::{
+    app::App,
+    key::{KeyCode, KeyPress},
+};
 
 /// The keys of whichever popup is up.
 ///
 /// One entry point for all of them: they are the same list with a title and a footer, so the keys
 /// that walk one walk all three, and a popup that is up is the only thing the keys are for.
-pub(super) fn handle_popup_key(app: &mut App, key_event: KeyEvent) -> bool {
+pub(super) fn handle_popup_key(app: &mut App, key_event: KeyPress) -> bool {
     if app.state.tasks_popup.open {
         return walk(&mut app.state.tasks_popup, key_event) || clear_finished(app, key_event);
     }
@@ -21,7 +24,7 @@ pub(super) fn handle_popup_key(app: &mut App, key_event: KeyEvent) -> bool {
 }
 
 /// The keys every popup shares: close, and walk the list.
-fn walk(popup: &mut crate::state::popup::PopupState, key_event: KeyEvent) -> bool {
+fn walk(popup: &mut crate::state::popup::PopupState, key_event: KeyPress) -> bool {
     match key_event.code {
         KeyCode::Esc | KeyCode::Char('q') => popup.close(),
         KeyCode::Up | KeyCode::Char('k' | 'K') => popup.scroll_up(),
@@ -35,7 +38,7 @@ fn walk(popup: &mut crate::state::popup::PopupState, key_event: KeyEvent) -> boo
 }
 
 /// `x` on the task list forgets what is over, which is what a reader who has read it wants next.
-fn clear_finished(app: &mut App, key_event: KeyEvent) -> bool {
+fn clear_finished(app: &mut App, key_event: KeyPress) -> bool {
     if key_event.code != KeyCode::Char('x') {
         return false;
     }

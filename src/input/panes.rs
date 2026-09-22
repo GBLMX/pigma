@@ -14,11 +14,12 @@
 
 use std::time::{Duration, Instant};
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEventKind};
+use crossterm::event::{MouseButton, MouseEventKind};
 
 use crate::{
     app::App,
     config::{NavPosition, Pane},
+    key::{KeyCode, KeyPress},
     layout::{self, Axis},
     state::PaneDrag,
     utils::Named,
@@ -105,8 +106,8 @@ pub(super) fn handle_mouse(app: &mut App, kind: MouseEventKind, col: u16, row: u
 
 /// `Ctrl` + an arrow moves the edge a drag would: down/up move the topbar's and the player bar's
 /// edges the way the mouse moves them, and left/right move the sidebar's.
-pub(super) fn handle_key(app: &mut App, key: KeyEvent) -> bool {
-    if !key.modifiers.contains(KeyModifiers::CONTROL) {
+pub(super) fn handle_key(app: &mut App, key: KeyPress) -> bool {
+    if !key.mods.ctrl {
         return false;
     }
 
@@ -179,7 +180,10 @@ mod tests {
     use ratatui::{Terminal, backend::TestBackend};
 
     use super::*;
-    use crate::config::{Config, PanesConfig};
+    use crate::{
+        config::{Config, PanesConfig},
+        key::Modifiers,
+    };
 
     /// An app on the main page, one frame drawn so the pane edges exist.
     fn app_with(panes: PanesConfig) -> App {
@@ -302,7 +306,15 @@ mod tests {
         let mut app = app_with(PanesConfig::default());
         let nav = app.config.panes.navigation;
 
-        let ctrl = |code| KeyEvent::new(code, KeyModifiers::CONTROL);
+        let ctrl = |code| {
+            KeyPress::new(
+                code,
+                Modifiers {
+                    ctrl: true,
+                    ..Modifiers::NONE
+                },
+            )
+        };
         assert!(handle_key(&mut app, ctrl(KeyCode::Right)));
         assert_eq!(app.config.panes.navigation, nav + KEY_STEP as u16);
 
@@ -312,7 +324,7 @@ mod tests {
         // Without `Ctrl` the arrow keys belong to whatever page is up.
         assert!(!handle_key(
             &mut app,
-            KeyEvent::new(KeyCode::Left, KeyModifiers::NONE)
+            KeyPress::new(KeyCode::Left, Modifiers::NONE)
         ));
     }
 }

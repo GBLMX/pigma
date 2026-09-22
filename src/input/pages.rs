@@ -7,8 +7,6 @@
 //! component guidance describes (`handle_key_events` on the component). [`crate::state::page::PageSpec::keys`]
 //! is what hands a layer back to the key map, which asks it before the global keys.
 
-use crossterm::event::{KeyCode, KeyEvent};
-
 use super::{
     content::{
         playlist_play_selected, playlist_select_first, playlist_select_last, playlist_select_next,
@@ -16,14 +14,20 @@ use super::{
     },
     main::{artist_activate, reload_artist},
 };
-use crate::{app::App, event::NavigationEvent, state::Page, text_input::TextInput};
+use crate::{
+    app::App,
+    event::NavigationEvent,
+    key::{KeyCode, KeyPress},
+    state::Page,
+    text_input::TextInput,
+};
 
 /// The artist page's keys.
 ///
 /// `Esc` leaves the page the way any page is left, its own two lists are walked with the same
 /// keys the tables use, `Tab` decides which of them the walking happens in, and `Enter` acts on
 /// what the cursor is on: the hot song is played, the album is opened.
-pub(crate) fn artist_keys(app: &mut App, key_event: KeyEvent) -> bool {
+pub(crate) fn artist_keys(app: &mut App, key_event: KeyPress) -> bool {
     match key_event.code {
         // The artist page is not part of the content breadcrumb stack — it is opened from a row
         // rather than by walking the table — so leaving it is a page change, not a restore, and
@@ -47,7 +51,7 @@ pub(crate) fn artist_keys(app: &mut App, key_event: KeyEvent) -> bool {
 }
 
 /// The queue's keys: its tabs, its rows, and the search that filters it.
-pub(crate) fn playlist_keys(app: &mut App, key_event: KeyEvent) -> bool {
+pub(crate) fn playlist_keys(app: &mut App, key_event: KeyPress) -> bool {
     match key_event.code {
         KeyCode::Tab => switch_queue(app, true),
         KeyCode::BackTab => switch_queue(app, false),
@@ -85,13 +89,11 @@ fn open_queue_search(app: &mut App) {
 
 #[cfg(test)]
 mod tests {
-    use crossterm::event::KeyModifiers;
-
     use super::*;
-    use crate::{config::Config, input::main::handle_main_key};
+    use crate::{config::Config, input::main::handle_main_key, key::Modifiers};
 
     fn press(app: &mut App, key: KeyCode) {
-        handle_main_key(app, KeyEvent::new(key, KeyModifiers::NONE)).expect("key");
+        handle_main_key(app, KeyPress::new(key, Modifiers::NONE)).expect("key");
     }
 
     fn app(page: Page) -> App {

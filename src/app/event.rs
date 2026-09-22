@@ -109,7 +109,7 @@ impl App {
         match event {
             Event::Crossterm(event) => match event {
                 CrosstermEvent::Key(key) if key.kind == crossterm::event::KeyEventKind::Press => {
-                    input::handle_key_events(self, key)?
+                    input::handle_key_events(self, key.into())?
                 }
                 // Bracketed paste (`enable_terminal_modes`): the block is a paste, not
                 // typing, so its newlines must not press Enter.

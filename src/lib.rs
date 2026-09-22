@@ -42,6 +42,7 @@ pub mod config;
 pub mod event;
 pub mod input;
 pub mod ipc;
+pub mod key;
 pub mod layout;
 pub mod logger;
 pub mod playback;

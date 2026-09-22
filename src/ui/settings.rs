@@ -24,6 +24,7 @@ use super::{BlockStyle, block::CornerBlock};
 use crate::{
     app::App,
     input::ex::{self, ExCommand},
+    key::{KeyCode, KeyPress},
 };
 
 /// How a row is changed, and therefore what the keys do on it.
@@ -524,9 +525,7 @@ pub(crate) fn handle_settings_scroll(app: &mut App, up: bool) -> bool {
 /// The page's own key layer, consulted before the global key map — see [`crate::state::page::PageKeys`].
 ///
 /// Returns whether the key was one of the page's.
-pub(crate) fn keys(app: &mut App, key_event: crossterm::event::KeyEvent) -> bool {
-    use crossterm::event::KeyCode;
-
+pub(crate) fn keys(app: &mut App, key_event: KeyPress) -> bool {
     let key = key_event.code;
     let selected = app.state.settings.selected.min(SETTINGS.len() - 1);
     let setting = &SETTINGS[selected];

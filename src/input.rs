@@ -15,11 +15,12 @@ mod search;
 mod splash;
 mod table;
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEventKind};
+use crossterm::event::MouseEventKind;
 
 use crate::{
     app::App,
     event::{AppEvent, CommandEvent, CommandPanelAction, NavigationEvent},
+    key::{KeyCode, KeyPress},
     state::Page,
 };
 
@@ -47,8 +48,8 @@ pub fn handle_paste(app: &mut App, text: &str) {
     }
 }
 
-pub fn handle_key_events(app: &mut App, key_event: KeyEvent) -> color_eyre::Result<()> {
-    if key_event.modifiers == KeyModifiers::CONTROL {
+pub fn handle_key_events(app: &mut App, key_event: KeyPress) -> color_eyre::Result<()> {
+    if key_event.mods.is_ctrl_only() {
         match key_event.code {
             KeyCode::Char('c' | 'C') => {
                 app.state.events.send(AppEvent::Quit);

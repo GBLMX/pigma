@@ -1,4 +1,4 @@
-use crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEventKind};
+use crossterm::event::{MouseButton, MouseEventKind};
 use ncm_api::SongInfo;
 use ratatui::layout::Rect;
 use std::sync::Arc;
@@ -17,6 +17,7 @@ use crate::{
     app::App,
     config::symbols,
     event::{NavigationEvent, PlaybackEvent},
+    key::{KeyCode, KeyPress},
     playback::mode_icon,
     state::{ArtistIo, ArtistPane, ContentState, Page, TableMode},
     ui::playerbar,
@@ -25,22 +26,20 @@ use crate::{
 /// The key a key event is, for the key map: the keys a binding can name are characters, with
 /// Ctrl/Alt optionally held (Shift is part of the character). Anything else — the arrows, `Tab`,
 /// `Enter` — is not a binding and is left to the key map's own arms.
-fn key_of(key_event: KeyEvent) -> Option<crate::config::keymap::Key> {
-    use crossterm::event::KeyModifiers;
-
+fn key_of(key_event: KeyPress) -> Option<crate::config::keymap::Key> {
     let KeyCode::Char(code) = key_event.code else {
         return None;
     };
-    let alt = key_event.modifiers.contains(KeyModifiers::ALT);
+    let alt = key_event.mods.alt;
 
     Some(crate::config::keymap::Key {
         code,
-        ctrl: key_event.modifiers.contains(KeyModifiers::CONTROL),
+        ctrl: key_event.mods.ctrl,
         alt,
     })
 }
 
-pub(super) fn handle_main_key(app: &mut App, key_event: KeyEvent) -> color_eyre::Result<()> {
+pub(super) fn handle_main_key(app: &mut App, key_event: KeyPress) -> color_eyre::Result<()> {
     // `Ctrl` + an arrow moves a pane edge, the way dragging one does; nothing else uses it.
     // The page's own keys come first, the way a layered keymap works: what `↑`/`↓`/`←`/`→` mean
     // depends on the page that is up, and each page writes its own layer (see `PageSpec::keys`).
@@ -794,6 +793,7 @@ fn is_local_music_view(app: &App) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::key::Modifiers;
 
     /// One key press, as the app receives it.
     fn press(app: &mut App, key: char) {
@@ -806,11 +806,7 @@ mod tests {
     /// layers are all consulted before the map below, and a test that skipped them would be
     /// testing a keyboard the user does not have.
     fn press_key(app: &mut App, key: KeyCode) {
-        crate::input::handle_key_events(
-            app,
-            crossterm::event::KeyEvent::new(key, crossterm::event::KeyModifiers::NONE),
-        )
-        .expect("key");
+        crate::input::handle_key_events(app, KeyPress::new(key, Modifiers::NONE)).expect("key");
     }
 
     /// A headless app: it owns no terminal, so — since `Config::persist` — nothing a key press

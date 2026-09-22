@@ -1,8 +1,11 @@
-use crossterm::event::{KeyCode, KeyEvent};
+use crate::{
+    app::App,
+    event::NavigationEvent,
+    key::{KeyCode, KeyPress},
+    state::ContentState,
+};
 
-use crate::{app::App, event::NavigationEvent, state::ContentState};
-
-pub(super) fn handle_search_key(app: &mut App, key_event: KeyEvent) -> bool {
+pub(super) fn handle_search_key(app: &mut App, key_event: KeyPress) -> bool {
     match key_event.code {
         KeyCode::Esc => {
             app.state.events.send(NavigationEvent::SearchDeactivated);

@@ -1,11 +1,12 @@
-use crossterm::event::{KeyCode, KeyEvent, MouseEventKind};
+use crossterm::event::MouseEventKind;
 
 use crate::{
     app::App,
     event::{CommandEvent, CommandPanelAction},
+    key::{KeyCode, KeyPress},
 };
 
-pub(super) fn handle_command_key(app: &mut App, key_event: KeyEvent) {
+pub(super) fn handle_command_key(app: &mut App, key_event: KeyPress) {
     match key_event.code {
         KeyCode::Esc => {
             app.state
