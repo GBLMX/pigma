@@ -331,10 +331,8 @@ impl Config {
         // overwriting it with defaults would silently discard what they wrote.
         let fresh = !config_path.exists();
         if fresh || migrated {
-            if fresh {
-                if let Some(dir) = config_path.parent() {
-                    let _ = fs::create_dir_all(dir);
-                }
+            if fresh && let Some(dir) = config_path.parent() {
+                let _ = fs::create_dir_all(dir);
             }
             let content = config.to_toml();
             if content.is_empty() {
