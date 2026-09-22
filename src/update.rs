@@ -425,7 +425,7 @@ async fn install(client: &Client, layout: &Layout, opts: &Options) -> Result<()>
     {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(&staged_bin, fs::Permissions::from_mode(0o755))
-            .map_err(|e| eyre!("改不了 {staged_bin} 的权限（{e}）"))?;
+            .map_err(|e| eyre!("改不了 {} 的权限（{e}）", staged_bin.display()))?;
     }
 
     let number = match &pinned {
