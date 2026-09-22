@@ -173,3 +173,51 @@ jobs:
         # `--workspace` also runs the tests of the `crates/*` members, which a
         # package-only invocation silently skipped.
         run: cargo test --locked --workspace --all-features
+
+  # The `#[ignore]`d benchmarks, run on their own so their output ends up somewhere a reader can
+  # find it rather than in whoever ran them locally. What this produces is a *trend*: these are
+  # shared runners, while the numbers FRAMEWORK.md quotes come from the author's machine (same
+  # command, same flags). The benches skip themselves when their material is absent — this
+  # repository ships no fixtures on purpose — printing one line saying so.
+  bench:
+    name: bench (ubuntu, release)
+    needs: skip-check
+    if: needs.skip-check.outputs.skip == 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    # A noisy benchmark must not redden a pull request: the uploaded run is the point here, not
+    # the exit code.
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install Linux audio dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libasound2-dev
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+      - name: Run the benchmark suite
+        run: cargo test --release --locked --lib -- --ignored --nocapture 2>&1 | tee bench-output.txt
+      - name: Upload the run as an artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: bench-output
+          path: bench-output.txt
+      - name: Put the run in the job summary
+        run: |
+          {
+            echo '## 性能基准输出'
+            echo
+            echo '命令与仓库文档里的复现命令相同：`cargo test --release --lib -- --ignored --nocapture`。'
+            echo '**这是共享 runner 上的数字，只作趋势**；FRAMEWORK.md 引用的那些是作者机器上的同一条命令。'
+            echo '缺素材的项（曲库扫描 / 音频链 / 封面）会打印一行说明并跳过 —— 本仓库刻意不带素材。'
+            echo
+            echo '```'
+            cat bench-output.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
