@@ -980,9 +980,13 @@ mod tests {
             let mut header = tar::Header::new_gnu();
             header.set_size(contents.len() as u64);
             header.set_mode(0o755);
+            // `append_data` would go through `Header::set_path`, which refuses `..` outright,
+            // and this helper has to be able to build the archive `extract` is meant to
+            // reject — so the name goes into the header directly.
+            let raw = name.as_bytes();
+            header.as_old_mut().name[..raw.len()].copy_from_slice(raw);
             header.set_cksum();
-            tar.append_data(&mut header, name, contents)
-                .expect("append entry");
+            tar.append(&header, contents).expect("append entry");
             tar.into_inner()
                 .expect("finish the tar stream")
                 .finish()
