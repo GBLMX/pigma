@@ -54,13 +54,6 @@ mouse = true
 # 输入框里的光标形状: "default"(跟随终端) / "block" / "underline" / "bar"
 cursor_style = "default"
 
-# 桌面通知（默认关闭）。用 OSC 9 触发，kitty / WezTerm / foot / iTerm2 / Windows Terminal 支持
-[notify]
-# 切歌时通知当前曲目（歌名 — 歌手）
-song_change = false
-# 播放出错时通知
-errors = false
-
 # 歌词渐变效果: "rainbow", "fire", "ocean", "forest", "sunset", "neon", "pastel", "monochrome"
 lyric_gradient = "rainbow"
 
@@ -85,6 +78,13 @@ lyric_translation = true
 # 海外用户: 取消注释并填上代理地址 (NCM 走代理)
 # 国内用户: 保持注释 (直连)
 # proxy = "http://127.0.0.1:7890"
+
+# 桌面通知（默认关闭）。用 OSC 9 触发，kitty / WezTerm / foot / iTerm2 / Windows Terminal 支持
+[notify]
+# 切歌时通知当前曲目（歌名 — 歌手）
+song_change = false
+# 播放出错时通知
+errors = false
 
 # =============================================================================
 # 缓存配置
