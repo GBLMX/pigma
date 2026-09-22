@@ -47,7 +47,7 @@ fn default_true() -> bool {
 /// Schema version of `config.toml` written by this build.
 ///
 /// Bump it whenever a field is renamed, removed, or changes meaning, and add the
-/// matching step in [`Config::migrate_from`].
+/// matching step in [`migrate_document`].
 pub const CONFIG_VERSION: u32 = 2;
 
 /// `config_version` is absent from files written before versioning existed, and such a
@@ -55,16 +55,6 @@ pub const CONFIG_VERSION: u32 = 2;
 /// never trigger.
 fn unversioned_config_version() -> u32 {
     0
-}
-
-/// Read the version-1 `proxy_target` out of a config file that is about to be
-/// migrated. The key is gone from [`Config`], so it is read straight from the raw
-/// TOML; a missing key — or a file that does not parse — means the old default,
-/// `normal`.
-fn legacy_proxy_target(config_path: &Path) -> Option<String> {
-    let content = fs::read_to_string(config_path).ok()?;
-    let doc = content.parse::<toml_edit::DocumentMut>().ok()?;
-    doc.get("proxy_target")?.as_str().map(str::to_string)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -289,31 +279,34 @@ impl Config {
     /// Split out of [`Config::load`] so the migration path is testable against a scratch
     /// file instead of the user's real config.
     pub fn load_from(config_path: &Path) -> Self {
-        let parsed: Option<Config> = if config_path.exists() {
+        let (mut config, migrated) = if config_path.exists() {
             match fs::read_to_string(config_path) {
-                Ok(content) => match toml_edit::de::from_str(&content) {
-                    Ok(cfg) => Some(cfg),
+                Ok(text) => match toml_edit::de::from_str(&text) {
+                    Ok(cfg) => (cfg, migrate_document(&text, config_path)),
                     Err(e) => {
                         log::warn!("Failed to parse config.toml: {e}, using defaults");
-                        None
+                        (Config::default(), None)
                     }
                 },
                 Err(e) => {
                     log::warn!("Failed to read config.toml: {e}, using defaults");
-                    None
+                    (Config::default(), None)
                 }
             }
         } else {
-            None
+            (Config::default(), None)
         };
 
-        let (mut config, migrated) = match parsed {
-            Some(mut cfg) => {
-                let migrated = cfg.migrate_from(config_path);
-                (cfg, migrated)
+        // The migration edited the *file*, so the config it produced is read back from the text
+        // that is about to be written: one implementation of the rules, and the app runs with what
+        // the file now says rather than with a struct migrated on the side.
+        if let Some(text) = migrated.as_deref() {
+            match toml_edit::de::from_str(text) {
+                Ok(cfg) => config = cfg,
+                Err(e) => log::warn!("Failed to read the migrated config.toml back: {e}"),
             }
-            None => (Config::default(), false),
-        };
+        }
+
         // A config read from the user's file is the user's: the app that loaded it may write it
         // back. (`Config::deserialize` cannot know this — `persist` is skipped on the way in —
         // so it is said here, and `App::new` narrows it again to "the process owns the
@@ -321,20 +314,22 @@ impl Config {
         config.persist = true;
 
         // Write the file back when this call changed it: there was no file (a fresh default),
-        // or `migrate_from` just upgraded one (after the backup it took). Doing it here rather
-        // than at the next `save()` is what makes a migration visible at once — the keys the
-        // new schema dropped stop sitting in the user's file — and it is why the write targets
-        // the path that was loaded rather than `save()`'s own directory.
+        // or `migrate_document` just upgraded one (after the backup it took). Doing it here
+        // rather than at the next `save()` is what makes a migration visible at once — the keys
+        // the new schema dropped stop sitting in the user's file — and it is why the write
+        // targets the path that was loaded rather than `save()`'s own directory.
         //
         // A file that is already current is left byte-for-byte alone, which is what keeps a
         // user's own comments, and a file that exists but failed to parse is left alone too:
         // overwriting it with defaults would silently discard what they wrote.
         let fresh = !config_path.exists();
-        if fresh || migrated {
+        if fresh || migrated.is_some() {
             if fresh && let Some(dir) = config_path.parent() {
                 let _ = fs::create_dir_all(dir);
             }
-            let content = config.to_toml();
+            // A migration hands back the user's own document with only the schema's changes in
+            // it; a fresh file has nothing of theirs in it and is written from the struct.
+            let content = migrated.unwrap_or_else(|| config.to_toml());
             if content.is_empty() {
                 log::error!("Refusing to overwrite config.toml with an empty document");
             } else if let Err(e) = fs::write(config_path, content) {
@@ -342,66 +337,6 @@ impl Config {
             }
         }
         config
-    }
-
-    /// Upgrade a config parsed from disk to [`CONFIG_VERSION`].
-    ///
-    /// The previous file is copied to `config.toml.bak-v{old}` first, so a user can always
-    /// roll back. Returns whether anything was upgraded, which is what tells the caller to
-    /// write the migrated file back at once: a migration the user cannot see on disk has not
-    /// happened as far as the next reader of that file is concerned. A file from a newer
-    /// build is left as it is (its unknown fields are ignored) instead of being downgraded,
-    /// and reports `false` so it is not written either.
-    fn migrate_from(&mut self, config_path: &Path) -> bool {
-        let from = self.config_version;
-        if from == CONFIG_VERSION {
-            return false;
-        }
-        if from > CONFIG_VERSION {
-            log::warn!(
-                "config.toml is schema v{from}, this build understands v{CONFIG_VERSION}: \
-                 newer fields are ignored"
-            );
-            return false;
-        }
-
-        let backup = config_path.with_extension(format!("toml.bak-v{from}"));
-        match fs::copy(config_path, &backup) {
-            Ok(_) => log::info!(
-                "config.toml schema v{from} → v{CONFIG_VERSION}（已备份到 {}）",
-                backup.display()
-            ),
-            Err(e) => log::warn!(
-                "config.toml schema v{from} → v{CONFIG_VERSION}（备份到 {} 失败: {e}）",
-                backup.display()
-            ),
-        }
-
-        // Steps run in order, each rewriting whatever the previous schema got wrong.
-
-        // v1 → v2: `proxy_target` is gone along with the multi-source fallback it
-        // scoped, and `proxy` now covers every network source. `normal` (the default)
-        // only ever proxied one non-NetEase source — the source that no longer exists —
-        // so that address is dropped and the user ends up on a direct connection;
-        // `reversed`/`both` meant "proxy NetEase traffic", which is exactly what
-        // `proxy` means now, so it is kept.
-        if from < 2 {
-            match legacy_proxy_target(config_path).as_deref() {
-                None | Some("normal") => {
-                    self.proxy = None;
-                    log::info!(
-                        "config.toml schema v1 → v2: proxy_target 为默认值，不再代理（清理 proxy）"
-                    );
-                }
-                Some(target) => log::info!(
-                    "config.toml schema v1 → v2: 保留 proxy（原 proxy_target = {target}）"
-                ),
-            }
-        }
-
-        self.config_version = CONFIG_VERSION;
-
-        true
     }
 
     pub fn save(&self) {
@@ -460,6 +395,302 @@ impl Config {
 
         doc.to_string()
     }
+}
+
+/// Where a key sits in the user's file: the names — and the array elements — to walk down from the
+/// root, as [`stale_keys`] walked them.
+#[derive(Debug, Clone)]
+enum Step {
+    Key(String),
+    Element(usize),
+}
+
+/// A place a key can be found in — a table (`[a]`, `a.b`, an inline table, the root of the file) or
+/// an element of an array — plus the item that *is* a key's value.
+enum Node<'a> {
+    Item(&'a mut toml_edit::Item),
+    Table(&'a mut toml_edit::Table),
+    Value(&'a mut toml_edit::Value),
+}
+
+impl<'a> Node<'a> {
+    /// The entries this node holds, when it holds keys at all.
+    fn entries(self) -> Option<&'a mut dyn toml_edit::TableLike> {
+        match self {
+            Node::Item(item) => item.as_table_like_mut(),
+            Node::Table(table) => Some(table),
+            Node::Value(toml_edit::Value::InlineTable(table)) => Some(table),
+            Node::Value(_) => None,
+        }
+    }
+
+    /// The element `index` of this node, when it is an array — an array of tables, or one of the
+    /// arrays a table writes tables in.
+    fn element(self, index: usize) -> Option<Node<'a>> {
+        match self {
+            Node::Item(toml_edit::Item::ArrayOfTables(arrays)) => {
+                Some(Node::Table(arrays.get_mut(index)?))
+            }
+            Node::Item(toml_edit::Item::Value(toml_edit::Value::Array(array)))
+            | Node::Value(toml_edit::Value::Array(array)) => {
+                Some(Node::Value(array.get_mut(index)?))
+            }
+            _ => None,
+        }
+    }
+}
+
+/// Walk `path` down from `node`. `None` cannot happen for a path this module built — the sweep only
+/// walks keys it has just looked at — so both callers read it as "nothing there to touch".
+fn node_at<'a>(mut node: Node<'a>, path: &[Step]) -> Option<Node<'a>> {
+    for step in path {
+        node = match step {
+            Step::Key(name) => Node::Item(node.entries()?.get_mut(name)?),
+            Step::Element(index) => node.element(*index)?,
+        };
+    }
+    Some(node)
+}
+
+/// The shapes a key is asked about, in the order they are tried: a number, a string, an array, a
+/// table.
+const PROBE_SHAPES: [&str; 4] = ["0", "\"\"", "[]", "{}"];
+
+/// Whether [`Config`] still has the key at `path`.
+///
+/// `Config`'s own `Deserialize` is the one list of keys that exists, so the question goes to it
+/// rather than to a list written here: the key is handed a value of every shape a TOML value has
+/// (see [`PROBE_SHAPES`]) and the file is read back. A key serde does not know, it *ignores*, and
+/// it ignores all four of them — that is what "the new schema dropped this key" means. A key the
+/// schema still has rejects at least one: the four shapes are a number, a string, an array and a
+/// table, and every field of the config graph is one of those things or has one inside it (an
+/// `Option`, a `Vec`, a `HashMap`, an untagged `ColorSpec` — each refuses at least one shape).
+/// Nothing in the graph is a catch-all that would swallow all four, which is what makes "all four
+/// were ignored" an answer about the schema rather than about the value.
+fn schema_ignores(doc: &toml_edit::DocumentMut, path: &[Step]) -> bool {
+    PROBE_SHAPES
+        .iter()
+        .all(|shape| schema_takes(doc, path, shape))
+}
+
+/// Read the file back with the key at `path` holding what `literal` spells: whether the schema took
+/// it. The file is asked on a copy — the user's own document is never touched by a question.
+fn schema_takes(doc: &toml_edit::DocumentMut, path: &[Step], literal: &str) -> bool {
+    let Ok(value) = literal.parse::<toml_edit::Value>() else {
+        // One of ours that does not parse would make every key look unknown; "this shape was not
+        // taken" is the reading that keeps the key.
+        return false;
+    };
+    let mut probe = doc.clone();
+    let Some(Node::Item(entry)) = node_at(Node::Item(probe.as_item_mut()), path) else {
+        return false;
+    };
+    *entry = toml_edit::Item::Value(value);
+    toml_edit::de::from_str::<Config>(&probe.to_string()).is_ok()
+}
+
+/// Every key of the user's own file that [`Config`] no longer has, at every level of it.
+fn stale_keys(doc: &toml_edit::DocumentMut) -> Vec<Vec<Step>> {
+    let mut stale = Vec::new();
+    let mut path = Vec::new();
+    visit_keys(doc, doc.as_table(), &mut path, &mut stale);
+    stale
+}
+
+/// One level of the sweep: every key a table holds, and — for a key the schema still has — what is
+/// under it. A key that is gone is not looked into: dropping it takes the subtree with it.
+fn visit_keys(
+    doc: &toml_edit::DocumentMut,
+    at: &dyn toml_edit::TableLike,
+    path: &mut Vec<Step>,
+    stale: &mut Vec<Vec<Step>>,
+) {
+    for (name, item) in at.iter() {
+        path.push(Step::Key(name.to_string()));
+        if schema_ignores(doc, path) {
+            stale.push(path.clone());
+        } else {
+            visit_item(doc, item, path, stale);
+        }
+        path.pop();
+    }
+}
+
+/// What is under a key the schema has: a table, the elements of an array of tables, or an array —
+/// which is another place a table can hide.
+fn visit_item(
+    doc: &toml_edit::DocumentMut,
+    at: &toml_edit::Item,
+    path: &mut Vec<Step>,
+    stale: &mut Vec<Vec<Step>>,
+) {
+    match at {
+        toml_edit::Item::Table(table) => visit_keys(doc, table, path, stale),
+        toml_edit::Item::ArrayOfTables(arrays) => {
+            for (index, table) in arrays.iter().enumerate() {
+                path.push(Step::Element(index));
+                visit_keys(doc, table, path, stale);
+                path.pop();
+            }
+        }
+        toml_edit::Item::Value(value) => visit_value(doc, value, path, stale),
+        toml_edit::Item::None => {}
+    }
+}
+
+/// What is under a key the schema has and that is written as a value: an inline table holds keys
+/// like any other table, and an array holds them in its elements.
+fn visit_value(
+    doc: &toml_edit::DocumentMut,
+    at: &toml_edit::Value,
+    path: &mut Vec<Step>,
+    stale: &mut Vec<Vec<Step>>,
+) {
+    match at {
+        toml_edit::Value::InlineTable(table) => visit_keys(doc, table, path, stale),
+        toml_edit::Value::Array(array) => {
+            for (index, value) in array.iter().enumerate() {
+                path.push(Step::Element(index));
+                visit_value(doc, value, path, stale);
+                path.pop();
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Take the key at `path` out of the user's document — its own comment goes with it.
+fn remove_key(doc: &mut toml_edit::DocumentMut, path: &[Step]) {
+    let Some((Step::Key(name), above)) = path.split_last() else {
+        return;
+    };
+    let Some(entries) = node_at(Node::Item(doc.as_item_mut()), above).and_then(|node| node.entries())
+    else {
+        return;
+    };
+    entries.remove(name);
+}
+
+/// The key a path names, the way the user reads it in their file: `cache.quality`,
+/// `navigation.sections[0].items`.
+fn path_name(path: &[Step]) -> String {
+    let mut name = String::new();
+    for step in path {
+        match step {
+            Step::Key(key) => {
+                if !name.is_empty() {
+                    name.push('.');
+                }
+                name.push_str(key);
+            }
+            Step::Element(index) => name.push_str(&format!("[{index}]")),
+        }
+    }
+    name
+}
+
+/// The schema version the user's file declares.
+///
+/// Read off the document rather than off a parsed [`Config`], because it is the file that is being
+/// upgraded. `config_version` first appeared in v1, so a file that says nothing — or says something
+/// that is not a version — is v0, the reading [`unversioned_config_version`] gives it.
+fn document_version(doc: &toml_edit::DocumentMut) -> u32 {
+    doc.get("config_version")
+        .and_then(toml_edit::Item::as_integer)
+        .and_then(|version| u32::try_from(version).ok())
+        .unwrap_or_else(unversioned_config_version)
+}
+
+/// Write the version this build writes, in place: whatever the user has on that line — their own
+/// spacing, a comment at the end of it — is the value's decor, and the new value is handed it back.
+fn set_version(doc: &mut toml_edit::DocumentMut) {
+    let mut version = toml_edit::Value::from(i64::from(CONFIG_VERSION));
+    match doc
+        .get_mut("config_version")
+        .and_then(toml_edit::Item::as_value_mut)
+    {
+        Some(existing) => {
+            *version.decor_mut() = existing.decor().clone();
+            *existing = version;
+        }
+        // A file older than versioning has no such line, and gets one.
+        None => {
+            doc.insert("config_version", toml_edit::Item::Value(version));
+        }
+    }
+}
+
+/// Upgrade the user's own file to [`CONFIG_VERSION`] by editing their document instead of writing a
+/// new one: their keys keep their values, their order, their spacing and their comments, and only
+/// what the schema requires moves. Returns the text to write, or `None` when the file needs nothing
+/// — it is already at this schema, or it comes from a newer build and is left as it is (its unknown
+/// fields are ignored rather than downgraded).
+///
+/// The previous file is copied to `config.toml.bak-v{old}` first, so a user can always roll back.
+/// The caller writes the result out at once: a migration the user cannot see on disk has not
+/// happened as far as the next reader of that file is concerned.
+fn migrate_document(text: &str, config_path: &Path) -> Option<String> {
+    let mut doc = text.parse::<toml_edit::DocumentMut>().ok()?;
+    let from = document_version(&doc);
+    if from == CONFIG_VERSION {
+        return None;
+    }
+    if from > CONFIG_VERSION {
+        log::warn!(
+            "config.toml is schema v{from}, this build understands v{CONFIG_VERSION}: \
+             newer fields are ignored"
+        );
+        return None;
+    }
+
+    let backup = config_path.with_extension(format!("toml.bak-v{from}"));
+    match fs::copy(config_path, &backup) {
+        Ok(_) => log::info!(
+            "config.toml schema v{from} → v{CONFIG_VERSION}（已备份到 {}）",
+            backup.display()
+        ),
+        Err(e) => log::warn!(
+            "config.toml schema v{from} → v{CONFIG_VERSION}（备份到 {} 失败: {e}）",
+            backup.display()
+        ),
+    }
+
+    // Steps run in order, each rewriting whatever the previous schema got wrong.
+
+    // v1 → v2: `proxy_target` is gone along with the multi-source fallback it scoped, and `proxy`
+    // now covers every network source. `normal` (the default) only ever proxied one non-NetEase
+    // source — the source that no longer exists — so that address is dropped and the user ends up
+    // on a direct connection; `reversed`/`both` meant "proxy NetEase traffic", which is exactly
+    // what `proxy` means now, so it is kept. The key itself is one the new schema no longer has, so
+    // the sweep below is what takes it out of the file.
+    if from < 2 {
+        match doc.get("proxy_target").and_then(toml_edit::Item::as_str) {
+            None | Some("normal") => {
+                doc.remove("proxy");
+                log::info!("config.toml schema v1 → v2: proxy_target 为默认值，不再代理（清理 proxy）");
+            }
+            Some(target) => {
+                log::info!("config.toml schema v1 → v2: 保留 proxy（原 proxy_target = {target}）");
+            }
+        }
+    }
+
+    // Everything the steps left in the file that the schema no longer has: keys a file written by
+    // this build cannot carry, and which nothing would ever take out again.
+    let stale = stale_keys(&doc);
+    for path in &stale {
+        remove_key(&mut doc, path);
+    }
+    if !stale.is_empty() {
+        let names: Vec<String> = stale.iter().map(|path| path_name(path)).collect();
+        log::info!(
+            "config.toml schema v{from} → v{CONFIG_VERSION}: 删除新 schema 没有的键 {}",
+            names.join("、")
+        );
+    }
+
+    set_version(&mut doc);
+    Some(doc.to_string())
 }
 
 #[cfg(test)]
@@ -695,6 +926,257 @@ mod tests {
             fs::read_to_string(&path).expect("read config"),
             authored,
             "a file from a newer schema must be left alone, not downgraded"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The sweep's answer for a document, as the paths read in a failure message.
+    fn sweep(doc: &toml_edit::DocumentMut) -> Vec<String> {
+        stale_keys(doc)
+            .iter()
+            .map(|path| path_name(path))
+            .collect()
+    }
+
+    /// A migration edits the user's own document instead of writing a new one: what they wrote
+    /// around the change — their comments, their spacing, their order — is still there character
+    /// for character, and only the line the schema owns moves.
+    #[test]
+    fn a_migration_keeps_what_the_user_wrote() {
+        let dir = scratch_dir("comments");
+        let path = dir.join("config.toml");
+        let authored = "# 手写的说明，迁移不能碰它\n\
+                        config_version = 1\n\
+                        default_theme = \"dracula\"  # 行尾注释也在\n\
+                        \n\
+                        # 缓存一节\n\
+                        [cache]\n\
+                        quality = \"flac\"\n";
+        fs::write(&path, authored).expect("write the user's config");
+
+        let cfg = Config::load_from(&path);
+
+        assert_eq!(cfg.default_theme, "dracula", "the value must still be read");
+        assert_eq!(cfg.cache.quality, "flac", "and the section's");
+        assert_eq!(
+            fs::read_to_string(&path).expect("read the migrated config"),
+            authored.replace(
+                "config_version = 1",
+                &format!("config_version = {CONFIG_VERSION}")
+            ),
+            "a migration may only move what the schema requires; the rest is the user's file"
+        );
+        assert_eq!(
+            fs::read_to_string(dir.join("config.toml.bak-v1")).expect("read the backup"),
+            authored,
+            "the backup is the rollback path and holds the file exactly as it was"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The keys the new schema dropped leave the user's file at every level they sit at: the v1
+    /// `proxy_target`, the section it scoped (no key of this build at all), one inside a table the
+    /// schema still has, and one inside a table inside an array.
+    #[test]
+    fn a_migration_drops_the_keys_the_schema_no_longer_has() {
+        let dir = scratch_dir("stale");
+        let path = dir.join("config.toml");
+        fs::write(
+            &path,
+            "config_version = 1\n\
+             search_limit = 42\n\
+             proxy = \"http://127.0.0.1:7890\"\n\
+             proxy_target = \"both\"\n\
+             [source_fallback]\n\
+             enabled = true\n\
+             [cache]\n\
+             quality = \"flac\"\n\
+             old_ttl = 3\n\
+             [[navigation.sections]]\n\
+             title = \"我的\"\n\
+             icon = \"star\"\n\
+             items = [{ name = \"我喜欢的音乐\", api = \"liked\", badge = \"x\" }]\n",
+        )
+        .expect("write the file");
+
+        let cfg = Config::load_from(&path);
+
+        assert_eq!(cfg.config_version, CONFIG_VERSION);
+        assert_eq!(cfg.search_limit, 42, "the keys the schema has are kept");
+        assert_eq!(
+            cfg.proxy.as_deref(),
+            Some("http://127.0.0.1:7890"),
+            "proxy_target = both means NetEase traffic went through the proxy, which is what `proxy` means now"
+        );
+        assert_eq!(
+            cfg.navigation.sections[0].items[0].name, "我喜欢的音乐",
+            "and what is under a section it keeps is still read"
+        );
+
+        let on_disk = fs::read_to_string(&path).expect("read the migrated config");
+        for gone in ["proxy_target", "source_fallback", "old_ttl", "icon", "badge"] {
+            assert!(
+                !on_disk.contains(gone),
+                "`{gone}` is not a key of the new schema and must not stay in the user's file:\n{on_disk}"
+            );
+        }
+        assert!(
+            on_disk.contains("quality = \"flac\"")
+                && on_disk.contains("title = \"我的\"")
+                && on_disk.contains("proxy = \"http://127.0.0.1:7890\""),
+            "the keys the schema has keep their values:\n{on_disk}"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The sweep is only allowed to take away keys the schema does not have. A file holding one key
+    /// of every kind the config writes — scalars, a map, nested tables, a table inside an array, a
+    /// theme with its own sections — comes through with all of them, while a key the schema never
+    /// had on the same file is found, so the first half cannot pass for the wrong reason.
+    #[test]
+    fn the_sweep_keeps_every_key_the_config_has() {
+        let text = "config_version = 2\n\
+                    default_theme = \"dracula\"\n\
+                    mouse = true\n\
+                    search_limit = 100\n\
+                    seek_interval_secs = 5\n\
+                    proxy = \"http://127.0.0.1:7890\"\n\
+                    [keys]\n\
+                    volume_up = \"volume +5\"\n\
+                    [cache]\n\
+                    content_cache_ttl = 1\n\
+                    quality = \"flac\"\n\
+                    [themes.mine]\n\
+                    base = \"dracula\"\n\
+                    accent = \"#4da6ff\"\n\
+                    [themes.mine.table]\n\
+                    row = { fg = \"text\", bg = \"surface\" }\n\
+                    [themes.\"my.theme\"]\n\
+                    base = \"dracula\"\n\
+                    [[navigation.sections]]\n\
+                    title = \"我\"\n\
+                    items = [{ name = \"x\", api = \"y\", title_template = \"{name}\" }]\n\
+                    [columns.overrides]\n\
+                    default = [{ header = \"H\", field = \"f\", width = 3, ratio = [1, 2] }]\n\
+                    [symbols]\n\
+                    preset = \"nerd\"\n\
+                    selected = \">\"\n";
+        let doc: toml_edit::DocumentMut = text.parse().expect("the sample parses");
+        toml_edit::de::from_str::<Config>(text).expect("the sample is a config this build reads");
+
+        assert_eq!(
+            sweep(&doc),
+            Vec::<String>::new(),
+            "the sweep would take away keys the schema has"
+        );
+
+        // The same document with keys the schema never had — at the top level and inside a table it
+        // does have — so the assertion above cannot pass for the wrong reason (a schema that
+        // rejected everything would take all of them away).
+        let mut with_stale = doc.clone();
+        let replaced = with_stale.insert("no_such_key", toml_edit::value(1));
+        assert!(replaced.is_none(), "the sample never had such a key");
+        let theme = with_stale
+            .get_mut("themes")
+            .and_then(|item| item.as_table_like_mut())
+            .and_then(|themes| themes.get_mut("mine"))
+            .and_then(|item| item.as_table_like_mut())
+            .expect("the sample has that theme");
+        theme.insert("old_colour", toml_edit::value("red"));
+        let mut stale = sweep(&with_stale);
+        stale.sort();
+        assert_eq!(
+            stale,
+            vec!["no_such_key".to_string(), "themes.mine.old_colour".to_string()],
+            "the keys the schema never had, and only those"
+        );
+
+        // A key the user wrote as a dotted key goes whole: the table it was folded into is not a
+        // key of the schema either, and an empty one left behind would be one more thing to look at.
+        let mut dotted: toml_edit::DocumentMut = "config_version = 2\nold_theme.section = true\n"
+            .parse()
+            .expect("the sample parses");
+        for path in stale_keys(&dotted) {
+            remove_key(&mut dotted, &path);
+        }
+        assert!(
+            !dotted.to_string().contains("old_theme"),
+            "a stale dotted key is removed with the table it made:\n{dotted}"
+        );
+    }
+
+    /// A 329-line example with a comment on nearly every key is what a user copies, so it is the
+    /// corpus the migration is checked against: migrating it from v1 keeps every line that the
+    /// schema has, keeps the comments that explain them, and leaves the settings the file means
+    /// exactly as they were.
+    #[test]
+    fn the_example_config_migrates_without_rewriting_what_it_keeps() {
+        let example = include_str!("../config.example.toml");
+        let v1 = example.replace("config_version = 2", "config_version = 1");
+        assert_ne!(v1, example, "the example declares the current version");
+
+        let dir = scratch_dir("example");
+        let path = dir.join("config.toml");
+        fs::write(&path, &v1).expect("write the example as a version-1 file");
+
+        let migrated = migrate_document(&v1, &path).expect("a version-1 file is migrated");
+
+        // The migration only takes lines out; it never rewrites one. (The version line is the
+        // example's own line, with the number the schema writes.)
+        let version_line = format!("config_version = {CONFIG_VERSION}");
+        for line in migrated.lines().filter(|line| !line.is_empty()) {
+            assert!(
+                example.contains(line) || line == version_line,
+                "a migration may not rewrite `{line}`"
+            );
+        }
+
+        // What the app reads out of the file must not change: the migration takes away only what
+        // serde ignores. The two readings are compared in their canonical form — the form the
+        // app's own `save` writes — with the lines sorted, because one map in it
+        // (`columns.overrides`) is a `HashMap` and writes its entries in a different order every
+        // run. The version is the one field the migration is there to change. (The example keeps a
+        // handful of lyrics keys inside `[notify]`, which the schema does not have there and serde
+        // ignores — the sweep takes those out of a user's file, the same way the rewrite this
+        // replaced did.)
+        let mut before: Config = toml_edit::de::from_str(&v1).expect("the example reads");
+        before.config_version = CONFIG_VERSION;
+        let after = toml_edit::de::from_str::<Config>(&migrated).expect("the migrated example reads");
+        let (wants_text, got_text) = (before.to_toml(), after.to_toml());
+        let (mut wants, mut got): (Vec<&str>, Vec<&str>) =
+            (wants_text.lines().collect(), got_text.lines().collect());
+        wants.sort();
+        got.sort();
+        assert_eq!(
+            got, wants,
+            "a migration may not change the settings the file means"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A pre-versioning file is brought to this schema once, and what is written is a file this
+    /// build reads back as current: `config_version` lands where the schema looks for it — with the
+    /// user's other top-level keys, not inside the last section of the file.
+    #[test]
+    fn an_unversioned_file_is_migrated_once_and_keeps_its_sections() {
+        let dir = scratch_dir("unversioned");
+        let path = dir.join("config.toml");
+        fs::write(&path, "search_limit = 7\n[cache]\nquality = \"flac\"\n").expect("write config");
+
+        assert_eq!(Config::load_from(&path).config_version, CONFIG_VERSION);
+
+        let written = fs::read_to_string(&path).expect("read the migrated config");
+        let again = Config::load_from(&path);
+        assert_eq!(
+            again.config_version, CONFIG_VERSION,
+            "the version has to sit where the schema reads it:\n{written}"
+        );
+        assert_eq!(again.search_limit, 7, "values must survive");
+        assert_eq!(again.cache.quality, "flac", "sections must survive");
+        assert_eq!(
+            fs::read_to_string(&path).expect("read it again"),
+            written,
+            "a file at the current version must not be migrated a second time"
         );
         let _ = fs::remove_dir_all(&dir);
     }
