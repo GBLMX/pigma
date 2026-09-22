@@ -481,8 +481,8 @@ impl PlaybackEngine {
     }
 
     /// Append `songs` to a fixed, non-dated queue key and start playing
-    /// `index`. Used by search (third-party & NCM) so all such songs share one
-    /// queue instead of one per keyword/day. If the song is already in the
+    /// `index`. Used by NetEase search so every search shares one queue
+    /// instead of one per keyword/day. If the song is already in the
     /// queue, just play the existing entry instead of adding a duplicate
     /// (re-pressing Enter on a search result).
     pub fn append_and_play_key(&mut self, key: &str, songs: &[Arc<SongInfo>], index: usize) {

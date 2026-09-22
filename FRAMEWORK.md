@@ -15,8 +15,8 @@
 | 方面 | 改前 | 改后 | 依据（实测） | 位置 |
 | --- | --- | --- | --- | --- |
 | 日志 | 手写 `log::Log` 实现：`Mutex<File>` 追加写，**无轮转、无上限**，调用线程持锁同步写 | `tracing` + `tracing-subscriber` + `tracing-appender`：按天轮转、保留最近 7 个、行内带模块路径与本地时间 | 旧日志实测已达 **2,892,695 B** 且无上限；替换后**135 个 `log::*!` 调用点一行未改**（`tracing-log` 桥接 `log` 记录） | `src/logger.rs` |
-| 对比度 | 手写 WCAG 亮度/对比度（`relative_luminance` / `contrast_ratio`），且 `ui.rs` 的审计测试里还有**第三份**拷贝 | `palette` 的 `Wcag21RelativeContrast`；全仓颜色数学收敛到一处 | 全 **2²⁴ 个 8 位 sRGB 颜色**逐值对拍，最大亮度偏差 7.29e-5（palette 用 CIE/Lindbloom 全精度系数，旧代码用 WCAG 取整系数）；**19 个内置主题的 `on_accent` 结果全部一致**；唯一分歧带是黑白锚对比度打平处（合成扫描的 0.005%，可读性相同，无内置主题落在那） | `src/config/theme.rs`、`src/app/theme.rs`、`src/ui.rs` |
-| 桌面通知 | 只用 `OSC 9`（单串正文） | kitty 走其自有的 `OSC 99`：标题与正文分开（`p=`）、Base64 负载（`e=1`）、`f=` 声明应用名便于过滤、`i=`/`d=` 分块并避免堆叠 | kitty 官方文档：kitty 实现 `OSC 99`，同时**兼容**旧式 `OSC 9`；其余终端保持 `OSC 9` **逐字节不变**（有测试钉住） | `src/utils/terminal.rs` |
+| 对比度 | 手写 WCAG 亮度/对比度（`relative_luminance` / `contrast_ratio`），且 `ui/contrast_audit.rs` 的审计测试里还有**第三份**拷贝 | `palette` 的 `Wcag21RelativeContrast`；全仓颜色数学收敛到一处 | 全 **2²⁴ 个 8 位 sRGB 颜色**逐值对拍，最大亮度偏差 7.29e-5（palette 用 CIE/Lindbloom 全精度系数，旧代码用 WCAG 取整系数）；**19 个内置主题的 `on_accent` 结果全部一致**；唯一分歧带是黑白锚对比度打平处（合成扫描的 0.005%，可读性相同，无内置主题落在那） | `src/config/theme.rs`、`src/app/theme.rs`、`src/ui.rs`、`src/ui/contrast_audit.rs` |
+| 桌面通知 | 只用 `OSC 9`（单串正文） | kitty 走其自有的 `OSC 99`：标题与正文分开（`p=`）、Base64 负载（`e=1`）、`f=` 声明应用名便于过滤、`i=`/`d=` 分块并避免堆叠 | kitty 官方文档：kitty 实现 `OSC 99`，同时**兼容**旧式 `OSC 9`；其余终端保持 `OSC 9` **逐字节不变**（有测试钉住） | `src/utils/terminal/`（按主题分成 capability / color / background / sequences） |
 | 网络超时 | 只有 `ncm-api` 设了 30s；搜索、封面下载、音频流**一处超时都没有** | 统一 `connect_timeout` 10s + `read_timeout` 30s；短请求另加 30s 总时限 | **音频流刻意不加总超时**（会截断正在播放的下载）—— 用 34 秒持续下载的探针实证不会被切断；`read_timeout` 是每次读的超时、读完即重置，语义已在 reqwest 源码里核实 | `src/app/builder.rs` |
 | 页面结构 | 绘制分发、页面按键、键位表三处各自维护 | 一张表：`PageSpec { name, key, render }` + `Page::spec()/opened_by()/on_key()` | 新增一个页面从改 **9 个文件降到 2 个**；`ui.rs` 生产代码里的页面匹配臂 5 → 0、`layout.rs` 3 → 0；等价性用旧/新代码各渲染 14 个场景比对缓冲区哈希验证 | `src/state/page.rs`、`src/ui.rs`、`src/layout.rs` |
 | 铺底色 | `Block::default().style(bg)`（用一个无边界的 `Block` 只为刷背景） | `Fill::new(" ")` | `Fill` 的渲染就是 `set_symbol + set_style`，像素等价；换完之后编译器指出 `Block` 在该文件已无其它用途 | `src/ui.rs` |
@@ -37,6 +37,28 @@
   网易云一个源；代理目标键随之删除，并入唯一的 `proxy`（旧文件由 `config_version` v1 → v2
   迁移处理）。记在这里而不是悄悄删掉：上面「网络超时」一行里指向兜底 crate 的位置已不存在，
   那一行记录的是当时的改动。
+- **终端 / IPC / 播放设备三个"万能模块"按主题拆开（2026-09-22）**：`utils/terminal.rs`(1483 行)
+  → `capability`（能力探测、图像协议、光标）/ `color`（颜色数学与调色板）/ `background`（明暗
+  探测，unix 与 windows 各自 `#[cfg]` 模块）/ `sequences`（转义序列发射）；`ipc.rs`(1100 行) →
+  协议 + `transport`（平台差异只存在于 transport，协议半边不再有 `cfg`）；`player.rs` 的 Linux
+  ALSA stderr 守卫 → `player/device.rs`，照 `exclusive.rs` 的 `#[cfg] mod imp` 形状。公开路径由
+  facade 重导出保持不变，**调用点零改动**（`git diff` 未触及任何使用方）。代价：模块内多了一层
+  `super::super::`，test-only 的 re-export 需要一处 `#[allow(unused_imports)]`（注释说明原因）。
+- **按键类型出栈（2026-09-22）**：应用自有 `key::{KeyPress, KeyCode, Modifiers}`，翻译只在事件
+  边界（`app::event`）发生一次；`input` / `state` / `ui` 的签名里不再出现终端库的类型，
+  crossterm 的键类型只剩 `key.rs`（转换）与 `app/event.rs`（边界）。依据：按键是应用自己的
+  词汇，不该由终端库定义。代价：Super / Hyper / Meta 不再区分（没有任何绑定用到它们），
+  `modifiers == KeyModifiers::CONTROL` 的严格含义改由 `is_ctrl_only()` 表达。
+- **`ui.rs` 的测试仪表拆出（2026-09-22）**：`shots`（自绘预览图）、`contrast_audit`、
+  `theme_background`、`frame_bench` 各成一个文件，`ui.rs` 1003 → 444 行只留 shell。测试路径与
+  `#[ignore]` 全保留；**预览图无需重生成**（五个场景都不含活动搜索框，也不含已删除的第三方队列
+  标签，逐张核对过）。
+- **配置迁移改成"启动即重写"（2026-09-22）**：`config_version` 升级以前只改内存、等下一次
+  `save()` 才落盘 —— 于是被新 schema 删掉的键会一直躺在用户的文件里。现在 `migrate_from` 报告
+  是否升级过，`load_from` 在**备份之后**当场按新 schema 重写**加载时那个文件**（不是 `save()`
+  自己的目录），并沿用 `save()` 的空文档保护。已经是当前版本的文件一个字节都不动（手写注释
+  因此保留），来自更新版本、以及解析失败的文件同样不动。代价：迁移那一次重写会丢注释（备份里
+  还在），与 `save()` 的行为一致。
 
 ## 二、已否决（附依据）
 
@@ -84,6 +106,10 @@ NCM 协议加密与签名、`:` 小语法解析、缓存淘汰与索引策略、
 RSS 大致是**二进制体积 + 约 3 MB**（1.0 的二进制 11.1 MB），换成 `tracing` 的增量在 +0.3~0.6 MB 之间。
 
 1.1.0 复测（同机、同条件对照 `v1.0.0` 产品产物）：RSS **未上升**（TUI 13.0 / 守护 12.4 MB，对 13.4 / 12.2 MB；本轮未登录、无播放，绝对值低于上表）；二进制 **11,383,424 B**（对 11,119,096 B，**+258 KiB / +2.4%**）。基准本轮未取到可比数字（被测的 `dsp.rs` / `playerbar.rs` / `engine.rs` 相对 1.0.0 零改动，封面基准用的是本机缓存里的另一批真实图），故上表不改。
+
+本次复测（2026-09-22，移除多源兜底 + 三处模块拆分之后，未发版）：同机、同条件，`cargo test --release --lib -- --ignored --nocapture` —— 这条命令在 Linux 上此前**必然失败**（Windows 独占输出那个测试只有 `#[ignore]`、没有平台门禁），本轮给它补上 `#[cfg(windows)]` 之后 10/10 通过：fft 512 / 1024 / 2048 点 **6.03 / 10.48 / 23.33 µs**、hann 2048 点 **13.88 µs**、分析帧（tap + 频谱 + 音高）**134.24 µs**（30 fps 占单核 **0.403%**）、playerbar 整帧 **81.34 µs**（**0.244%**）、空闲主页面整帧 **266.06 µs**（播放时分析流约 30 次/秒 ≈ **0.80%** 单核）、封面 **501.73–708.69 µs/首**、封面旋转 **1062.61–1098.19 µs/角度**（3.6 次/秒 ≈ **0.38–0.40%**）；`styled_text` 解析 0.53 µs（复用缓存后 0.07 µs，**7.8×**）；曲库扫描因本机 `~/Music` 无素材跳过。与上表各行相差 **±3~15%**，而**同一台机器上两次运行（一次受并发编译干扰、一次干净）之间的散布本身就有 ±5~10%**（本轮两次的数字都记在上面这行的量级里），且本轮改动没有落在任何被测热路径上（模块搬运、按键类型在事件边界转换、配置在启动时重写），故按**无回退**记。
+
+资源占用（同机、未登录、无播放）：release 二进制 **10,947,504 B**（对 1.5.0 发布产物 12,941,128 B，**−1,993,624 B ≈ −15.4%** —— 兜底 crate 与它依赖的子模块整体删除）；RSS 采样 24 秒 / 0.2 秒粒度：TUI **13.8 MB**、守护进程（`-d`）**12.4 MB**，两者**启动峰值 = 稳态**、窗口内无增长（守护进程与 1.1.0 的 12.4 MB 一致）。
 
 二进制体积：整条日志栈换新后 **11.1 MB**（换之前 10.8 MB）。完整变更记录见 [CHANGELOG](./CHANGELOG.md)；**每项框架调整的改前改后、依据与代价（含被否决的候选）见 [FRAMEWORK.md](./FRAMEWORK.md)**。
 

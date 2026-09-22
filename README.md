@@ -73,7 +73,7 @@ boxpigma 把网易云音乐与本地音频播放带进终端：流式播放、�
 - **UI 内部结构**：页面分发、页面按键与键位表合并为一张表（新增一个页面从改 9 个文件降到 2 个）；铺底色改用 `Fill`
 - **主题内部**：WCAG 亮度与对比度改用 `palette`，全仓只剩一处颜色数学；`default_theme = "random"` 每次启动随机挑一个、`:theme random` 立刻重掷；主题名排序固定，`:theme` 循环顺序不再随进程变化
 - **启动画面**：字形取自 FIGlet 字体 `Calvin S`，一次渲染后作为常量内嵌（运行时不带字体依赖）
-- **配置**：`config_version` 版本号，旧文件加载时自动升级并把原文件备份为 `config.toml.bak-v0`
+- **配置**：`config_version` 版本号，旧文件加载时自动升级、备份为 `config.toml.bak-v{旧版本}` 并当场重写为新 schema
 
 **二、增量差异**（可被上游采纳或替代；挑上游提交时优先看这一类）
 
@@ -87,7 +87,7 @@ boxpigma 把网易云音乐与本地音频播放带进终端：流式播放、�
 
 > 该项目仅供学习与研究使用。
 
-**升级提示：`config.toml` 现在带 `config_version`，旧文件（没有该字段，按 v0 处理）在加载时会自动升级，并把原文件备份为 `config.toml.bak-v0`；反之，来自更新版本的配置文件按原样使用（未识别的字段忽略，不会被降级覆盖）。**
+**升级提示：`config.toml` 现在带 `config_version`。旧文件（缺少该字段的按 v0 处理）在加载时会自动升级：先把原文件备份为 `config.toml.bak-v{旧版本}`，然后当场按新 schema 重写 —— 新版本删掉的键不会再留在你的文件里，而不是等到下一次保存。已经是当前版本的文件一个字节都不动（手写的注释因此保留）；来自更新版本的文件同样按原样使用（未识别的字段忽略，不会被降级覆盖）。**
 
 **[配置参考](./config.example.toml)**
 
@@ -157,7 +157,7 @@ boxpigma 把网易云音乐与本地音频播放带进终端：流式播放、�
   </tr>
 </table>
 
-它们是**应用自己画出来的**：`src/ui.rs` 里的 `shots` 会把整页渲染到离屏缓冲（就是测试用的那个 `TestBackend`），再导出 HTML 栅格化——所以 UI 一变就能重新生成，也不会带上任何人的账号信息（顶栏是未登录态）。终端支持图形协议（kitty / iTerm2 / sixel）时播放条才会显示封面。
+它们是**应用自己画出来的**：`src/ui/shots.rs` 里的 `shots` 会把整页渲染到离屏缓冲（就是测试用的那个 `TestBackend`），再导出 HTML 栅格化——所以 UI 一变就能重新生成，也不会带上任何人的账号信息（顶栏是未登录态）。终端支持图形协议（kitty / iTerm2 / sixel）时播放条才会显示封面。
 
 
 ## Install
@@ -482,7 +482,7 @@ Send-boxpigma '{"cmd":"msg","action":{"action":"volume","absolute":0.75}}'  # �
 
 | 项 | 作用 |
 | --- | --- |
-| `config_version` | 配置版本；旧文件加载时自动升级，并把原文件备份为 `config.toml.bak-v0` |
+| `config_version` | 配置版本；旧文件加载时自动升级（先备份为 `config.toml.bak-v{旧版本}`，再当场重写为新 schema）；已经是当前版本的文件不会被重写 |
 | `default_theme` / `light_theme` | 暗色/浅色槽位的主题名；可写 `"random"` 每次启动随机挑一个 |
 | `background` | `auto`（跟随终端背景）/ 强制 `dark` 或 `light` |
 | `[panes]` | 面板尺寸与折叠（`topbar` / `navigation` / `playerbar` / `mv` 的格数，`collapsed` 列出折叠掉的面板；鼠标拖框内边界改尺寸、双击折叠/还原） |
