@@ -561,7 +561,7 @@ git clone https://github.com/GBLMX/pigma.git
 cd pigma
 cargo run                                             # 交互界面
 cargo test --locked --workspace --all-features
-cargo clippy --locked --workspace --all-targets
+cargo clippy --locked --workspace --all-targets -- -D warnings   # 警告即失败（CI 同）
 cargo test --release --lib -- --ignored --nocapture   # 性能基准
 cargo +nightly fmt
 ```

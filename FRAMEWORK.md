@@ -75,6 +75,7 @@
 | 一批未经验证的音频 crate（`oximedia-audio`、`oxideav-flac`、`oxiaudio-dsp`、`libflo-audio`、`oxideav-sysaudio`、`audio_engine_core`、`fast-audio-resampler`、`lanczos-resampler`、`resample`、`coupler`、`rsynth`） | crates.io 下载量实测 **49 – 7,299**（最低的 `audio_engine_core` 49、`oxideav-sysaudio` 97），无一经过生态验证；同功能都有成熟选择（`rubato` 11.4M、`ebur128` 949k、`biquad` 387k） |
 | 三个查无实物的名字（`InfiniteDSP`、`tpt-dsp`、`math_audio_iir_fir`） | crates.io 与 GitHub 均查无对应可用项目；`nih-plug` 确有 2,973★ 但**不在 crates.io**，只能 git 依赖 —— 插件宿主不是当前要做的事 |
 | `insta` 快照测试 / `criterion` 基准 | `criterion` 被项目自己的注释拒绝过（"Criterion would be a dependency tree for a handful of numbers"，见 `lib.rs` 的 `bench_util`），本仓库自带的 `#[ignore]` 基准已够；`insta` **尚未采纳** —— 把 60 余条 `TestBackend` 渲染测试快照化是候选，但目前没有量到的问题驱动它 |
+| `cargo doc` 的链接告警当 CI 守卫 | **暂不上，等链接本身修干净**：实测 `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps` 报 **11 条真实诊断**（6 条"公开文档链到私有项"、4 条未解析链接、1 条冗余显式链接目标），散在 10 个文件（含 `crates/ncm-api`）。`--document-private-items` 只能消掉那 6 条、剩下 5 条照样红，而且它把私有实现发布成公开文档 —— 那是产品决定，不是 lint 修复。同一轮把 **clippy 警告**升成守卫则是可行的（本机 `cargo clippy --workspace --all-targets -- -D warnings` 已 0 诊断） |
 
 **继续自己写的（成熟库确实不提供 / 换了会改契约）**：终端协议兜底判定（kitty/ghostty/sixel/tmux）、
 封面圆形 alpha 遮罩、OSC 11 背景亮度、16/256 色量化、本地 DSP（FFT/YIN —— **分析侧**仍自写；输出侧的重采样 / EQ / 响度改用上面三个库，两者目的不同：一个只看不改，一个改），卡拉 OK 逐字符着色、

@@ -99,7 +99,13 @@ jobs:
         with:
           # Cover the workspace members (`crates/ncm-api`) as well:
           # a package-only clippy run never looked at them.
-          args: --workspace --all-targets
+          #
+          # The `-- -D warnings` after the workspace flags is how the action takes rustc flags:
+          # it builds `cargo clippy --message-format=json <args>`, putting its own
+          # `--message-format` *before* these args precisely because `-D warnings` belongs at the
+          # end. A warning therefore becomes an error, clippy exits non-zero, and the action
+          # fails the step — a lint can no longer land on `main` unpunished.
+          args: --workspace --all-targets -- -D warnings
   build-aarch64:
     name: build linux/aarch64
     needs: skip-check

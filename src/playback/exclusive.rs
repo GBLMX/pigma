@@ -23,7 +23,22 @@ use rodio::Source;
 /// Float first: the chain works in `f32` and the device almost always takes it natively, so the
 /// bit-perfect case needs no conversion at all. 16-bit PCM is the fallback for the devices that
 /// only accept it.
+// A note on the `expect(dead_code)` attributes below, since there are several. `imp` — the
+// Windows implementation — is the only *production* caller of the conversion and rate
+// negotiation; everywhere else `probe`/`start` report the platform unsupported before they
+// reach any of it, so the lint is right that these items have no caller. They stay compiled
+// rather than being `cfg`-ed away because the logic is platform-neutral and the tests at the
+// bottom of this file exercise it on every platform. That is also why the expectation is
+// dropped when `test` is on: there the tests *are* the caller, so the lint does not fire and
+// an `expect` would be unfulfilled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(
+    not(any(windows, test)),
+    expect(
+        dead_code,
+        reason = "only the Windows device description constructs them; the tests that do run everywhere"
+    )
+)]
 pub(super) enum DeviceSample {
     Float32,
     Int16,
@@ -38,6 +53,13 @@ pub(super) struct Format {
 }
 
 impl DeviceSample {
+    #[cfg_attr(
+        not(any(windows, test)),
+        expect(
+            dead_code,
+            reason = "`encode` is the only caller, and `encode` has no non-test caller off Windows"
+        )
+    )]
     fn bytes(self) -> usize {
         match self {
             DeviceSample::Float32 => 4,
@@ -50,6 +72,13 @@ impl DeviceSample {
 ///
 /// This is the only place the samples change shape, and for a float device it is a copy: the
 /// bit-perfect path is a `memcpy` of what the chain produced.
+#[cfg_attr(
+    not(any(windows, test)),
+    expect(
+        dead_code,
+        reason = "the Windows player is the only production caller; the tests here cover it everywhere"
+    )
+)]
 pub(super) fn encode(samples: &[f32], format: Format, out: &mut Vec<u8>) {
     out.clear();
     out.reserve(samples.len() * format.sample.bytes());
@@ -76,6 +105,13 @@ pub(super) fn encode(samples: &[f32], format: Format, out: &mut Vec<u8>) {
 /// is as close to a straight wire as a chain gets. The device's own rate is the fallback — it is
 /// what the mixer is running right now, so it is the most likely to be accepted when the first
 /// attempt is not.
+#[cfg_attr(
+    not(any(windows, test)),
+    expect(
+        dead_code,
+        reason = "only the Windows device negotiation offers these rates; the tests cover the order here"
+    )
+)]
 pub(super) fn candidate_rates(device_rate: u32, preferred_rate: u32) -> Vec<u32> {
     let mut rates = Vec::with_capacity(2);
     for rate in [preferred_rate, device_rate] {
@@ -121,6 +157,13 @@ struct Shared {
     rate: u32,
 }
 
+#[cfg_attr(
+    not(windows),
+    expect(
+        dead_code,
+        reason = "nothing on this platform builds a `Shared`: `start` reports the platform unsupported before it would, and no test constructs one"
+    )
+)]
 impl Shared {
     fn new(rate: u32, volume: f32) -> Self {
         Self {

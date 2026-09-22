@@ -87,7 +87,7 @@
   cargo +nightly fmt          # Windows 上加：-- --config newline_style=Windows
   ```
 
-  stable 的 `cargo fmt` **看不到**这些选项，会把未格式化的树报成"没问题"，而 CI 会红——`.githooks/pre-commit` 就是为这件事存在的：它跑与 CI 相同的检查，失败时就地格式化并拦下这次提交。另外运行 `cargo clippy --workspace --all-targets --all-features`。
+  stable 的 `cargo fmt` **看不到**这些选项，会把未格式化的树报成"没问题"，而 CI 会红——`.githooks/pre-commit` 就是为这件事存在的：它跑与 CI 相同的检查，失败时就地格式化并拦下这次提交。另外运行 `cargo clippy --workspace --all-targets --all-features -- -D warnings`（CI 现在把 clippy 警告当失败，本地照这个跑就不会红）。
 - **提交信息格式**：必须遵循 [约定式提交](https://www.conventionalcommits.org/) 规范。这有助于自动生成变更日志（我们使用 `git-cliff`）。
   - 格式：`<类型>: <简短描述>`，如 `feat: 添加用户登录接口`、`fix: 修复内存泄漏问题`。
   - 允许的类型：`feat`、`fix`、`docs`、`style`、`refactor`、`perf`、`test`、`chore`。
