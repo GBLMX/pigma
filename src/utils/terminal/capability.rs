@@ -298,11 +298,13 @@ pub fn color_mode_from(lookup: impl Fn(&str) -> Option<String>) -> ColorMode {
 mod terminal_mode_tests {
     use std::collections::HashMap;
 
-    use super::super::{
-        begin_synchronized_update, disable_terminal_modes, enable_terminal_modes,
-        end_synchronized_update,
+    use super::{
+        super::{
+            begin_synchronized_update, disable_terminal_modes, enable_terminal_modes,
+            end_synchronized_update,
+        },
+        *,
     };
-    use super::*;
 
     fn env_of(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
         let map: HashMap<String, String> = pairs

@@ -152,8 +152,7 @@ pub fn end_synchronized_update<W: Write>(out: &mut W) -> io::Result<()> {
 
 #[cfg(test)]
 mod notification_tests {
-    use super::super::CursorStyle;
-    use super::*;
+    use super::{super::CursorStyle, *};
 
     /// `OSC 9` is the form the terminals implement, and the payload is remote data: a `BEL`
     /// or `ESC` in a song title would otherwise end the sequence early or start another one.

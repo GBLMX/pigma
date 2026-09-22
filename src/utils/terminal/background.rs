@@ -204,11 +204,13 @@ fn detect_background() -> Background {
 mod tests {
     use ratatui::style::Color;
 
-    use super::super::{
-        ANSI_16, ColorMode, background_from_luminance, color_luminance, color_mode_from,
-        palette_rgb, rgb_to_16, rgb_to_256,
+    use super::{
+        super::{
+            ANSI_16, ColorMode, background_from_luminance, color_luminance, color_mode_from,
+            palette_rgb, rgb_to_16, rgb_to_256,
+        },
+        *,
     };
-    use super::*;
 
     #[cfg(target_os = "linux")]
     use super::unix::query_background_on_tty;
