@@ -13,17 +13,11 @@
 //!   implements (`ACTIONS`) and the endpoint it listens on. Read-only, so it
 //!   answers even before login or with nothing loaded.
 //!
-//! Transport is platform-specific: a Unix domain socket at
-//! `~/.cache/boxpigma/boxpigma.sock` on Linux/macOS, and a named pipe `\\.\pipe\boxpigma`
-//! on Windows. The endpoint is user-scoped so no authentication is needed.
+//! The endpoint the listener sits on, and the streams the two sides talk over, are the
+//! `transport` module's business. Nothing here branches on the platform, so the protocol is
+//! the same whether that endpoint is a Unix socket or a named pipe.
 
-#[cfg(unix)]
-use std::fs;
-use std::{
-    cell::RefCell,
-    path::{Path, PathBuf},
-    sync::{Arc, Mutex, OnceLock},
-};
+use std::sync::{Arc, Mutex};
 
 use color_eyre::eyre::{OptionExt, WrapErr};
 use serde::{Deserialize, Serialize};
@@ -32,19 +26,18 @@ use tokio::{
     sync::{broadcast, mpsc},
 };
 
-#[cfg(unix)]
-use crate::utils::boxpigma_cache_dir;
 use crate::{
     event::{AppEvent, Event},
     playback::PlayMode,
 };
 
-/// Socket file name inside `boxpigma_cache_dir()` (Unix only).
-pub const SOCKET_FILE: &str = "boxpigma.sock";
+mod transport;
 
-/// Default named-pipe name on Windows.
-#[cfg(windows)]
-const PIPE_NAME: &str = r"\\.\pipe\boxpigma";
+use transport::{ClientStream, IpcListener, client_connect, resolve_socket_path};
+
+pub use transport::{
+    IpcServerGuard, SOCKET_FILE, remove_socket, set_socket_path, set_socket_path_override,
+};
 
 /// Request sent from the CLI to the running TUI.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -492,169 +485,6 @@ impl SearchEntry {
     }
 }
 
-fn socket_path() -> PathBuf {
-    #[cfg(unix)]
-    {
-        boxpigma_cache_dir().join(SOCKET_FILE)
-    }
-    #[cfg(windows)]
-    {
-        PathBuf::from(PIPE_NAME)
-    }
-}
-
-thread_local! {
-    static SOCKET_OVERRIDE: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
-}
-
-/// Process-wide socket-path override (set once by the CLI's `--socket` flag).
-/// The thread-local test override, when present, still takes precedence.
-static SOCKET_GLOBAL: OnceLock<PathBuf> = OnceLock::new();
-
-/// Override the socket path for this thread (used by integration tests, which
-/// each bind their own socket so they can run in parallel). Safe because the
-/// override is thread-local.
-#[doc(hidden)]
-pub fn set_socket_path_override(path: Option<PathBuf>) {
-    SOCKET_OVERRIDE.with(|c| *c.borrow_mut() = path);
-}
-
-/// Override the socket path process-wide (used by the CLI `--socket` flag so a
-/// daemon and the `status`/`msg` commands can address a non-default instance).
-pub fn set_socket_path(path: Option<PathBuf>) {
-    if let Some(p) = path {
-        let _ = SOCKET_GLOBAL.set(p);
-    }
-}
-
-/// Resolve the socket path: a thread-local override if set, otherwise the
-/// process-wide override, otherwise the default location under `boxpigma_cache_dir()`.
-fn resolve_socket_path() -> PathBuf {
-    SOCKET_OVERRIDE
-        .with(|c| c.borrow().clone())
-        .unwrap_or_else(|| SOCKET_GLOBAL.get().cloned().unwrap_or_else(socket_path))
-}
-
-/// The stream a client connects with (Unix socket on unix, named pipe on
-/// Windows).
-#[cfg(unix)]
-type ClientStream = tokio::net::UnixStream;
-#[cfg(windows)]
-type ClientStream = tokio::net::windows::named_pipe::NamedPipeClient;
-
-/// Connect to the running instance's listener endpoint.
-async fn client_connect(path: &Path) -> std::io::Result<ClientStream> {
-    #[cfg(unix)]
-    {
-        ClientStream::connect(path).await
-    }
-    #[cfg(windows)]
-    {
-        tokio::net::windows::named_pipe::ClientOptions::new().open(path.to_string_lossy().as_ref())
-    }
-}
-
-/// Platform-specific listener for the IPC server. On Windows a named pipe is
-/// re-created for every connection, so `next()` holds the pipe name rather than
-/// a persistent handle.
-enum IpcListener {
-    #[cfg(unix)]
-    Unix(tokio::net::UnixListener),
-    #[cfg(windows)]
-    Pipe { name: String },
-}
-
-/// Restrict the IPC socket to its owner. The endpoint is user-scoped (see the module docs),
-/// so no other account needs access; the process umask would otherwise leave it reachable
-/// by group/other.
-#[cfg(unix)]
-fn restrict_socket(path: &std::path::Path) {
-    use std::os::unix::fs::PermissionsExt;
-    if let Err(e) = fs::set_permissions(path, fs::Permissions::from_mode(0o600)) {
-        log::warn!(
-            "ipc: failed to restrict permissions of {}: {e}",
-            path.display()
-        );
-    }
-}
-
-/// Bind the listener, clearing any stale file left by a previous run on Unix.
-/// Returns `None` when another boxpigma instance already holds the endpoint.
-impl IpcListener {
-    fn bind() -> Option<Self> {
-        let path = resolve_socket_path();
-        #[cfg(unix)]
-        {
-            if let Some(dir) = path.parent() {
-                let _ = fs::create_dir_all(dir);
-            }
-            match tokio::net::UnixListener::bind(&path) {
-                Ok(listener) => {
-                    restrict_socket(&path);
-                    Some(Self::Unix(listener))
-                }
-                Err(_) => {
-                    // Either a live instance owns the socket or it is stale.
-                    // A non-blocking connect probe tells us which: if we can
-                    // connect, another instance is running and we must not
-                    // steal the socket.
-                    if std::os::unix::net::UnixStream::connect(&path).is_ok() {
-                        log::warn!(
-                            "ipc: another boxpigma instance already owns {}",
-                            path.display()
-                        );
-                        return None;
-                    }
-                    let _ = fs::remove_file(&path);
-                    let listener = tokio::net::UnixListener::bind(&path).ok();
-                    if listener.is_some() {
-                        restrict_socket(&path);
-                    }
-                    listener.map(Self::Unix)
-                }
-            }
-        }
-        #[cfg(windows)]
-        {
-            let name = path.to_string_lossy().into_owned();
-            match tokio::net::windows::named_pipe::ServerOptions::new().create(&name) {
-                Ok(_) => Some(Self::Pipe { name }),
-                Err(e) => {
-                    // Windows releases the pipe name when the owning process
-                    // exits, so a failed bind always means a live instance.
-                    log::warn!("ipc: another boxpigma instance already owns the pipe {name}: {e}");
-                    None
-                }
-            }
-        }
-    }
-
-    /// Wait for the next incoming connection, returning the accepted stream.
-    async fn next(&mut self) -> Option<AcceptedStream> {
-        match self {
-            #[cfg(unix)]
-            Self::Unix(l) => l.accept().await.ok().map(|(stream, _)| stream),
-            #[cfg(windows)]
-            Self::Pipe { name } => {
-                // A fresh server instance per connection; after a client
-                // attaches, that instance becomes the connection stream.
-                let server = tokio::net::windows::named_pipe::ServerOptions::new()
-                    .create(name)
-                    .ok()?;
-                server.connect().await.ok()?;
-                Some(server)
-            }
-        }
-    }
-}
-
-/// The stream accepted by the server (Unix socket on unix, named pipe on
-/// Windows).
-#[cfg(unix)]
-type AcceptedStream = tokio::net::UnixStream;
-#[cfg(windows)]
-type AcceptedStream = tokio::net::windows::named_pipe::NamedPipeServer;
-
 /// Start the IPC server for the running TUI.
 ///
 /// Spawns a background task that accepts connections, answering `status` and
@@ -698,35 +528,6 @@ pub fn start_server(
     });
     log::info!("ipc: listening on {}", path.display());
     IpcServerGuard::new(true)
-}
-
-/// Removes the Unix socket file on drop (clean shutdown of the TUI).
-/// On Windows the OS releases the pipe name automatically, so nothing to do.
-pub struct IpcServerGuard {
-    #[cfg_attr(windows, allow(dead_code))]
-    remove_on_drop: bool,
-}
-
-impl IpcServerGuard {
-    fn new(remove_on_drop: bool) -> Self {
-        Self { remove_on_drop }
-    }
-}
-
-impl Drop for IpcServerGuard {
-    fn drop(&mut self) {
-        #[cfg(unix)]
-        if self.remove_on_drop {
-            let _ = fs::remove_file(resolve_socket_path());
-        }
-    }
-}
-
-/// Remove the Unix socket file unconditionally (used on shutdown paths where
-/// the guard may already be dropped). No-op on Windows.
-pub fn remove_socket() {
-    #[cfg(unix)]
-    let _ = fs::remove_file(resolve_socket_path());
 }
 
 async fn handle_connection<S>(
