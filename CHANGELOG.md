@@ -1,4 +1,10 @@
-## [Unreleased]
+## [1.6.0] - 2026-09-22
+
+### 🚀 Features
+
+- *(ipc)* **`boxpigma msg` 新增两个动作：`seek` 与 `clear`**，语义直接复用命令层（`:seek` / `:clear`）而不是另写一份 —— 跳转吃 `+15` / `-30` / `50%` / `90` 四种写法，清空队列等价于 `:clear`。seek 的**值语法**抽成一份共享解析（`playback::seek::parse_seek`），`:seek` 与 CLI 共用，于是 `msg seek abc` **在客户端就被拒绝**：此前它会被送到实例里、只弹一条调用方看不见的提示，而动作回包照样是 `{"ok":true}` —— 与 `msg play abc` / `msg volume 150` 的行为对齐；顺带把 `f64` 能解析的 `nan`/`inf` 挡在门外（NaN 会污染进度，之后每一帧都受影响）。两个动作都出现在 `capabilities`、`msg --help` 与补全里（同一张表生成）
+- *(systemd)* **systemd 用户单元**（`systemd/boxpigma.service`）：README 的 Plan 里缺的这一项。`Type=simple`、`Restart=on-failure`，`KillSignal=SIGTERM` 沿用守护进程自己的保存逻辑，所以 `systemctl --user stop` 与注销登录都不丢进度；`ExecStart` 默认对应安装脚本的布局，README 写了另外两种安装怎么改，以及 `loginctl enable-linger` 让其未登录也常驻
+- *(config)* **配置迁移改为"就地编辑用户自己的文档"**：迁移现在只在 schema 要求的地方动用户的文件 —— 删掉新 schema 已经没有的键、就地改写 `config_version`（沿用该行原有的行尾注释与间距），值、顺序、缩进与**手写注释逐字保留**。判据不另造键表：某个键还算不算 schema 的，交给 `Config` 自己的 `Deserialize` 回答（四种形状的探针值全被忽略即为已删除），迁移后的文本还会被回读成 `Config`，于是"跑的就是文件现在说的"
 
 ### 🐛 Bug Fixes
 
@@ -6,6 +12,39 @@
   - `Esc` 关不掉：`Esc` 的页面特例从主键位表移走后，歌手页补上了自己的层而**设置页漏了**，于是落到「面包屑返回」——而设置页不在面包屑栈里，返回无事发生。现在它自己的层里处理 `Esc`（页面切换而非 restore）。回归测试先验证过：撤掉修复即失败（`left: Settings / right: Main`）
   - `Tab` 无意义：以前落到全局的「切换导航区块」，动的是页面**背后**的侧栏。现在 `Tab`/`⇧Tab` 在「分组列 ↔ 条目列」之间切换焦点，`↑↓` 跟随焦点走（分组列上走分组、条目列上走条目），分组列上 `→`/`Enter` 进入该组条目；两列各自显示自己的选中态（当前焦点列用强调色加粗，另一列只留强调色）
   - 鼠标完全不响应：页面现在在绘制时登记**命中区**（分组列与条目列各一行一个），主分发按页路由点击与滚轮——点分组跳到该组、点条目选中它、**在同一条目上再点一次即切换该项**、滚轮移动光标（与其它列表一致，走完会绕回）。命中区是「当前显示的那一组」的行，所以点击位置要经该组换算回全表下标（这一条是测试抓出来的）
+
+- *(config)* **`config.example.toml` 的 4 个歌词键其实从来没生效**：`lyric_gradient` / `lyric_style` / `lyric_ktv_color` / `lyric_translation` 写在 `[notify]` 表头之后 —— TOML 里它们因此属于那张表，而 `NotifyConfig` 没有这几个字段，serde 一直静默忽略。搬到第一个表头之前（顶层区）即修好
+- *(terminal)* **Windows 控制台探测的两个条目对父模块可见**：拆模块时漏了 `pub(crate)`，非 Windows 构建因此报 unused 告警
+
+### 🚜 Refactor
+
+- **[breaking] 移除多源兜底（`sonar` / `y7dl`），只保留网易云与本地**：删掉两个子模块与它们的 crate（含 `.gitmodules`、workspace 成员、依赖与 examples），播放链收敛为 **NCM → 云盘**（一次重试与"云盘未命中时报 NCM 错误"的优先级逐字保留），移除第三方搜索（`SearchProvider`、搜索栏 provider 段与 `Tab` 切换、第三方搜索队列），缓存里的 `thirdparty` 标记与 `thirdparty_source.json` 取消（磁盘上的旧条目与旧队列 id 降级为忽略），配置 v1 → v2 删除 `[source_fallback]` 与 `proxy_target`（`normal` 迁移为直连，`reversed`/`both` 保留 `proxy`）。**已发布的消费者不受影响**：`msg search` 的 `source` 字段留在契约里（恒为 `netease`），本地文件 id 的掩码保留（id 已写进磁盘队列）
+- *(terminal,ipc,playback)* **按主题拆开终端 / IPC / 播放设备三个"万能模块"**：`utils/terminal.rs`(1483 行) 拆成能力探测 / 颜色 / 背景 / 图像等，`ipc` 与 `playback` 的同类拆分跟上；纯搬运，行为不变
+- *(input,state,ui)* **按键类型出栈，crossterm 只留在事件边界**：应用自有 `key::{KeyPress, KeyCode, Modifiers}`，翻译只发生在事件边界，于是键位表与各处分发不再依赖终端库的类型
+- *(ui)* **`ui.rs` 的测试仪表拆出**：`shots` / `contrast_audit` / `theme_background` / `frame_bench` 各成一个文件，`ui.rs` 1003 → 444 行只留外壳
+- *(config)* **配置迁移改成"启动即重写"**：`config_version` 升级以前只改内存、等下一次 `save()` 才落盘，于是被新 schema 删掉的键一直躺在用户的文件里 —— 现在迁移在备份之后当场升级**加载时那个文件**（不是 `save()` 自己的目录），并沿用空文档保护；已是当前版本、来自更新版本、解析失败的文件都不动
+
+### 🧪 Testing
+
+- *(playback)* **音频链基准 `chain_bench`**：解码 → 重采样 → EQ + EBU R128 逐段量出开销（解码 **414.60–433.24 µs/音频秒**、加重采样 **902.03–1001.49**、再加 EQ 与响度 **1898.94–2007.04**，整条 ≈ **0.19–0.20% 单核**；同长度内存源对照 44.80–46.23 说明几乎没有"框架税"）
+- *(ipc)* **`ipc` 新增文档与动作表对齐的守卫**：每个已发布动作都必须在 README 与 SKILLS 里留下痕迹（今天正是这条守卫对账出 README 缺 `:clear` 与 `msg capabilities` 两行）
+- *(playback)* **Windows 独占输出测试加平台门禁**：它此前只有 `#[ignore]`、没有 `#[cfg(windows)]`，于是 `cargo test --release --lib -- --ignored` 这条"用来复现性能数字"的命令在 Linux 上**必然失败**
+
+### 📚 Documentation
+
+- *(page)* 安装说明补上版本化布局（`releases/` + `current` + `install.lock`）与 `--rollback`
+- README / SKILLS：`msg seek` / `msg clear` 的用法与示例、`msg capabilities` 补进 msg 表、Plan 勾选
+- FRAMEWORK：记录音频路径实测，以及配置迁移两轮调整的改前改后、依据与代价
+
+### 🎨 Styling
+
+- *(terminal)* 三个终端模块的 `use` 块按 nightly rustfmt 收拢；`config` 按 clippy 合并嵌套 `if`；迁移那批新代码按 rustfmt 收拢
+
+### ⚙️ Miscellaneous Tasks
+
+- *(ci)* **CI 把 clippy 警告当守卫**：clippy job 一直在"报告"（只有退出码非 0 才判红，而 clippy 对 warning 默认退出 0），现在 `args` 末尾加 `-- -D warnings`；同时清掉它立刻拦下的 5 条 —— 全在 `playback/exclusive.rs`，该文件的实体是 `#[cfg(windows)]` 的 WASAPI 实现，纯逻辑在 Linux 上"看起来死"，改用带 reason 的 `expect(dead_code)` 精确门禁（删掉等于弄坏 Windows 独占输出）。本地命令与 CI 对齐（README / CONTRIBUTING）
+- *(pages)* Pages workflow 自行开启 Pages（`enablement: true`），省掉仓库设置里的手工一步
+- *(pkg)* `PKGBUILD` 的版本与校验和升到已发布的 1.5.0
 
 ## [1.3.0] - 2026-09-21
 
