@@ -7,8 +7,6 @@
 
 use std::sync::Arc;
 
-use rodio::cpal::traits::{DeviceTrait, HostTrait};
-
 use super::{DeviceHealth, stream_error_callback};
 
 /// Open the audio device while suppressing ALSA stderr noise (Linux only).
@@ -50,6 +48,9 @@ fn open_sink_impl(
         target_os = "dragonfly",
     ))]
     {
+        // Only this block talks to cpal directly; elsewhere the traits are not in scope.
+        use rodio::cpal::traits::{DeviceTrait, HostTrait};
+
         let host = rodio::cpal::default_host();
         if let Ok(devices) = host.devices() {
             let list: Vec<_> = devices.collect();

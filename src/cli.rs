@@ -15,6 +15,7 @@ use crate::{
     ipc::{self, ActionKind, ControlAction, MsgAction, QueryAction, StatusSnapshot},
     logger::init_logger,
     playback::parse_seek,
+    update,
     utils::format_duration,
 };
 
@@ -112,6 +113,33 @@ pub enum Command {
         /// Target shell: bash | zsh | fish | elvish | powershell.
         #[arg(value_parser = ["bash", "zsh", "fish", "elvish", "powershell"])]
         shell: String,
+    },
+    /// Check for and install the latest release in place (self-update).
+    Update {
+        /// Only report the installed version and the latest release.
+        #[arg(long, conflicts_with_all = ["rollback", "force"])]
+        check: bool,
+        /// Release tag to install (`v1.6.0` or `1.6.0`); default `latest`.
+        #[arg(long, value_name = "TAG", default_value = "latest", value_hint = ValueHint::Other)]
+        version: String,
+        /// Install root: the directory holding `releases/` and `current`.
+        #[arg(long, value_name = "DIR", value_hint = ValueHint::AnyPath)]
+        dir: Option<PathBuf>,
+        /// Replace the `https://github.com` prefix (mirrors/proxies).
+        #[arg(long, value_name = "URL", value_hint = ValueHint::Url)]
+        mirror: Option<String>,
+        /// `SHA256SUMS` URL or local file; default the one beside the asset.
+        #[arg(long, value_name = "URL|FILE", value_hint = ValueHint::AnyPath)]
+        checksums: Option<String>,
+        /// Reinstall even when this version is already installed.
+        #[arg(long)]
+        force: bool,
+        /// Print the plan; download nothing, write nothing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Switch `current` back to the previous version.
+        #[arg(long)]
+        rollback: bool,
     },
 }
 
@@ -527,6 +555,29 @@ pub async fn run_cli(mut cli: Cli) -> color_eyre::Result<Option<App>> {
         }
         Some(Command::Completions { shell }) => {
             cli::completions(shell)?;
+            return Ok(None);
+        }
+        Some(Command::Update {
+            check,
+            version,
+            dir,
+            mirror,
+            checksums,
+            force,
+            dry_run,
+            rollback,
+        }) => {
+            update::run(update::Options {
+                check: *check,
+                version: version.clone(),
+                dir: dir.clone(),
+                mirror: mirror.clone(),
+                checksums: checksums.clone(),
+                force: *force,
+                dry_run: *dry_run,
+                rollback: *rollback,
+            })
+            .await?;
             return Ok(None);
         }
         None => {}

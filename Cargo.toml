@@ -42,6 +42,10 @@ color-eyre = "0.6.5"
 crossterm = { version = "0.29.0", features = ["event-stream"] }
 dirs = "7.0.0"
 ebur128 = "0.1.10"
+# `boxpigma update` unpacks the release archive itself (see src/update.rs). The rust backend
+# keeps it pure Rust: no C toolchain is needed to build on MSVC, and the same backend serves
+# `zip`'s deflate below.
+flate2 = { version = "1.1.10", default-features = false, features = ["rust_backend"] }
 futures = { version = "0.3.33", default-features = false, features = ["async-await", "std"] }
 image = { version = "0.25.10", default-features = false, features = ["jpeg"] }
 lofty = "0.25.0"
@@ -59,6 +63,8 @@ rubato = "5.0.0"
 rustls = { workspace = true }
 serde = { workspace = true, features = ["rc"] }
 serde_json = { workspace = true }
+# Verifying the downloaded release against the published `SHA256SUMS` (src/update.rs).
+sha2 = "0.11.0"
 stream-download = { version = "0.24.4", default-features = false, features = ["async-read", "reqwest", "temp-storage"] }
 thiserror = { workspace = true }
 time = { workspace = true, features = ["formatting", "local-offset", "macros"] }
@@ -78,12 +84,17 @@ rustls = { workspace = true }
 # `SIGPIPE` handling (src/cli.rs) is a Unix concern, not a Linux one: Rust ignores the signal on
 # every Unix, so the CLI restores the default everywhere it exists.
 libc = "0.2.189"
+# Release archives are `boxpigma-<target>.tar.gz` on every Unix (see .github/workflows/release.yml).
+tar = "0.4.46"
 
 [target.'cfg(windows)'.dependencies]
 wasapi = "0.24.0"
 # The console's background colour (`GetConsoleScreenBufferInfoEx`, src/utils/terminal.rs):
 # Windows has no `/dev/tty`, and ConPTY does not answer the OSC 11 query the Unix side uses.
 windows-sys = { version = "0.61.2", features = ["Win32_System_Console"] }
+# …and `boxpigma-<target>.zip` on Windows. Only deflate is enabled, which routes through
+# flate2's Rust backend instead of a C zlib.
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 
 # Read the optimization guideline for more details: https://ratatui.rs/recipes/apps/release-your-app/#optimizations
 [profile.release]

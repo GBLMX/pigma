@@ -206,6 +206,21 @@ irm https://raw.githubusercontent.com/GBLMX/pigma/main/install.ps1 | iex
 .\install.ps1 -Dir 'D:\tools\boxpigma' -AddToPath   # -Version / -Checksums / -Mirror / -DryRun / -Force
 ```
 
+### 升级：`boxpigma update`
+
+装过一次之后就不必再跑脚本：`boxpigma update` 把上面那套流程在进程内重做一遍——下载对应资产、按 `SHA256SUMS` 校验、解压进新的 `releases/<版本>-<目标>`，校验通过才切 `current`，切换失败就退回旧链接。需要 shell、curl、tar 的那部分它自己实现了，所以 Windows 上也不必开 PowerShell。
+
+```sh
+boxpigma update                    # 装最新版，保留最近 3 个版本（current 指向的那个永不删）
+boxpigma update --check            # 只看当前版本 / 最新版本，不下载、不写盘、不改 current
+boxpigma update --dry-run          # 只打印计划：下什么、装到哪、校验哪个文件
+boxpigma update --version v1.5.0   # 指定版本（`latest` 之外的都按 tag 下载）
+boxpigma update --rollback         # 切回上一个版本（连按两次会在两个版本间来回）
+boxpigma update --mirror https://ghproxy.example --dir D:\tools\boxpigma
+```
+
+`--mirror` 相当于脚本里的 `--host` / `-Mirror`，`--dir` / `--checksums` / `--force` 与脚本同名参数一致。它只处理 `releases/` 已经存在的目录：**首次安装仍然走上面的脚本**（建目录、写 `PATH`、装 `.cmd` shim 都是脚本的事）。同一个版本已装好时是 no-op，`--force` 重装。
+
 ### Linux / macOS（手动）
 
 ```sh
