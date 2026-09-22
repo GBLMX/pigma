@@ -867,6 +867,34 @@ mod tests {
         }
     }
 
+    /// An action a user cannot find in the docs only exists for whoever wrote it: `seek` and
+    /// `clear` were reachable from `capabilities` before either file mentioned them, and
+    /// `capabilities` itself had no README row at all. README writes whole invocations
+    /// (`boxpigma msg seek +15`), SKILLS writes the name as a span (`seek <VALUE>`), so each file
+    /// is checked in the shape it actually uses.
+    #[test]
+    fn every_published_action_is_documented() {
+        for spec in ACTIONS {
+            for (file, text, needle) in [
+                (
+                    "README.md",
+                    include_str!("../../README.md"),
+                    format!("msg {}", spec.name),
+                ),
+                (
+                    "SKILLS.md",
+                    include_str!("../../SKILLS.md"),
+                    format!("`{}", spec.name),
+                ),
+            ] {
+                assert!(
+                    text.contains(&needle),
+                    "{file} 里找不到 {needle:?} —— 文档落后于动作表"
+                );
+            }
+        }
+    }
+
     /// The catalogue has to be self-consistent: unique names, ascending order
     /// (that order *is* the published one) and a summary for every action.
     #[test]
