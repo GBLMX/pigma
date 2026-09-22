@@ -10,7 +10,6 @@ use super::super::color::rgb_luminance;
 /// index and `ColorTable` carries the palette, which Windows Terminal fills in from the color
 /// scheme the tab was started with. Best effort — a process without a console fails the call
 /// and the caller keeps the dark default.
-#[cfg(windows)]
 pub(super) fn probe_console_background() -> Option<f64> {
     use windows_sys::Win32::System::Console::{
         CONSOLE_SCREEN_BUFFER_INFOEX, GetConsoleScreenBufferInfoEx, GetStdHandle, STD_OUTPUT_HANDLE,
@@ -34,8 +33,7 @@ pub(super) fn probe_console_background() -> Option<f64> {
 }
 
 /// `COLORREF` is `0x00BBGGRR` — green in the middle, which is the opposite of the web order.
-#[cfg(windows)]
-fn console_color_luminance(color: u32) -> f64 {
+pub(super) fn console_color_luminance(color: u32) -> f64 {
     let channel = |shift: u32| f64::from((color >> shift) & 0xFF) / 255.0;
     rgb_luminance(channel(0), channel(8), channel(16))
 }
