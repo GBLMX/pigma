@@ -94,6 +94,14 @@ pub enum MsgAction {
         delta: Option<f64>,
         absolute: Option<f64>,
     },
+    /// Jump within the current track, with the same syntax as the TUI's `:seek`: `+15` and
+    /// `-30` move relative to the position, `90` jumps to second 90, `50%` to that fraction
+    /// of the track.
+    Seek {
+        value: String,
+    },
+    /// Throw the playback queue away — the `:clear` command, i.e. the `w` key.
+    Clear,
     Mode,
     Like,
     Dislike,
@@ -123,6 +131,10 @@ pub enum IpcEvent {
         delta: Option<f64>,
         absolute: Option<f64>,
     },
+    Seek {
+        value: String,
+    },
+    Clear,
     Mode,
     Like,
     Dislike,
@@ -149,6 +161,8 @@ impl From<MsgAction> for IpcEvent {
             MsgAction::SwitchList { endpoint, playlist } => {
                 IpcEvent::SwitchList { endpoint, playlist }
             }
+            MsgAction::Seek { value } => IpcEvent::Seek { value },
+            MsgAction::Clear => IpcEvent::Clear,
         }
     }
 }
@@ -211,6 +225,8 @@ pub(crate) enum ControlAction {
     Dislike,
     ToggleLike,
     SwitchList,
+    Seek,
+    Clear,
 }
 
 /// Request/response actions.
@@ -233,6 +249,13 @@ pub const ACTIONS: &[ActionSpec] = &[
         takes_value: false,
         summary: "Print this contract: API version, program version, actions, endpoint",
         kind: ActionKind::Query(QueryAction::Capabilities),
+    },
+    ActionSpec {
+        name: "clear",
+        aliases: &[],
+        takes_value: false,
+        summary: "Clear the playback queue (the `:clear` command)",
+        kind: ActionKind::Control(ControlAction::Clear),
     },
     ActionSpec {
         name: "dislike",
@@ -296,6 +319,13 @@ pub const ACTIONS: &[ActionSpec] = &[
         takes_value: true,
         summary: "Search songs on NetEase Cloud Music",
         kind: ActionKind::Query(QueryAction::Search),
+    },
+    ActionSpec {
+        name: "seek",
+        aliases: &[],
+        takes_value: true,
+        summary: "Jump in the track (`+15`, `-30`, `50%` or a second; same as `:seek`)",
+        kind: ActionKind::Control(ControlAction::Seek),
     },
     ActionSpec {
         name: "switch-list",
@@ -799,6 +829,12 @@ mod tests {
             ActionKind::Control(ControlAction::SwitchList) => serde_json::json!({
                 "cmd": "msg",
                 "action": { "action": name, "endpoint": "liked" },
+            }),
+            // `seek` is the other action whose value the wire form requires: a bare
+            // `{"action":"seek"}` has nothing to jump to, so the request would be dropped.
+            ActionKind::Control(ControlAction::Seek) => serde_json::json!({
+                "cmd": "msg",
+                "action": { "action": name, "value": "+15" },
             }),
             ActionKind::Control(_) => {
                 serde_json::json!({ "cmd": "msg", "action": { "action": name } })

@@ -31,6 +31,7 @@ use crate::{
     cache::CacheManager,
     config::{Config, ThemeRegistry, init_symbols, symbols},
     event::{AuthEvent, EventHandler},
+    input::ex::ExCommand,
     ipc::{IpcEvent, QueueSnapshot, StatusSnapshot},
     playback::{NCM_SEARCH_QUEUE_KEY, PlaybackEngine},
     service::{ApiEndpoint, ApiService},
@@ -506,6 +507,18 @@ impl App {
                 } else {
                     format!("切换失败: {endpoint}")
                 });
+            }
+            // Both go through the command layer the `:` line uses, so `msg seek` and `:seek`
+            // cannot drift apart — one parser, one behaviour, one set of error messages.
+            IpcEvent::Seek { value } => {
+                if let Err(error) = crate::input::ex::execute(self, ExCommand::Seek(value)) {
+                    self.toast(format!("seek: {error}"));
+                }
+            }
+            IpcEvent::Clear => {
+                if let Err(error) = crate::input::ex::execute(self, ExCommand::ClearQueue) {
+                    self.toast(format!("clear: {error}"));
+                }
             }
         }
     }

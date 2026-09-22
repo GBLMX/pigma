@@ -26,6 +26,7 @@ use crate::{
     event::{AppEvent, AuthEvent, NavigationEvent, PlaybackEvent},
     ipc::MsgAction,
     key::{KeyCode, KeyPress},
+    playback::{SeekTarget, parse_seek},
     state::{LoginMethod, Page},
     text_input::TextInput,
     utils::{GradientPreset, Named, terminal::CursorStyle},
@@ -935,32 +936,29 @@ pub(crate) fn execute(app: &mut App, command: ExCommand) -> Result<(), String> {
 /// `:seek +15` / `:seek -30` move relative to the position, `:seek 90` jumps to a second,
 /// and `:seek 50%` to a fraction of the track.
 fn seek(app: &mut App, value: &str) -> Result<(), String> {
-    let invalid = || format!("无效的跳转位置: {value}");
-
-    if let Some(percent) = value.strip_suffix('%') {
-        let percent: f64 = percent.parse().map_err(|_| invalid())?;
-        app.playback.seek_to_fraction(percent / 100.0);
-        return Ok(());
+    match parse_seek(value)? {
+        SeekTarget::Fraction(fraction) => {
+            app.playback.seek_to_fraction(fraction);
+            Ok(())
+        }
+        SeekTarget::Relative(delta) => {
+            app.playback.seek_relative(delta);
+            Ok(())
+        }
+        SeekTarget::Absolute(seconds) => {
+            let total_secs = app
+                .playback
+                .state
+                .current_song
+                .as_ref()
+                .map(|song| song.duration as f64 / 1000.0)
+                .filter(|total| *total > 0.0)
+                .ok_or_else(|| "当前没有可跳转的歌曲".to_string())?;
+            app.playback
+                .seek_to_fraction((seconds / total_secs).clamp(0.0, 1.0));
+            Ok(())
+        }
     }
-
-    if value.starts_with('+') || value.starts_with('-') {
-        let delta: f64 = value.parse().map_err(|_| invalid())?;
-        app.playback.seek_relative(delta);
-        return Ok(());
-    }
-
-    let seconds: f64 = value.parse().map_err(|_| invalid())?;
-    let total_secs = app
-        .playback
-        .state
-        .current_song
-        .as_ref()
-        .map(|song| song.duration as f64 / 1000.0)
-        .filter(|total| *total > 0.0)
-        .ok_or_else(|| "当前没有可跳转的歌曲".to_string())?;
-    app.playback
-        .seek_to_fraction((seconds / total_secs).clamp(0.0, 1.0));
-    Ok(())
 }
 
 #[cfg(test)]

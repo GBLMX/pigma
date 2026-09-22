@@ -14,6 +14,7 @@ use crate::{
     config::Config,
     ipc::{self, ActionKind, ControlAction, MsgAction, QueryAction, StatusSnapshot},
     logger::init_logger,
+    playback::parse_seek,
     utils::format_duration,
 };
 
@@ -330,6 +331,20 @@ fn parse_msg_action(
             })?;
             parse_volume(value)?
         }
+        ControlAction::Seek => {
+            // The shapes `:seek` accepts come from the same parser: a value the command would
+            // refuse must not reach the daemon, where the only feedback is a toast the caller
+            // never sees (and the action's reply says `ok` either way).
+            let usage = || {
+                color_eyre::eyre::eyre!("seek requires a value like `+15`, `-30`, `50%` or `90`")
+            };
+            let value = value.ok_or_else(usage)?;
+            parse_seek(value).map_err(|_| usage())?;
+            MsgAction::Seek {
+                value: value.to_string(),
+            }
+        }
+        ControlAction::Clear => MsgAction::Clear,
         ControlAction::Mode => MsgAction::Mode,
         ControlAction::Like => MsgAction::Like,
         ControlAction::Dislike => MsgAction::Dislike,
@@ -625,6 +640,30 @@ mod tests {
         assert_eq!(
             parse_msg_action(ControlAction::TogglePlay, None, None).unwrap(),
             MsgAction::TogglePlay
+        );
+    }
+
+    /// The two actions the Plan's "more `msg` actions" asked for: `seek` (whose value is
+    /// required — without one there is nothing to jump to) and `clear` (which takes none).
+    #[test]
+    fn msg_seek_needs_a_value_and_clear_takes_none() {
+        assert_eq!(
+            parse_msg_action(ControlAction::Seek, Some("+15"), None).unwrap(),
+            MsgAction::Seek {
+                value: "+15".into()
+            }
+        );
+        assert!(
+            parse_msg_action(ControlAction::Seek, None, None).is_err(),
+            "a seek without a value has nothing to jump to"
+        );
+        assert!(
+            parse_msg_action(ControlAction::Seek, Some("abc"), None).is_err(),
+            "the CLI rejects a seek value `:seek` would refuse, instead of mailing it to the daemon"
+        );
+        assert_eq!(
+            parse_msg_action(ControlAction::Clear, None, None).unwrap(),
+            MsgAction::Clear
         );
     }
 
