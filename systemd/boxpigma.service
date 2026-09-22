@@ -1,0 +1,41 @@
+# boxpigma 无头守护进程的 systemd 用户单元。
+#
+# 装法（无需 root）：
+#
+#   mkdir -p ~/.config/systemd/user
+#   cp systemd/boxpigma.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now boxpigma
+#
+# 之后用 `boxpigma status` / `boxpigma msg` 控制；日志看 `journalctl --user -u boxpigma -f`。
+# 想让它在**没登录**时也常驻（服务器/常开机器），再执行一次：
+#
+#   loginctl enable-linger "$USER"
+#
+# ExecStart 里的路径对应安装脚本的布局（`<dir>/current/boxpigma`，默认 `~/.local/bin`）。
+# 其它安装方式改这一行即可：包管理器装的是 `/usr/bin/boxpigma`，`cargo install` 装的是
+# `%h/.cargo/bin/boxpigma`。`-d <端点>` 决定启动时加载哪个队列（默认 `liked`，可换
+# `local_music`、`toplist:3` 等，见 README「无头守护进程模式」）。
+
+[Unit]
+Description=boxpigma 网易云音乐（无头守护进程）
+Documentation=https://github.com/GBLMX/pigma
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/current/boxpigma -d liked
+
+# 意外退出才拉起；正常退出（下面那个 SIGTERM）不重启。反复起不来时 systemd 默认的
+# 启动频率限制会让它停在 failed，不会一直刷日志。
+Restart=on-failure
+RestartSec=10
+
+# 守护进程收到 SIGTERM 会保存会话（队列、播放位置）后干净退出，这也是 `boxpigma -d`
+# 在终端里 Ctrl-C 走的那条路径。
+KillSignal=SIGTERM
+TimeoutStopSec=10
+
+[Install]
+WantedBy=default.target
