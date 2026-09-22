@@ -564,7 +564,8 @@ fn remove_key(doc: &mut toml_edit::DocumentMut, path: &[Step]) {
     let Some((Step::Key(name), above)) = path.split_last() else {
         return;
     };
-    let Some(entries) = node_at(Node::Item(doc.as_item_mut()), above).and_then(|node| node.entries())
+    let Some(entries) =
+        node_at(Node::Item(doc.as_item_mut()), above).and_then(|node| node.entries())
     else {
         return;
     };
@@ -667,7 +668,9 @@ fn migrate_document(text: &str, config_path: &Path) -> Option<String> {
         match doc.get("proxy_target").and_then(toml_edit::Item::as_str) {
             None | Some("normal") => {
                 doc.remove("proxy");
-                log::info!("config.toml schema v1 → v2: proxy_target 为默认值，不再代理（清理 proxy）");
+                log::info!(
+                    "config.toml schema v1 → v2: proxy_target 为默认值，不再代理（清理 proxy）"
+                );
             }
             Some(target) => {
                 log::info!("config.toml schema v1 → v2: 保留 proxy（原 proxy_target = {target}）");
@@ -932,10 +935,7 @@ mod tests {
 
     /// The sweep's answer for a document, as the paths read in a failure message.
     fn sweep(doc: &toml_edit::DocumentMut) -> Vec<String> {
-        stale_keys(doc)
-            .iter()
-            .map(|path| path_name(path))
-            .collect()
+        stale_keys(doc).iter().map(|path| path_name(path)).collect()
     }
 
     /// A migration edits the user's own document instead of writing a new one: what they wrote
@@ -1014,7 +1014,13 @@ mod tests {
         );
 
         let on_disk = fs::read_to_string(&path).expect("read the migrated config");
-        for gone in ["proxy_target", "source_fallback", "old_ttl", "icon", "badge"] {
+        for gone in [
+            "proxy_target",
+            "source_fallback",
+            "old_ttl",
+            "icon",
+            "badge",
+        ] {
             assert!(
                 !on_disk.contains(gone),
                 "`{gone}` is not a key of the new schema and must not stay in the user's file:\n{on_disk}"
@@ -1087,7 +1093,10 @@ mod tests {
         stale.sort();
         assert_eq!(
             stale,
-            vec!["no_such_key".to_string(), "themes.mine.old_colour".to_string()],
+            vec![
+                "no_such_key".to_string(),
+                "themes.mine.old_colour".to_string()
+            ],
             "the keys the schema never had, and only those"
         );
 
@@ -1141,7 +1150,8 @@ mod tests {
         // replaced did.)
         let mut before: Config = toml_edit::de::from_str(&v1).expect("the example reads");
         before.config_version = CONFIG_VERSION;
-        let after = toml_edit::de::from_str::<Config>(&migrated).expect("the migrated example reads");
+        let after =
+            toml_edit::de::from_str::<Config>(&migrated).expect("the migrated example reads");
         let (wants_text, got_text) = (before.to_toml(), after.to_toml());
         let (mut wants, mut got): (Vec<&str>, Vec<&str>) =
             (wants_text.lines().collect(), got_text.lines().collect());
