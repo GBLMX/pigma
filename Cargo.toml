@@ -10,9 +10,7 @@ authors = ["akirco <earlfx@163.com>", "GBLMX <GBLMX@users.noreply.github.com>"]
 [workspace]
 # First-party crates live in one workspace so a single lockfile resolves them and
 # `cargo test/clippy --workspace` actually covers them (see .github/workflows/ci.yml).
-# `crates/y7dl` is a third-party submodule by another author, so it stays independent.
-members = ["crates/ncm-api", "crates/sonar"]
-exclude = ["crates/y7dl"]
+members = ["crates/ncm-api"]
 resolver = "3"
 
 # Versions shared by more than one crate. Members pull these in with
@@ -61,7 +59,6 @@ rubato = "5.0.0"
 rustls = { workspace = true }
 serde = { workspace = true, features = ["rc"] }
 serde_json = { workspace = true }
-sonar = { path = "crates/sonar" }
 stream-download = { version = "0.24.4", default-features = false, features = ["async-read", "reqwest", "temp-storage"] }
 thiserror = { workspace = true }
 time = { workspace = true, features = ["formatting", "local-offset", "macros"] }

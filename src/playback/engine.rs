@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashSet,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -39,18 +39,14 @@ pub(super) fn mem_rss_kb() -> u64 {
         .unwrap_or(0)
 }
 
-/// Fixed queue key (display name) shared by every third-party (sonar) search
-/// queue; all such songs are stored in the single `thirdparty_source.json`.
-pub const THIRD_PARTY_QUEUE_KEY: &str = "第三方搜索";
-
 /// Fixed queue key (display name) shared by every NCM search queue; all such
 /// songs are stored in the single `ncm_search.json`.
 pub const NCM_SEARCH_QUEUE_KEY: &str = "官方搜索";
 
 /// Return whether an error is a transient audio stream error (buffer underrun/overrun). These
-/// occur frequently when the stream download can't keep up with playback (e.g. YouTube), and
-/// rodio recovers automatically, so they should be ignored. Case-insensitive to cover cpal's
-/// "Buffer underrun/overrun occurred." and various decoder-specific wordings.
+/// occur frequently when the stream download can't keep up with playback, and rodio recovers
+/// automatically, so they should be ignored. Case-insensitive to cover cpal's "Buffer
+/// underrun/overrun occurred." and various decoder-specific wordings.
 fn is_transient_stream_error(err: &str) -> bool {
     let lower = err.to_lowercase();
     lower.contains("underrun") || lower.contains("overrun")
@@ -67,7 +63,7 @@ pub struct PlaybackEngine {
     /// playing, so the tab bar can highlight where the music actually comes
     /// from.
     playing_queue_key: String,
-    /// Canonical id of the currently loaded queue (`q_<hash>` / `q_thirdparty`).
+    /// Canonical id of the currently loaded queue (`q_<hash>` / `q_ncm_search`).
     /// Only this queue stays in memory; the others live on disk and are loaded
     /// on demand when switched.
     active_queue_id: String,
@@ -113,9 +109,6 @@ impl PlaybackEngine {
         audio: crate::config::AudioConfig,
         save_on_play: bool,
         stream_client: reqwest::Client,
-        finder: Arc<sonar::SonarFinder>,
-        sonar_enabled: bool,
-        sonar_songs: Arc<std::sync::Mutex<HashMap<u64, Arc<sonar::Song>>>>,
         liked_ids: Arc<std::sync::Mutex<HashSet<u64>>>,
     ) -> Self {
         let storage = PlaylistStorage::new(base_dir);
@@ -135,9 +128,6 @@ impl PlaybackEngine {
                 quality,
                 save_on_play,
                 stream_client,
-                finder,
-                sonar_enabled,
-                sonar_songs,
                 event_tx.clone(),
             ),
             controller: PlaybackHandle::new(event_tx.clone(), audio.clone()),
@@ -646,9 +636,6 @@ impl PlaybackEngine {
             // busy loop.
             self.state.seeking = false;
         }
-        if let Ok(mut registry) = self.source.sonar_songs.lock() {
-            registry.clear();
-        }
         if !self.active_queue_id.is_empty() {
             self.storage
                 .delete_queue(&self.active_queue_id, &self.active_queue_key);
@@ -758,9 +745,9 @@ impl PlaybackEngine {
     }
 
     pub fn on_playback_error(&mut self, err: String) {
-        // Buffer underruns/overruns are transient events (e.g. YouTube streams downloading
-        // slower than playback), and rodio recovers automatically, so ignore them to avoid
-        // wrongly switching songs or duplicating error reports.
+        // Buffer underruns/overruns are transient events (the stream downloading slower than
+        // playback), and rodio recovers automatically, so ignore them to avoid wrongly switching
+        // songs or duplicating error reports.
         if is_transient_stream_error(&err) {
             log::warn!("忽略瞬时音频流错误: {err}");
             return;

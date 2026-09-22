@@ -114,7 +114,7 @@ boxpigma msg [OPTIONS] <ACTION> [VALUE]
 | 动作 | 别名 | 说明 |
 |---|---|---|
 | `play` | | 播放/恢复；`play <ID>` 跳到队列中指定歌曲并播放 |
-| `search <KEYWORD>` | | 搜索并**返回**歌曲数据（请求/响应，非 fire-and-forget）；NCM 在前、再并上已启用 sonar 源，每行标 `source` 与 `id`，并注册到守护进程，随后 `play <ID>` 即可播放选中的那首 |
+| `search <KEYWORD>` | | 搜索并**返回**歌曲数据（请求/响应，非 fire-and-forget）；搜索网易云，每行标 `source` 与 `id`，并注册到守护进程，随后 `play <ID>` 即可播放选中的那首 |
 | `toggle_play` | `play_pause` | 播放/暂停切换（停止时开始） |
 | `pause` | | 暂停 |
 | `next` | | 下一首 |
@@ -134,7 +134,7 @@ boxpigma msg [OPTIONS] <ACTION> [VALUE]
 boxpigma msg play
 boxpigma msg play 187186        # 按歌曲 id 播放（先 `boxpigma msg list --json` 查 id）
 boxpigma msg search 周杰伦       # 返回: source + id + 歌名 - 歌手（在守护进程内搜索，跨实例可用）
-boxpigma msg play 11201139274454706721  # 播放上面搜到的某首 sonar 结果
+boxpigma msg play 33894312      # 播放上面搜到的某首
 boxpigma msg toggle_play
 boxpigma msg next
 boxpigma msg volume 75

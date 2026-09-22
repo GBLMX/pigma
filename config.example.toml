@@ -81,12 +81,10 @@ lyric_ktv_color = "#4da6ff"
 lyric_translation = true
 
 # 代理地址, 支持 http:// https:// socks5://
-proxy = "http://127.0.0.1:7890"
-
-# 代理目标: "normal" (默认, 代理 YouTube), "reversed" (代理网易云,bilibili,kuwo,kugou), "both" (都代理)
-# 海外用户: proxy_target = "reversed"  (NCM 走代理, YouTube 直连)
-# 国内用户: proxy_target = "normal"   (NCM 直连, YouTube 走代理)
-proxy_target = "normal"
+# 所有网络请求都走它 —— 网易云 API、封面下载、音频流
+# 海外用户: 取消注释并填上代理地址 (NCM 走代理)
+# 国内用户: 保持注释 (直连)
+# proxy = "http://127.0.0.1:7890"
 
 # =============================================================================
 # 缓存配置
@@ -125,17 +123,6 @@ resample = true
 # [audio.loudness]
 # target_lufs = -14.0
 # max_gain_db = 12.0
-
-# =============================================================================
-# 兜底源配置 (NCM 播放失败时的多源兜底, 基于 sonar)
-# =============================================================================
-[source_fallback]
-# 是否启用兜底源
-enabled = true
-# 参与兜底的源, 按优先级从高到低排列, 可选: kuwo, kugou, bilivideo, youtube
-providers = ["kuwo", "kugou", "bilivideo", "youtube"]
-# 单个源搜索超时(毫秒)
-timeout_ms = 10000
 
 # =============================================================================
 # 面板尺寸

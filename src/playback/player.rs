@@ -589,8 +589,8 @@ impl Drop for StderrGuard {
 }
 
 /// rodio's default error callback prints `eprintln!("audio stream error: {err}")` straight to
-/// stderr, which pollutes the TUI render in crossterm raw mode (typically triggered by YouTube
-/// streams downloading slower than playback, causing audio device buffer underruns). We replace
+/// stderr, which pollutes the TUI render in crossterm raw mode (typically triggered by a stream
+/// downloading slower than playback, causing audio device buffer underruns). We replace
 /// it with a callback that logs and updates [`DeviceHealth`]: transient underruns/overruns (which
 /// rodio recovers from automatically) are only recorded; fatal errors (device removed,
 /// stream invalidated, backend-specific device loss on WASAPI/CoreAudio/ALSA) set the

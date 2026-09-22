@@ -13,8 +13,8 @@ fn channel() -> (
     tokio::sync::broadcast::channel(16)
 }
 
-/// A `SearchEngine` with no providers: the round trips exercise the IPC
-/// plumbing without hitting any network.
+/// A `SearchEngine` for the round trips that exercise the IPC plumbing without
+/// hitting any network.
 fn stub_searcher() -> Arc<boxpigma::app::SearchEngine> {
     let _ = rustls::crypto::ring::default_provider().install_default();
     let cache_dir =
@@ -24,21 +24,21 @@ fn stub_searcher() -> Arc<boxpigma::app::SearchEngine> {
         cache_dir,
         String::new(),
     ));
-    let api = Arc::new(ncm_api::NcmClient::builder().build().expect("client"));
-    let service = boxpigma::service::ApiService::new(api, cache);
-    let finder = Arc::new(
-        sonar::SonarFinder::new(sonar::SearchConfig::new().with_providers(vec![])).expect("finder"),
+    // The discard port: a search fails fast and stays off the network, which is all
+    // the request/reply plumbing needs.
+    let api = Arc::new(
+        ncm_api::NcmClient::builder()
+            .proxy("http://127.0.0.1:9")
+            .timeout(std::time::Duration::from_millis(500))
+            .build()
+            .expect("client"),
     );
-    let sonar_songs: Arc<Mutex<HashMap<u64, Arc<sonar::Song>>>> =
-        Arc::new(Mutex::new(HashMap::new()));
+    let service = boxpigma::service::ApiService::new(api, cache);
     let search_results: boxpigma::app::SearchResults = Arc::new(Mutex::new(HashMap::new()));
     Arc::new(boxpigma::app::SearchEngine::new(
         service,
-        finder,
-        sonar_songs,
         search_results,
         20,
-        vec![],
     ))
 }
 
@@ -318,8 +318,8 @@ async fn search_round_trip() {
 
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-    // The stub searcher has no providers, so it returns an empty list without
-    // touching the network — this still exercises the request/reply plumbing.
+    // The stub's client cannot reach the network, so the search returns an empty
+    // list — this still exercises the request/reply plumbing.
     let results = ipc::search_songs("test").await.expect("search round trip");
     assert!(results.is_empty());
 }

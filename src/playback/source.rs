@@ -1,5 +1,4 @@
 use std::{
-    collections::HashMap,
     future::Future,
     sync::{
         Arc, Mutex,
@@ -9,7 +8,6 @@ use std::{
 };
 
 use ncm_api::{NcmError, SongInfo, SongQuality};
-use sonar::{PlayUrlResult, Quality, SearchQuery, SonarFinder, Song};
 use stream_download::{
     Settings, StreamDownload, StreamPhase, http::HttpStream, storage::temp::TempStorageProvider,
 };
@@ -41,9 +39,9 @@ const PREBUFFER_TIMEOUT: Duration = Duration::from_secs(8);
 const CLOUD_DISK_PAGE: u32 = 100;
 
 /// How many cloud-disk entries the fallback scans before giving up. The disk is only scanned after
-/// NCM streaming and the third-party sources both failed, so the scan spends a few requests for a
-/// chance to play a song the user owns; past this bound playback should fail with the original
-/// error instead of walking an arbitrarily large disk.
+/// NCM streaming failed, so the scan spends a few requests for a chance to play a song the user
+/// owns; past this bound playback should fail with the original error instead of walking an
+/// arbitrarily large disk.
 const CLOUD_DISK_SCAN_LIMIT: u32 = 500;
 
 /// How far an upload's duration (ms) may differ from the catalogue entry's duration and still be
@@ -54,7 +52,7 @@ const CLOUD_MATCH_DURATION_MS: u64 = 5_000;
 /// Why a song could not be turned into a playable stream.
 ///
 /// The class drives behaviour instead of the message text: [`SourceError::Network`]
-/// is retried once, every other class falls through to the fallback sources
+/// is retried once, every other class falls through to the cloud-disk fallback
 /// immediately. Messages stay user-facing, so the UI shows the same wording as
 /// before.
 #[derive(Debug, thiserror::Error)]
@@ -70,17 +68,11 @@ pub(super) enum SourceError {
     /// download-cache provider).
     #[error("{0}")]
     Stream(String),
-    /// A third-party provider could not resolve the song or hand out a play URL.
-    #[error("{0}")]
-    Provider(String),
-    /// Internal state is inconsistent (poisoned registry, lost song metadata).
-    #[error("{0}")]
-    Internal(String),
 }
 
 /// Whether a failed NCM attempt should be retried instead of falling back to the
-/// other sources: only a transport failure is worth a second try, and only once.
-/// Every other class (no play URL, provider failure) would fail the same way again.
+/// cloud disk: only a transport failure is worth a second try, and only once.
+/// Every other class (no play URL) would fail the same way again.
 fn should_retry_ncm(error: &SourceError, attempt: u32) -> bool {
     matches!(error, SourceError::Network(_)) && attempt < 1
 }
@@ -89,8 +81,7 @@ fn should_retry_ncm(error: &SourceError, attempt: u32) -> bool {
 ///
 /// The entry may only be written once the file is complete — an entry written mid-download
 /// lists a truncated file as playable and lets eviction delete a file that is still being
-/// written — and only once per stream. NCM songs carry no sonar metadata (`msong = None`),
-/// which is not a reason to skip the entry altogether.
+/// written — and only once per stream.
 fn should_record_cache(mark_cache: bool, complete: bool, sent: &AtomicBool) -> bool {
     mark_cache && complete && !sent.swap(true, Ordering::SeqCst)
 }
@@ -170,27 +161,22 @@ fn pick_cloud_match(song: &SongInfo, disk: &[SongInfo]) -> Option<u64> {
 }
 
 /// Run the streaming chain for a song whose cached copy and local file cannot be used: NCM player
-/// URLs (one retry, only for a transport failure), then the third-party sources, then the user's
-/// own cloud disk.
+/// URLs (one retry, only for a transport failure), then the user's own cloud disk.
 ///
-/// The three resolvers are callbacks so tests can pin the order of the chain and the error it
-/// reports with fake resolvers — none of the real ones can be exercised without a login, an
-/// uploaded disk entry and a third-party provider. `sonar` is `None` when the third-party sources
-/// are disabled.
+/// The two resolvers are callbacks so tests can pin the order of the chain and the error it
+/// reports with fake resolvers — neither can be exercised without a login and an uploaded disk
+/// entry.
 ///
 /// Adding the cloud disk must not change what a caller sees when nothing can play the song: the
-/// third-party failure is still reported when that step ran, and the NCM failure otherwise.
-async fn resolve_streaming<N, NF, S, SF, C, CF>(
+/// NCM failure is reported when the disk holds no copy either.
+async fn resolve_streaming<N, NF, C, CF>(
     song: &SongInfo,
     mut ncm: N,
-    sonar: Option<S>,
     mut cloud: C,
 ) -> Result<AudioInput, SourceError>
 where
     N: FnMut() -> NF,
     NF: Future<Output = Result<AudioInput, SourceError>>,
-    S: FnOnce() -> SF,
-    SF: Future<Output = Result<AudioInput, SourceError>>,
     C: FnMut() -> CF,
     CF: Future<Output = Option<AudioInput>>,
 {
@@ -227,41 +213,21 @@ where
             mem_rss_kb()
         );
         log::warn!(
-            "NCM网络错误，2次重试失败，改用兜底源: {} - {}",
+            "NCM网络错误，2次重试失败，改用云盘兜底: {} - {}",
             song.name,
             song.singer
         );
     }
 
-    // The third-party sources come first: they need no login, and they often carry the track.
-    if let Some(sonar) = sonar {
-        log::info!(
-            "NCM解析失败，尝试sonar fallback: {} - {} ({})",
-            song.name,
-            song.singer,
-            error
-        );
-        let sonar_error = match sonar().await {
-            Ok(input) => return Ok(input),
-            Err(e) => e,
-        };
-        log::info!(
-            "sonar 兜底失败，尝试云盘 fallback: {} - {} ({})",
-            song.name,
-            song.singer,
-            sonar_error
-        );
-        // The third-party failure is the more informative of the two, and it is what the caller saw
-        // before the cloud disk existed, so it stays the reported error.
-        return cloud().await.ok_or(sonar_error);
-    }
-
     log::info!(
-        "sonar 未启用，尝试云盘 fallback: {} - {} ({})",
+        "NCM解析失败，尝试云盘兜底: {} - {} ({})",
         song.name,
         song.singer,
         error
     );
+
+    // The cloud disk is the last resort, and everything it cannot do is silent: the NCM failure
+    // stays the reported error.
     cloud().await.ok_or(error)
 }
 
@@ -275,8 +241,7 @@ struct StreamProgress {
     completed: Arc<AtomicBool>,
 }
 
-/// Resolves audio inputs for songs via local files, NCM streaming, the third-party sources, or the
-/// user's own cloud disk.
+/// Resolves audio inputs for songs via local files, NCM streaming, or the user's own cloud disk.
 #[derive(Clone)]
 pub struct AudioSource {
     service: ApiService,
@@ -285,27 +250,18 @@ pub struct AudioSource {
     /// Save while playing: when true, stream and write the file into the download cache; when
     /// false, stream to a temporary file only.
     save_on_play: bool,
-    finder: Arc<SonarFinder>,
-    sonar_enabled: bool,
     /// HTTP client used for streaming play URLs (proxy + headers applied).
     stream_client: reqwest::Client,
     event_tx: mpsc::UnboundedSender<Event>,
-    /// Original sonar songs for search results, keyed by the synthetic
-    /// `SongInfo` id so playback can resolve the source via the same provider.
-    pub(super) sonar_songs: Arc<Mutex<HashMap<u64, Arc<Song>>>>,
 }
 
 impl AudioSource {
-    #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
         service: ApiService,
         cache: Arc<CacheManager>,
         quality: SongQuality,
         save_on_play: bool,
         stream_client: reqwest::Client,
-        finder: Arc<SonarFinder>,
-        sonar_enabled: bool,
-        sonar_songs: Arc<Mutex<HashMap<u64, Arc<Song>>>>,
         event_tx: mpsc::UnboundedSender<Event>,
     ) -> Self {
         Self {
@@ -313,11 +269,8 @@ impl AudioSource {
             cache,
             quality,
             save_on_play,
-            finder,
-            sonar_enabled,
             stream_client,
             event_tx,
-            sonar_songs,
         }
     }
 
@@ -343,7 +296,6 @@ impl AudioSource {
         mark_cache: bool,
         song: &SongInfo,
         ext: &'static str,
-        mut msong: Option<sonar::Song>,
     ) -> (Settings<HttpStream<HeadersClient>>, StreamProgress) {
         let event_tx = self.event_tx.clone();
         let cache = self.cache.clone();
@@ -363,10 +315,9 @@ impl AudioSource {
             }
             // Record the cache entry only once the download has finished: an entry written
             // mid-download would list a truncated file as playable and would let eviction
-            // delete a file that is still being written. NCM songs pass `msong = None`, so
-            // their entry is written without sonar metadata instead of being skipped.
+            // delete a file that is still being written.
             if should_record_cache(mark_cache, complete, &sent) {
-                cache.mark_cached(&song, ext, msong.take());
+                cache.mark_cached(&song, ext);
                 let _ = event_tx.send(PlaybackEvent::Cached(song.id).into());
             }
         });
@@ -406,13 +357,12 @@ impl AudioSource {
         url: url::Url,
         song: &SongInfo,
         ext: &'static str,
-        msong: Option<sonar::Song>,
     ) -> Result<AudioInput, SourceError> {
         let stream = HttpStream::new(HeadersClient::new(self.stream_client.clone()), url)
             .await
             .map_err(|e| SourceError::Stream(format!("流初始化失败: {e}")))?;
 
-        let (settings, progress) = self.tracked_settings(self.save_on_play, song, ext, msong);
+        let (settings, progress) = self.tracked_settings(self.save_on_play, song, ext);
 
         let reader: Box<dyn AudioReader> = if self.save_on_play {
             let provider = self
@@ -456,84 +406,6 @@ impl AudioSource {
         }
     }
 
-    fn to_sonar_quality(quality: SongQuality) -> Quality {
-        match quality {
-            SongQuality::Lossless
-            | SongQuality::HiRes
-            | SongQuality::Surround
-            | SongQuality::Master
-            | SongQuality::AudioVivid => Quality::Lossless,
-            SongQuality::Standard => Quality::Standard,
-            _ => Quality::High,
-        }
-    }
-
-    /// Stream a resolved play URL through the cache layer.
-    async fn stream_play_url(
-        &self,
-        song: &SongInfo,
-        msong: Option<&sonar::Song>,
-        play: PlayUrlResult,
-    ) -> Result<AudioInput, SourceError> {
-        let url = url::Url::parse(&play.url)
-            .map_err(|e| SourceError::Stream(format!("sonar URL解析失败: {e}")))?;
-        let ext = Self::ext_from_url(&play.url);
-        self.build_stream(url, song, ext, msong.cloned()).await
-    }
-
-    /// Search all configured sonar sources for the best playable match and
-    /// stream it (cross-provider fallback).
-    async fn resolve_providers(&self, song: &SongInfo) -> Result<AudioInput, SourceError> {
-        let keyword = format!("{} {}", song.name, song.singer);
-        let query = SearchQuery::new(keyword).with_duration(song.duration);
-
-        let (found, play) = self
-            .finder
-            .search_and_get_url(&query, Some(Self::to_sonar_quality(self.quality)))
-            .await
-            .map_err(|e| SourceError::Provider(format!("sonar 兜底失败: {e}")))?;
-
-        #[cfg(all(target_os = "linux", target_env = "gnu"))]
-        log::info!(
-            "[HEAP] after sonar search (id={}): {} kB — {} ({})",
-            song.id,
-            mem_rss_kb(),
-            found.name,
-            found.source
-        );
-
-        self.stream_play_url(song, Some(&found), play).await
-    }
-
-    /// Resolve a sonar search result directly via the provider that found it.
-    async fn resolve_by_provider(&self, song: &SongInfo) -> Result<AudioInput, SourceError> {
-        let msong = self
-            .sonar_songs
-            .lock()
-            .map_err(|_| SourceError::Internal("sonar 歌曲注册表损坏".to_string()))?
-            .get(&song.id)
-            .cloned()
-            .or_else(|| self.cache.thirdparty_song(song.id))
-            .ok_or_else(|| SourceError::Internal("搜索结果音源信息丢失".to_string()))?;
-
-        let play = self
-            .finder
-            .get_play_url_for_song(&msong, Some(Self::to_sonar_quality(self.quality)))
-            .await
-            .map_err(|e| SourceError::Provider(format!("获取音源失败 ({}): {e}", msong.source)))?;
-
-        #[cfg(all(target_os = "linux", target_env = "gnu"))]
-        log::info!(
-            "[HEAP] after get_play_url_for_song (id={}): {} kB — {} ({})",
-            song.id,
-            mem_rss_kb(),
-            msong.name,
-            msong.source
-        );
-
-        self.stream_play_url(song, Some(&msong), play).await
-    }
-
     /// Try to resolve a song from NCM streaming.
     async fn resolve_ncm(&self, song: &SongInfo) -> Result<AudioInput, SourceError> {
         self.resolve_ncm_id(song, song.id).await
@@ -573,7 +445,7 @@ impl AudioSource {
             .map_err(|e| SourceError::Stream(format!("URL解析失败: {e}")))?;
         let ext = Self::ext_from_url(url_str);
 
-        self.build_stream(url, song, ext, None).await
+        self.build_stream(url, song, ext).await
     }
 
     /// Last resort before playback is declared failed: find the song in the user's own cloud disk
@@ -662,37 +534,14 @@ impl AudioSource {
             return Ok(input);
         }
 
-        // 2. Third-party (sonar) songs: direct provider, then cross-provider fallback.
-        if sonar::is_sonar_song_id(song.id) {
-            match self.resolve_by_provider(song).await {
-                Ok(input) => return Ok(input),
-                Err(e) => log::warn!("sonar 直接解析失败，改用兜底搜索: {e}"),
-            }
-            if self.sonar_enabled {
-                return self.resolve_providers(song).await;
-            }
-            return Err(SourceError::Provider(
-                "sonar 未启用，第三方音源无法解析".into(),
-            ));
-        }
-
-        // 3. Free NCM songs may point at a local file path.
+        // 2. Free NCM songs may point at a local file path.
         if let Some(input) = self.resolve_local(song).await {
             return Ok(input);
         }
 
-        // 4. NCM streaming, then the third-party sources, then the user's own cloud disk: the song
-        //    is only declared unplayable when all three failed.
-        let sonar = self
-            .sonar_enabled
-            .then_some(|| self.resolve_providers(song));
-        resolve_streaming(
-            song,
-            || self.resolve_ncm(song),
-            sonar,
-            || self.resolve_cloud(song),
-        )
-        .await
+        // 3. NCM streaming, then the user's own cloud disk: the song is only declared
+        //    unplayable when both failed.
+        resolve_streaming(song, || self.resolve_ncm(song), || self.resolve_cloud(song)).await
     }
 }
 
@@ -720,7 +569,7 @@ mod tests {
     }
 
     /// The NCM retry/fallback policy: a transport failure gets exactly one retry, while
-    /// an unplayable song falls through to the third-party sources immediately (retrying
+    /// an unplayable song falls through to the cloud-disk fallback immediately (retrying
     /// cannot turn a VIP-only track into a playable one). This used to be encoded in a
     /// `"NETWORK:"` string prefix.
     #[test]
@@ -745,7 +594,7 @@ mod tests {
 
     /// A download-cache entry is recorded on completion only, and only once per stream:
     /// recording mid-download would list a truncated file as playable, and skipping the
-    /// entry for NCM songs (which have no sonar metadata) leaves them unmanaged on disk.
+    /// entry would leave a completed file unmanaged on disk.
     #[test]
     fn cache_entry_is_recorded_only_after_completion() {
         let sent = AtomicBool::new(false);
@@ -770,7 +619,7 @@ mod tests {
 
     /// A local song plays from `local_path`. `album` is only the fallback for songs that still
     /// carry their path there: it stopped being the path once a local file gained a real album
-    /// tag, and reading it there sends tagged files into the network fallbacks even though the
+    /// tag, and reading it there sends tagged files to the network resolver even though the
     /// file is on disk.
     #[test]
     fn local_songs_prefer_the_path_over_the_album() {
@@ -836,9 +685,6 @@ mod tests {
         );
     }
 
-    /// Stands in for "the third-party sources are disabled": the chain must never call it.
-    type NoSonar = fn() -> std::future::Ready<Result<AudioInput, SourceError>>;
-
     /// An in-memory stand-in for a resolved stream, carrying the bytes of the step that produced
     /// it: the real inputs have one type, so a test cannot tell them apart otherwise.
     fn fake_input(marker: &[u8]) -> AudioInput {
@@ -859,21 +705,19 @@ mod tests {
         marker
     }
 
-    /// The streaming chain with fake resolvers, because no real one can be exercised offline: the
+    /// The streaming chain with fake resolvers, because neither can be exercised offline: the
     /// cloud disk is the last resort, so it must not be asked when NCM streaming already worked
-    /// (that would be a request on the common path), it must hand over its URL when the sources
-    /// before it failed, and when nothing can play the song the caller must see the error the
-    /// chain reported before the cloud disk existed.
+    /// (that would be a request on the common path), it must hand over its URL when NCM failed,
+    /// and when neither can play the song the caller must see the NCM failure.
     #[tokio::test]
     async fn streaming_chain_consults_the_cloud_disk_last() {
         let song = test_song();
 
-        // (a) NCM streaming works: neither fallback is touched, least of all the cloud disk.
+        // (a) NCM streaming works: the cloud disk is not touched.
         let cloud_asked = AtomicBool::new(false);
         let input = resolve_streaming(
             &song,
             || async { Ok(fake_input(b"ncm")) },
-            Some(|| async { Ok(fake_input(b"sonar")) }),
             || async {
                 cloud_asked.store(true, Ordering::SeqCst);
                 Some(fake_input(b"cloud"))
@@ -887,38 +731,20 @@ mod tests {
             "普通解析成功时不该访问云盘"
         );
 
-        // (b) NCM and the third-party sources fail, the cloud disk holds the song: the uploaded
-        // copy is played.
+        // (b) NCM fails, the cloud disk holds the song: the uploaded copy is played.
         let input = resolve_streaming(
             &song,
             || async { Err(SourceError::Unavailable("该歌曲暂无播放源".into())) },
-            Some(|| async { Err(SourceError::Provider("sonar 兜底失败".into())) }),
             || async { Some(fake_input(b"cloud")) },
         )
         .await
         .expect("the cloud disk matched");
         assert_eq!(marker_of(&input), b"cloud");
 
-        // (c) the cloud disk cannot play it either: the reported error is the one the chain
-        // produced before the cloud disk was added — the third-party failure when that step ran,
-        // the NCM failure when the third-party sources are disabled.
+        // (c) the cloud disk cannot play it either: the NCM failure is what the caller sees.
         let error = resolve_streaming(
             &song,
             || async { Err(SourceError::Unavailable("该歌曲暂无播放源".into())) },
-            Some(|| async { Err(SourceError::Provider("sonar 兜底失败".into())) }),
-            || async { None },
-        )
-        .await
-        .expect_err("nothing can play the song");
-        assert!(
-            matches!(&error, SourceError::Provider(message) if message == "sonar 兜底失败"),
-            "云盘未命中时必须返回兜底源的错误, got {error:?}"
-        );
-
-        let error = resolve_streaming(
-            &song,
-            || async { Err(SourceError::Unavailable("该歌曲暂无播放源".into())) },
-            None::<NoSonar>,
             || async { None },
         )
         .await
@@ -928,7 +754,7 @@ mod tests {
             "云盘未命中时必须返回 NCM 的错误, got {error:?}"
         );
 
-        // (d) the retry policy still runs in front of both fallbacks: a transport failure is
+        // (d) the retry policy still runs in front of the fallback: a transport failure is
         // retried once, and the cloud disk is asked after that second attempt, not instead of it.
         let attempts = AtomicU32::new(0);
         let cloud_asked = AtomicBool::new(false);
@@ -938,7 +764,6 @@ mod tests {
                 attempts.fetch_add(1, Ordering::SeqCst);
                 Err(SourceError::Network("boom".into()))
             },
-            None::<NoSonar>,
             || async {
                 cloud_asked.store(true, Ordering::SeqCst);
                 None

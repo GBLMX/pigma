@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>boxpigma —— 终端里的网易云音乐客户端</title>
-<meta name="description" content="boxpigma 是 Rust 写的终端音乐客户端：流式播放与边听边存、多源 fallback、逐字歌词、歌手页三栏、命令行与 JSON IPC。Apache-2.0，发布 Linux / macOS / Windows 六个平台的构建。">
+<meta name="description" content="boxpigma 是 Rust 写的终端音乐客户端：流式播放与边听边存、逐字歌词、歌手页三栏、命令行与 JSON IPC。Apache-2.0，发布 Linux / macOS / Windows 六个平台的构建。">
 <meta name="theme-color" content="#0b0b0d">
 <link rel="icon" type="image/png" href="https://raw.githubusercontent.com/GBLMX/pigma/main/imgs/logo.png">
 <style>
@@ -178,7 +178,7 @@
       <h1 id="hero-title">boxpigma<span class="dot">.</span></h1>
       <p class="tagline">终端里的网易云音乐客户端。</p>
       <p class="sub">
-        在 TUI 里登录、搜索、听歌与管队列：流式播放与边听边存、逐字歌词、多源 fallback，
+        在 TUI 里登录、搜索、听歌与管队列：流式播放与边听边存、逐字歌词、云盘兜底，
         键盘与鼠标一套操作逻辑，封面走终端的图形协议。
       </p>
       <div class="actions">
@@ -266,8 +266,8 @@
           <p>边下边播，低延迟 seek，也能直接放本地音频；开启边听边存后播放即写入缓存（下载管理与它共用一套）。</p>
         </article>
         <article>
-          <h3>多源 fallback</h3>
-          <p>官方源拿不到时依次走 <code>kugou</code> / <code>kuwo</code> / <code>bilibili</code> / <code>youtube</code>，都不需要 cookie。</p>
+          <h3>云盘兜底</h3>
+          <p>官方拿不到播放地址（VIP / 版权 / 地区限制）的歌，若是你自己上传到云盘的，就播那份。</p>
         </article>
         <article>
           <h3>歌词五种样式 + 逐字</h3>

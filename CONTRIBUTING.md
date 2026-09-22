@@ -164,7 +164,7 @@ git cherry-pick <commit>                  # 一次一个，冲突面就限于这
 cargo test --workspace --all-features && cargo clippy --workspace --all-targets
 ```
 
-协议与 API 那一层（`crates/ncm-api`、`crates/sonar`）的上游改动通常最值得挑 —— 它们对着的是线上服务。
+协议与 API 那一层（`crates/ncm-api`）的上游改动通常最值得挑 —— 它们对着的是线上服务。
 
 ## 发布流程（仅维护者）
 

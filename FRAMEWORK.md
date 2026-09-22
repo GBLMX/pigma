@@ -17,7 +17,7 @@
 | 日志 | 手写 `log::Log` 实现：`Mutex<File>` 追加写，**无轮转、无上限**，调用线程持锁同步写 | `tracing` + `tracing-subscriber` + `tracing-appender`：按天轮转、保留最近 7 个、行内带模块路径与本地时间 | 旧日志实测已达 **2,892,695 B** 且无上限；替换后**135 个 `log::*!` 调用点一行未改**（`tracing-log` 桥接 `log` 记录） | `src/logger.rs` |
 | 对比度 | 手写 WCAG 亮度/对比度（`relative_luminance` / `contrast_ratio`），且 `ui.rs` 的审计测试里还有**第三份**拷贝 | `palette` 的 `Wcag21RelativeContrast`；全仓颜色数学收敛到一处 | 全 **2²⁴ 个 8 位 sRGB 颜色**逐值对拍，最大亮度偏差 7.29e-5（palette 用 CIE/Lindbloom 全精度系数，旧代码用 WCAG 取整系数）；**19 个内置主题的 `on_accent` 结果全部一致**；唯一分歧带是黑白锚对比度打平处（合成扫描的 0.005%，可读性相同，无内置主题落在那） | `src/config/theme.rs`、`src/app/theme.rs`、`src/ui.rs` |
 | 桌面通知 | 只用 `OSC 9`（单串正文） | kitty 走其自有的 `OSC 99`：标题与正文分开（`p=`）、Base64 负载（`e=1`）、`f=` 声明应用名便于过滤、`i=`/`d=` 分块并避免堆叠 | kitty 官方文档：kitty 实现 `OSC 99`，同时**兼容**旧式 `OSC 9`；其余终端保持 `OSC 9` **逐字节不变**（有测试钉住） | `src/utils/terminal.rs` |
-| 网络超时 | 只有 `ncm-api` 设了 30s；sonar 搜索、封面下载、音频流**一处超时都没有** | 统一 `connect_timeout` 10s + `read_timeout` 30s；短请求另加 30s 总时限 | **音频流刻意不加总超时**（会截断正在播放的下载）—— 用 34 秒持续下载的探针实证不会被切断；`read_timeout` 是每次读的超时、读完即重置，语义已在 reqwest 源码里核实 | `src/app/builder.rs`、`crates/sonar/src/provider.rs` |
+| 网络超时 | 只有 `ncm-api` 设了 30s；搜索、封面下载、音频流**一处超时都没有** | 统一 `connect_timeout` 10s + `read_timeout` 30s；短请求另加 30s 总时限 | **音频流刻意不加总超时**（会截断正在播放的下载）—— 用 34 秒持续下载的探针实证不会被切断；`read_timeout` 是每次读的超时、读完即重置，语义已在 reqwest 源码里核实 | `src/app/builder.rs` |
 | 页面结构 | 绘制分发、页面按键、键位表三处各自维护 | 一张表：`PageSpec { name, key, render }` + `Page::spec()/opened_by()/on_key()` | 新增一个页面从改 **9 个文件降到 2 个**；`ui.rs` 生产代码里的页面匹配臂 5 → 0、`layout.rs` 3 → 0；等价性用旧/新代码各渲染 14 个场景比对缓冲区哈希验证 | `src/state/page.rs`、`src/ui.rs`、`src/layout.rs` |
 | 铺底色 | `Block::default().style(bg)`（用一个无边界的 `Block` 只为刷背景） | `Fill::new(" ")` | `Fill` 的渲染就是 `set_symbol + set_style`，像素等价；换完之后编译器指出 `Block` 在该文件已无其它用途 | `src/ui.rs` |
 | 启动画面字形 | 手绘 3 行 ASCII 字（B 的下面两行相同、X 的交叉挤在一行里，都读不清） | FIGlet 字体 **`Calvin S`** 的渲染结果，3 行 × 23 列，作为常量内嵌 | 用自写的 `.flf` 解析器（含 kerning 布局）比较 13 款字体后选定；运行时**不带字体依赖** | `src/ui/splash.rs` |
@@ -32,6 +32,11 @@
   现在 `layout::splash` 接收行数、渲染从 `LOGO.len()` 推导，字形是唯一写下来的地方。
 - **日志调用点零改动**：`tracing-log` 桥接意味着换栈不必改 135 处调用点 —— 这是选它的首要理由。
 - **主题解析只在"设置主题"时发生**：`resolve_theme` 每帧都跑，任何随机性都不能放在那里。
+- **多源兜底链移除（2026-09-22）**：第三方兜底 crate 与它依赖的子模块、配置里的兜底源一节整体
+  删除。播放解析链收敛为 **网易云 → 云盘兜底 → 报错**（本地文件仍走自己的路径），搜索也只剩
+  网易云一个源；代理目标键随之删除，并入唯一的 `proxy`（旧文件由 `config_version` v1 → v2
+  迁移处理）。记在这里而不是悄悄删掉：上面「网络超时」一行里指向兜底 crate 的位置已不存在，
+  那一行记录的是当时的改动。
 
 ## 二、已否决（附依据）
 
@@ -43,7 +48,7 @@
 | `colorgrad` 替换渐变预设 | 只在全局 registry 缓存里、非项目依赖；6 个预设中 5 个与自写实现逐值一致、Cubehelix 不同 —— 收益不足以引入一棵依赖树 |
 | tokio `taskdump` 做进程内卡死诊断 | 接线正确（信号确实到达、快照确实被采集到），但把快照**渲染**成回溯那一步在本机不返回，且采集时的 `poll` 会卡住工作线程、外层 `timeout` 来不及生效 —— 一次信号就能让监听永久失效。改用外部抓栈（见 README 的「排障」） |
 | `tracing` 的 `EnvFilter` | 需要 `regex-automata` 等一串依赖；配置只给一个全局级别，用内置的 `LevelFilter` 即可 |
-| `reqwest-retry` / `backon` | 未在本机 vendor，未核实；现有手写重试只有 8 处且各有明确语义（NCM 重试一次、bilivideo 退避重签等），先量化问题再谈 |
+| `reqwest-retry` / `backon` | 未在本机 vendor，未核实；现有手写重试只有 8 处且各有明确语义（如 NCM 解析网络失败重试一次），先量化问题再谈 |
 | `candle` / `burn` 做 AI 音频超分 | 模型体积与推理延迟跟"一个终端里的音乐客户端"的定位不符；独占/重采样/EQ/响度已经把这轮能拿的可听收益拿到 |
 | 一批未经验证的音频 crate（`oximedia-audio`、`oxideav-flac`、`oxiaudio-dsp`、`libflo-audio`、`oxideav-sysaudio`、`audio_engine_core`、`fast-audio-resampler`、`lanczos-resampler`、`resample`、`coupler`、`rsynth`） | crates.io 下载量实测 **49 – 7,299**（最低的 `audio_engine_core` 49、`oxideav-sysaudio` 97），无一经过生态验证；同功能都有成熟选择（`rubato` 11.4M、`ebur128` 949k、`biquad` 387k） |
 | 三个查无实物的名字（`InfiniteDSP`、`tpt-dsp`、`math_audio_iir_fir`） | crates.io 与 GitHub 均查无对应可用项目；`nih-plug` 确有 2,973★ 但**不在 crates.io**，只能 git 依赖 —— 插件宿主不是当前要做的事 |

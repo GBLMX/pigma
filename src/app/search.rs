@@ -1,22 +1,9 @@
-use std::sync::Arc;
-
-use super::{
-    App,
-    search_core::{search_ncm, search_sonar},
-    send_event,
-};
-use crate::{
-    event::NavigationEvent,
-    state::{ContentState, SearchProvider},
-    text_input::TextInput,
-};
+use super::{App, search_core::search_ncm, send_event};
+use crate::{event::NavigationEvent, state::ContentState, text_input::TextInput};
 
 impl App {
     pub(super) fn handle_search_song(&mut self, keyword: String) {
-        match self.state.navigation.search.provider {
-            SearchProvider::Ncm => self.submit_ncm_search(keyword),
-            provider => self.submit_sonar_search(keyword, provider),
-        }
+        self.submit_ncm_search(keyword);
     }
 
     /// TUI-only orchestration for an NCM search: mark the loading state, spawn
@@ -37,61 +24,12 @@ impl App {
         });
     }
 
-    /// TUI-only orchestration for a single-source sonar search: build a finder
-    /// restricted to the selected provider, then delegate to
-    /// [`search_core::search_sonar`] and surface the result via an event.
-    fn submit_sonar_search(&mut self, keyword: String, provider: SearchProvider) {
-        self.state.navigation.set_content(ContentState::Loading);
-        self.state.navigation.content_is_search = true;
-        self.state.navigation.nav.subtitle =
-            Some(format!("({}): {keyword}", provider.display_name()));
-        self.state.navigation.content_selected = 0;
-        let source = provider.to_sonar().expect("sonar provider");
-        let sender = self.state.events.sender();
-        let registry = self.sonar_songs.clone();
-        let search_results = self.search_results.clone();
-        let limit = self.config.search_limit as usize;
-        tokio::spawn(async move {
-            let config = sonar::SearchConfig::new()
-                .with_providers(vec![source])
-                .with_timeout(15000);
-            let finder = match sonar::SonarFinder::new(config) {
-                Ok(f) => f,
-                Err(e) => {
-                    send_event(
-                        &sender,
-                        NavigationEvent::ContentLoaded(ContentState::Error(format!(
-                            "搜索初始化失败: {e}"
-                        )))
-                        .into(),
-                    );
-                    return;
-                }
-            };
-            let state =
-                match search_sonar(&finder, &registry, &search_results, &keyword, limit).await {
-                    Ok(hits) => {
-                        let songs: Vec<Arc<ncm_api::SongInfo>> =
-                            hits.into_iter().map(|h| Arc::new(h.info)).collect();
-                        if songs.is_empty() {
-                            ContentState::Error("没有找到结果".into())
-                        } else {
-                            ContentState::Songs(songs)
-                        }
-                    }
-                    Err(e) => ContentState::Error(e),
-                };
-            send_event(&sender, NavigationEvent::ContentLoaded(state).into());
-        });
-    }
-
     pub(super) fn handle_search_activate(&mut self) {
         let nav = &mut self.state.navigation;
         nav.search.active = true;
         nav.search.input = TextInput::new();
         nav.search.filter_queue_only = false;
         nav.search.unfiltered_songs = None;
-        nav.search.provider = SearchProvider::Ncm;
 
         nav.push_breadcrumb();
 

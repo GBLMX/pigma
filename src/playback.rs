@@ -21,7 +21,7 @@ mod storage;
 mod stream_client;
 
 pub use cover::CoverState;
-pub use engine::{NCM_SEARCH_QUEUE_KEY, PlaybackEngine, THIRD_PARTY_QUEUE_KEY};
+pub use engine::{NCM_SEARCH_QUEUE_KEY, PlaybackEngine};
 pub use lyrics::{LyricLine, parse_lyric_lines};
 pub use mode::{PlayMode, mode_icon};
 pub use pitch::{Note, PitchTracker, note_from_frequency};

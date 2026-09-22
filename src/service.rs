@@ -5,7 +5,7 @@ use std::{collections::HashMap, path::Path, sync::Arc};
 
 use crate::{
     cache::CacheManager,
-    playback::{LyricLine, parse_lyric_lines, scan_local_music},
+    playback::scan_local_music,
     state::{ContentState, HotSearchKeywords, PaginationInfo},
 };
 
@@ -396,51 +396,6 @@ impl ApiService {
                 None
             }
         }
-    }
-
-    /// Load lyrics for a third-party (sonar) song, with cache integration.
-    ///
-    /// Serves cached lyrics first (keyed by song id, shared with the NCM path)
-    /// so replays don't hit the provider again. On a miss, the original sonar
-    /// song is resolved from `registry` (falling back to the disk cache) and the
-    /// provider's lyrics are fetched and cached.
-    ///
-    /// Returns `(lyric, translated)` lines, or `None` when no usable lyrics
-    /// exist. `registry` maps synthetic song ids back to the sonar `Song`.
-    pub async fn load_sonar_lyrics(
-        &self,
-        song_id: u64,
-        finder: Arc<sonar::SonarFinder>,
-        registry: &std::sync::Mutex<HashMap<u64, Arc<sonar::Song>>>,
-    ) -> Option<(Vec<LyricLine>, Vec<LyricLine>)> {
-        // Serve cached lyrics first so replays don't hit the provider again.
-        if let Some(cached) = self.cache.load_lyrics_cache_async(song_id).await {
-            let lyric_lines = parse_lyric_lines(&cached.lyric);
-            if !lyric_lines.is_empty() {
-                let tlyric_lines = parse_lyric_lines(&cached.tlyric);
-                return Some((lyric_lines, tlyric_lines));
-            }
-        }
-
-        let msong = registry
-            .lock()
-            .ok()
-            .and_then(|m| m.get(&song_id).cloned())
-            .or_else(|| self.cache.thirdparty_song(song_id))?;
-        let lrc = finder.get_lyrics_fallback(&msong).await?;
-        let lines: Vec<String> = lrc.lines().map(|s| s.to_string()).collect();
-        let lyric_lines = parse_lyric_lines(&lines);
-        if lyric_lines.is_empty() {
-            return None;
-        }
-        self.cache.save_lyrics_cache(
-            song_id,
-            &ncm_api::Lyrics {
-                lyric: lines,
-                tlyric: Vec::new(),
-            },
-        );
-        Some((lyric_lines, Vec::new()))
     }
 
     /// Search songs by keyword.

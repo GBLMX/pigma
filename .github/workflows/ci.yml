@@ -60,7 +60,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          submodules: recursive
           fetch-depth: 0
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@nightly
@@ -81,7 +80,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          submodules: recursive
           fetch-depth: 0
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -99,7 +97,7 @@ jobs:
       - name: Run clippy action
         uses: clechasseur/rs-clippy-check@v5
         with:
-          # Cover the workspace members (`crates/ncm-api`, `crates/sonar`) as well:
+          # Cover the workspace members (`crates/ncm-api`) as well:
           # a package-only clippy run never looked at them.
           args: --workspace --all-targets
   build-aarch64:
@@ -112,7 +110,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          submodules: recursive
           fetch-depth: 0
 
       - name: Setup Cargo Env
@@ -151,7 +148,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          submodules: recursive
           fetch-depth: 0
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable

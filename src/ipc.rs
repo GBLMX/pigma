@@ -61,7 +61,7 @@ pub enum IpcRequest {
     /// Keep the connection open and stream each `StatusSnapshot` change as a
     /// JSON line. An initial snapshot is sent immediately on connect.
     Subscribe,
-    /// Search songs across NCM and the enabled sonar providers
+    /// Search songs on NetEase Cloud Music
     /// (`boxpigma msg search <keyword>`). The server replies with a JSON array of
     /// [`SearchEntry`]; results are registered in-process so a returned id can
     /// later be played with `boxpigma msg play <id>`.
@@ -301,7 +301,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "search",
         aliases: &[],
         takes_value: true,
-        summary: "Search songs across NCM and the enabled sonar sources",
+        summary: "Search songs on NetEase Cloud Music",
         kind: ActionKind::Query(QueryAction::Search),
     },
     ActionSpec {
@@ -466,9 +466,9 @@ pub struct QueueSnapshot {
     pub songs: Vec<QueueEntry>,
 }
 
-/// A search hit served to `boxpigma msg search <keyword>`. `source` tags the
-/// provider: `netease` for NetEase Cloud, otherwise the sonar provider name
-/// (`kugou` / `kuwo` / `bilivideo` / `youtube`).
+/// A search hit served to `boxpigma msg search <keyword>`. `source` names the
+/// provider: always `netease` (NetEase Cloud) now that it is the only search
+/// source, kept in the contract because published consumers read it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchEntry {
     pub id: u64,

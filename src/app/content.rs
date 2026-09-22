@@ -9,7 +9,7 @@ use ncm_api::SongInfo;
 use super::{App, send_event};
 use crate::{
     event::{AppEvent, NavigationEvent, PlaybackEvent},
-    playback::{CoverState, NCM_SEARCH_QUEUE_KEY, THIRD_PARTY_QUEUE_KEY, parse_lyric_lines},
+    playback::{CoverState, NCM_SEARCH_QUEUE_KEY, parse_lyric_lines},
     state::{ContentState, PaginationInfo, mv},
 };
 
@@ -149,11 +149,7 @@ impl App {
         };
         if let Some(pos) = pos {
             if let ContentState::Songs(songs) = self.state.navigation.content.as_ref() {
-                if self.state.navigation.content_is_search && sonar::is_sonar_song_id(id) {
-                    // Third-party search always goes into the same queue; do not reuse queues built by keyword/date
-                    self.playback
-                        .append_and_play_key(THIRD_PARTY_QUEUE_KEY, &songs[pos..=pos], 0);
-                } else if self.state.navigation.content_is_search {
+                if self.state.navigation.content_is_search {
                     // NetEase Cloud search always goes into the "官方搜索" queue
                     self.playback
                         .append_and_play_key(NCM_SEARCH_QUEUE_KEY, &songs[pos..=pos], 0);
@@ -263,28 +259,7 @@ impl App {
             self.toast(format!("▶  {}", song.name));
             let song_id = song.id;
 
-            if sonar::is_sonar_song_id(song_id) {
-                let service = self.service.clone();
-                let finder = self.finder.clone();
-                let registry = self.sonar_songs.clone();
-                let sender = self.state.events.sender();
-                tokio::spawn(async move {
-                    let Some((lyric_lines, tlyric_lines)) =
-                        service.load_sonar_lyrics(song_id, finder, &registry).await
-                    else {
-                        return;
-                    };
-                    send_event(
-                        &sender,
-                        PlaybackEvent::LyricsLoaded {
-                            song_id,
-                            lyrics: lyric_lines,
-                            translated_lyrics: tlyric_lines,
-                        }
-                        .into(),
-                    );
-                });
-            } else if let Some(audio) = local_audio_path(&song) {
+            if let Some(audio) = local_audio_path(&song) {
                 // Local tracks have no lyrics on the server — their id is just a
                 // path hash, so asking for it could only ever come back empty.
                 let audio = audio.to_path_buf();
@@ -358,16 +333,13 @@ impl App {
 
             // Load cover image
             let song_id = song.id;
-            let is_sonar = sonar::is_sonar_song_id(song_id);
             let own_pic = song.pic_url.clone();
             let cover = self.playback.state.cover.clone();
             let picker = self.picker.clone();
             let cache = self.service.cache().clone();
             let cover_http = self.cover_http.clone();
 
-            if !own_pic.is_empty() || is_sonar {
-                let finder = self.finder.clone();
-                let registry = self.sonar_songs.clone();
+            if !own_pic.is_empty() {
                 tokio::spawn(async move {
                     // Mark whose cover we are loading; a stale loader for a
                     // previously played song will be dropped below.
@@ -376,8 +348,7 @@ impl App {
                     }
 
                     // Serve from cache first — never block a cached cover on
-                    // re-resolving the source URL, which can fail offline or
-                    // when the third-party provider is unreachable.
+                    // re-resolving the source URL, which can fail offline.
                     let cached = {
                         let cache = cache.clone();
                         let picker = picker.clone();
@@ -396,26 +367,8 @@ impl App {
                         return;
                     }
 
-                    // Cache miss — resolve a cover URL: own cover, else
-                    // fallback search (kuwo preferred) for sonar songs without
-                    // one.
-                    let cover_url = if !own_pic.is_empty() {
-                        Some(own_pic)
-                    } else {
-                        let msong = registry
-                            .lock()
-                            .ok()
-                            .and_then(|m| m.get(&song_id).cloned())
-                            .or_else(|| cache.thirdparty_song(song_id));
-                        match msong {
-                            Some(msong) => finder.get_cover_fallback(&msong).await,
-                            None => None,
-                        }
-                    };
-                    let Some(cover_url) = cover_url else {
-                        return;
-                    };
-
+                    // Cache miss — the cover URL is the song's own picture.
+                    let cover_url = own_pic;
                     let small_url = if cover_url.contains('?') {
                         format!("{}&param=200y200", cover_url)
                     } else {
@@ -743,10 +696,7 @@ mod mv_panel_hook {
     use std::time::Duration;
 
     use super::*;
-    use crate::{
-        config::{Config, ProxyTarget},
-        state::mv,
-    };
+    use crate::{config::Config, state::mv};
 
     /// A song the hook can be started on: only its id and whether it has an MV matter here.
     fn song(id: u64, mv: u64) -> Arc<SongInfo> {
@@ -775,8 +725,7 @@ mod mv_panel_hook {
         let _turn = mv::fixtures::turn().await;
 
         let config = Config {
-            proxy: "http://127.0.0.1:9".into(),
-            proxy_target: ProxyTarget::Both,
+            proxy: Some("http://127.0.0.1:9".into()),
             ..Config::default()
         };
         let mut app = App::new(config, false).expect("app");

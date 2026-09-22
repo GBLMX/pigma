@@ -31,7 +31,7 @@ static HELP_ITEMS: LazyLock<Vec<HelpRow>> = LazyLock::new(|| {
         row("w", "清空播放队列"),
         row("?", "帮助"),
         row("Esc", "返回"),
-        row("Tab / ⇧Tab", "切换导航区块 / 搜索引擎"),
+        row("Tab / ⇧Tab", "切换导航区块"),
         row("↑ / ↓ 或 k / j", "上 / 下选择"),
         row("g / G", "跳转顶部 / 底部"),
         row("Enter", "播放选中 / 进入"),

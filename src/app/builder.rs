@@ -1,12 +1,11 @@
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
 
 use ratatui_image::picker::Picker;
 use reqwest::Client;
-use sonar::SonarFinder;
 
 use super::App;
 use crate::{
-    config::{Config, ProxyTarget, ThemeRegistry},
+    config::ThemeRegistry,
     state::{CommandItem, CommandPanel, palette_items},
     utils::terminal::{ImageProtocol, choose_image_protocol},
 };
@@ -29,35 +28,7 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 /// able to keep the app from starting.
 const PICKER_QUERY_BUDGET: Duration = Duration::from_secs(2);
 
-/// Used to decide whether a proxy is enabled based on `ProxyTarget`.
-pub(super) enum ProxyKind {
-    /// Non-YouTube services (NetEase Cloud, sonar search, covers, streaming), proxied under `Reversed`/`Both`.
-    NonYoutube,
-    /// YouTube services, proxied under `Normal`/`Both`.
-    Youtube,
-}
-
 impl App {
-    /// `NonYoutube` is proxied under `Reversed`/`Both`; `Youtube` under `Normal`/`Both`.
-    pub(super) fn proxy_for(config: &Config, kind: ProxyKind) -> &str {
-        let proxy = config.proxy.as_str();
-        if proxy.is_empty() {
-            return "";
-        }
-        let active = match kind {
-            ProxyKind::NonYoutube => {
-                matches!(
-                    config.proxy_target,
-                    ProxyTarget::Reversed | ProxyTarget::Both
-                )
-            }
-            ProxyKind::Youtube => {
-                matches!(config.proxy_target, ProxyTarget::Normal | ProxyTarget::Both)
-            }
-        };
-        if active { proxy } else { "" }
-    }
-
     /// Build the command palette from the one command table.
     ///
     /// Every entry comes from [`COMMANDS`] — the plain commands, then one submenu per config
@@ -84,42 +55,6 @@ impl App {
         commands.extend(palette_items());
 
         CommandPanel::with_root("COMMANDS", commands)
-    }
-
-    /// Build the sonar finder per config, applying the search/YouTube proxy.
-    pub(super) fn build_finder(
-        config: &Config,
-        search_proxy: &str,
-        youtube_proxy: &str,
-    ) -> color_eyre::Result<Arc<SonarFinder>> {
-        let mut sources: Vec<sonar::SonarSource> = Vec::new();
-        for name in &config.source_fallback.providers {
-            match sonar::SonarSource::from_name(name) {
-                Some(source) if !sources.contains(&source) => sources.push(source),
-                Some(_) => {}
-                None => log::warn!(
-                    "unknown [source_fallback] provider {name:?}; expected one of {}",
-                    sonar::SonarSource::ALL
-                        .iter()
-                        .map(sonar::SonarSource::as_str)
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ),
-            }
-        }
-        if sources.is_empty() {
-            // A typo in the provider list must not silently disable the fallback
-            // sources; fall back to the defaults and say so.
-            log::warn!("no valid [source_fallback] providers configured; using defaults");
-            sources = sonar::SonarSource::ALL.to_vec();
-        }
-        let search_config = sonar::SearchConfig::new()
-            .with_providers(sources)
-            .with_timeout(config.source_fallback.timeout_ms)
-            .with_search_proxy(search_proxy.to_string())
-            .with_youtube_proxy(youtube_proxy.to_string());
-        let finder = sonar::SonarFinder::new(search_config).map_err(color_eyre::Report::msg)?;
-        Ok(Arc::new(finder))
     }
 
     /// Build the image picker for the current terminal and settle on a protocol.

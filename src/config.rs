@@ -48,13 +48,23 @@ fn default_true() -> bool {
 ///
 /// Bump it whenever a field is renamed, removed, or changes meaning, and add the
 /// matching step in [`Config::migrate_from`].
-pub const CONFIG_VERSION: u32 = 1;
+pub const CONFIG_VERSION: u32 = 2;
 
 /// `config_version` is absent from files written before versioning existed, and such a
 /// file must be treated as v0 rather than as "current" — otherwise a migration could
 /// never trigger.
 fn unversioned_config_version() -> u32 {
     0
+}
+
+/// Read the version-1 `proxy_target` out of a config file that is about to be
+/// migrated. The key is gone from [`Config`], so it is read straight from the raw
+/// TOML; a missing key — or a file that does not parse — means the old default,
+/// `normal`.
+fn legacy_proxy_target(config_path: &Path) -> Option<String> {
+    let content = fs::read_to_string(config_path).ok()?;
+    let doc = content.parse::<toml_edit::DocumentMut>().ok()?;
+    doc.get("proxy_target")?.as_str().map(str::to_string)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -140,14 +150,10 @@ pub struct Config {
     /// Desktop notifications, off by default.
     #[serde(default)]
     pub notify: NotifyConfig,
-    /// Proxy address (leave empty to disable the proxy).
-    #[serde(default = "default_proxy")]
-    pub proxy: String,
-    /// Proxy target: `normal` proxies only YouTube (default, domestic users),
-    /// `reversed` proxies everything except YouTube (overseas users),
-    /// `both` proxies everything.
-    #[serde(default = "default_proxy_target")]
-    pub proxy_target: ProxyTarget,
+    /// Proxy address for every network request — the NetEase Cloud API, cover
+    /// downloads and audio streams. Absent means a direct connection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy: Option<String>,
     /// Maximum number of search results.
     #[serde(default = "default_search_limit")]
     pub search_limit: u16,
@@ -157,9 +163,6 @@ pub struct Config {
     /// Minimum splash screen display time (seconds); auto-transition waits for this even if boot finishes instantly.
     #[serde(default = "default_splash_duration")]
     pub splash_duration_secs: f64,
-    /// sonar fallback source config (multi-source fallback when NCM playback fails).
-    #[serde(default)]
-    pub source_fallback: SonarConfig,
     /// Default template for `boxpigma status` (plain format).
     #[serde(default = "default_cli_status_template")]
     pub cli_status_template: String,
@@ -171,25 +174,6 @@ pub struct Config {
 /// The karaoke blue: what a KTV screen paints over the words once they have been sung.
 fn default_lyric_ktv_color() -> String {
     "#4da6ff".into()
-}
-
-fn default_proxy() -> String {
-    "http://127.0.0.1:7890".into()
-}
-
-fn default_proxy_target() -> ProxyTarget {
-    ProxyTarget::Normal
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ProxyTarget {
-    /// Domestic default: only YouTube goes through the proxy; everything else connects directly.
-    Normal,
-    /// Overseas users: everything except YouTube goes through the proxy.
-    Reversed,
-    /// Everything goes through the proxy.
-    Both,
 }
 
 /// Navigation bar position: left (default), right, top, or bottom.
@@ -241,34 +225,6 @@ fn default_cli_status_format() -> String {
     "plain".into()
 }
 
-/// Fallback source config (sonar multi-source fallback).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct SonarConfig {
-    /// Whether fallback sources are enabled.
-    pub enabled: bool,
-    /// Sources participating in fallback, ordered from highest to lowest priority:
-    /// `kuwo`, `kugou`, `bilivideo`, `youtube`.
-    pub providers: Vec<String>,
-    /// Per-source search timeout (milliseconds).
-    pub timeout_ms: u64,
-}
-
-impl Default for SonarConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            providers: vec![
-                "kuwo".to_string(),
-                "kugou".to_string(),
-                "bilivideo".to_string(),
-                "youtube".to_string(),
-            ],
-            timeout_ms: 10000,
-        }
-    }
-}
-
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -290,8 +246,7 @@ impl Default for Config {
             mouse: true,
             cursor_style: crate::utils::terminal::CursorStyle::default(),
             notify: NotifyConfig::default(),
-            proxy: default_proxy(),
-            proxy_target: default_proxy_target(),
+            proxy: None,
             search_limit: default_search_limit(),
             navigation_position: NavPosition::default(),
             splash_duration_secs: default_splash_duration(),
@@ -300,7 +255,6 @@ impl Default for Config {
             audio: AudioConfig::default(),
             playerbar: PlayerbarConfig::default(),
             titles: TitlesConfig::default(),
-            source_fallback: SonarConfig::default(),
             themes: HashMap::new(),
             navigation: NavConfig::default(),
             columns: ColumnsConfig::default(),
@@ -410,9 +364,27 @@ impl Config {
         }
 
         // Steps run in order, each rewriting whatever the previous schema got wrong.
-        // There is no field to rewrite for v0 → v1 yet: files written before versioning
-        // existed load unchanged, and the version is recorded here so that the next
-        // migration can key off it.
+
+        // v1 → v2: `proxy_target` is gone along with the multi-source fallback it
+        // scoped, and `proxy` now covers every network source. `normal` (the default)
+        // only ever proxied one non-NetEase source — the source that no longer exists —
+        // so that address is dropped and the user ends up on a direct connection;
+        // `reversed`/`both` meant "proxy NetEase traffic", which is exactly what
+        // `proxy` means now, so it is kept.
+        if from < 2 {
+            match legacy_proxy_target(config_path).as_deref() {
+                None | Some("normal") => {
+                    self.proxy = None;
+                    log::info!(
+                        "config.toml schema v1 → v2: proxy_target 为默认值，不再代理（清理 proxy）"
+                    );
+                }
+                Some(target) => log::info!(
+                    "config.toml schema v1 → v2: 保留 proxy（原 proxy_target = {target}）"
+                ),
+            }
+        }
+
         self.config_version = CONFIG_VERSION;
     }
 
@@ -567,6 +539,50 @@ mod tests {
             "the pre-versioning file must be backed up"
         );
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The v1 → v2 rule: the old `proxy_target` decides whether the configured `proxy`
+    /// survives. `normal` only ever proxied a source that no longer exists — never
+    /// NetEase — so the address is dropped and the user ends up direct;
+    /// `reversed`/`both` meant NetEase traffic goes through the proxy, which is what
+    /// `proxy` means now, so it is kept. Neither the stale key nor the (removed)
+    /// `[source_fallback]` section may be written back.
+    #[test]
+    fn v1_proxy_target_decides_whether_the_proxy_survives() {
+        for (target, expected) in [
+            ("normal", None),
+            ("both", Some("http://127.0.0.1:7890")),
+            ("reversed", Some("http://127.0.0.1:7890")),
+        ] {
+            let dir = scratch_dir(&format!("proxy-target-{target}"));
+            let path = dir.join("config.toml");
+            fs::write(
+                &path,
+                format!(
+                    "config_version = 1\n\
+                     proxy = \"http://127.0.0.1:7890\"\n\
+                     proxy_target = \"{target}\"\n\
+                     [source_fallback]\n\
+                     enabled = true\n"
+                ),
+            )
+            .expect("write v1 config");
+
+            let cfg = Config::load_from(&path);
+
+            assert_eq!(cfg.config_version, CONFIG_VERSION);
+            assert_eq!(cfg.proxy.as_deref(), expected, "proxy_target = {target}");
+            assert!(
+                dir.join("config.toml.bak-v1").exists(),
+                "the v1 file must be backed up"
+            );
+            let rendered = cfg.to_toml();
+            assert!(
+                !rendered.contains("proxy_target") && !rendered.contains("source_fallback"),
+                "a saved config must not carry the removed keys back:\n{rendered}"
+            );
+            let _ = fs::remove_dir_all(&dir);
+        }
     }
 
     /// The startup path end to end: `save`/first-run output carries the current version and

@@ -68,7 +68,7 @@ boxpigma 把网易云音乐与本地音频播放带进终端：流式播放、�
 **一、结构性差异**（上游不会覆盖；每次同步必然冲突，冲突时保留本仓库版本）
 
 - **项目身份**：包名与二进制名 `boxpigma`（上游为 `pigma`），配置目录 `~/.config/boxpigma`、缓存目录 `~/.cache/boxpigma`、IPC socket `boxpigma.sock` 与 Windows 命名管道一并改名；首次运行会把旧的 `pigma` 目录整体接管过来（搬不动就继续用旧目录），不丢配置与缓存
-- **构建**：两个 crate 收进一个 Cargo workspace —— 依赖版本统一（rustls 三份规格合一）、`cargo test/clippy --workspace` 覆盖全部成员，CI 增加 ubuntu 与成员检查
+- **构建**：独立的 crate 收进一个 Cargo workspace —— 依赖版本统一（rustls 三份规格合一）、`cargo test/clippy --workspace` 覆盖全部成员，CI 增加 ubuntu 与成员检查
 - **日志栈**：`tracing` + `tracing-appender`（按天轮转、保留最近 7 个、行内带模块路径与本地时间）；135 处 `log::*!` 由 `tracing-log` 桥接，调用点无需改动
 - **UI 内部结构**：页面分发、页面按键与键位表合并为一张表（新增一个页面从改 9 个文件降到 2 个）；铺底色改用 `Fill`
 - **主题内部**：WCAG 亮度与对比度改用 `palette`，全仓只剩一处颜色数学；`default_theme = "random"` 每次启动随机挑一个、`:theme random` 立刻重掷；主题名排序固定，`:theme` 循环顺序不再随进程变化
@@ -78,7 +78,7 @@ boxpigma 把网易云音乐与本地音频播放带进终端：流式播放、�
 **二、增量差异**（可被上游采纳或替代；挑上游提交时优先看这一类）
 
 - **修复**：下载缓存条目只在流完成后记录 · 默认日志级别改为 INFO · 清空的 `sections`/`columns` 序列化不再 panic · eapi 非 2xx 只告警 · IPC socket 权限收窄到属主 · `.gitignore` 忽略调试残留 · 搜索、封面、音频流补齐连接与读超时（音频流刻意**不加**总超时，否则会截断正在播放的下载）
-- **播放**：解析失败按类型分类（网络失败重试一次、无版权/无地址直接走兜底源），不再靠错误字符串前缀判断
+- **播放**：解析失败按类型分类（网络失败重试一次、无版权/无地址直接走云盘兜底），不再靠错误字符串前缀判断
 - **外观**：符号预设（`nerd`／`unicode`／`ascii`，不装 Nerd Font 也能用）· 按终端能力降级真彩色 · 依据终端背景自动选明/暗主题（Linux/macOS 问终端 OSC 11，Windows 读控制台调色板）· **背景也由主题绘制**（此前只给文字上色，浅色主题在深色终端上会变成零星灰字）· 内置 20 套主题 + `[themes.<名>]` 继承式自定义 · 高亮行的前景色按对比度自动选取，浅色主题下也读得出来
 - **新增**：频谱可视化 · 音高读数（自实现 YIN，无新增依赖）· 鼠标交互（点击 seek／切区／播放控制／模式／喜欢／静音）· vim 风格 `:` 命令行与 Tab 补全（密码/短信登录、退出登录、签到）· 听歌打卡（播满约 30 秒即上报，与官方客户端口径一致；短于 30 秒的歌以播完为准）· **面板可拖拽可开关**（框内顶栏/侧栏/播放条/MV 栏：鼠标拖边界改尺寸、双击折叠还原、`Ctrl+方向键` 同义，尺寸与折叠态写回配置；**外框不动**）· **进度条样式预设**（`:progress`，一种样式一个词，逐键仍可覆盖）· **歌词五种显示样式**（`:lyrics window|one_line|ktv|flow|plain`，`ktv` 是单色卡拉OK填充、颜色由 `lyric_ktv_color` 定）· 译文与原文一眼分得开（译文行带标记，`y` ／`:translation` 开关）· 歌词严格按解码位置对轴 · 终端开关：`mouse`／`cursor_style`／`[notify]` 桌面通知 · 随仓库提供的性能基准
 - **终端协议**：kitty 图形协议封面（可用 `[playerbar] image_protocol` 强制）· 同步刷新（整帧一次性呈现，也是 kitty 放图的规范要求）· kitty 键盘协议（`Esc` 不再被读成 `Alt+<key>`）· 括号粘贴 · 封面协议以**终端的回答**为准，tmux 内自动回退（Windows 的 ConPTY 不回答该查询，故按环境判定，见 [Windows](#windows)）· kitty 的桌面通知用其自有的 `OSC 99`（标题与正文分开、Base64 负载、`f=` 声明应用名），其余终端保持 `OSC 9` 逐字节不变
@@ -99,7 +99,6 @@ boxpigma 把网易云音乐与本地音频播放带进终端：流式播放、�
 
 - [x] 流式播放、边听边存、低延迟 seek、本地音频播放
 - [x] 下载管理（与边听边存重合）· 云盘上传（缓存文件、本地文件）· 音量控制
-- [x] 多源 fallback：kugou / kuwo / bilibili / youtube（无需 cookie），思路参考 [UnblockNeteaseMusic](https://github.com/UnblockNeteaseMusic/server)
 - [x] 播放模式、心动模式、歌曲操作（like / dislike / fav …）
 
 **界面**
@@ -132,7 +131,7 @@ boxpigma 把网易云音乐与本地音频播放带进终端：流式播放、�
 **待办**
 
 - [x] command panel 重写，更多运行时配置支持（`ctrl+p` 面板 + `:mouse` / `:cursor` / `:notify` / `:lyricgradient` / `:saveonplay` 等可运行时修改的设置）
-- [x] 云盘源作为 fallback（NCM → sonar → **云盘** → 才报错）
+- [x] 云盘源作为 fallback（NCM → **云盘** → 才报错）
 - [x] 本地音频歌词、元数据重写（`lofty` 读标签；同名侧车 `.lrc` 复用既有歌词管线）
 - [x] 歌手详情页：简介 / 热门曲目 / **专辑 / 相似歌手** —— 三个列表共用一个光标（`Tab`/`Shift+Tab` 循环），专辑可走可开（`Enter` 打开该专辑，`Esc` 回到歌手页），相似歌手 `Enter` 直接跳过去；鼠标点哪栏就选中哪栏，滚轮走指针所在那栏
 - [x] 推荐生态接入既有侧栏与内容页：相似歌曲 / 包含该歌的歌单 / 听歌排行（本周 · 全部）/ 推荐电台 / 私人 FM（`:simi` `:simiplaylist` `:fm` `:fmtrash`）
@@ -241,10 +240,10 @@ bin install https://github.com/GBLMX/pigma
 cargo install --git https://github.com/GBLMX/pigma.git
 ```
 
-或本地构建 —— `crates/sonar` 依赖 `crates/y7dl` 子模块，克隆时要一并取回：
+或本地构建：
 
 ```sh
-git clone --recurse-submodules https://github.com/GBLMX/pigma.git
+git clone https://github.com/GBLMX/pigma.git
 cd pigma                     # 仓库名仍是 pigma，二进制叫 boxpigma
 cargo build --release
 # binary at target/release/boxpigma
@@ -260,7 +259,7 @@ cargo build --release
 | s/d           |       添加到喜欢/不感兴趣(仅每日推荐)        |
 | ?             |                  快捷键面板                  |
 | r             |               手动刷新列表内容               |
-| tab/shift+tab |              切换导航/搜索引擎               |
+| tab/shift+tab |                 切换导航区块                 |
 | enter         |                播放/进入列表                 |
 | space         |                     暂停                     |
 | f             |                   播放队列                   |
@@ -354,7 +353,7 @@ Add-Content $PROFILE '. "$HOME/.config/powershell/boxpigma.ps1"'
 | `boxpigma msg list` | 列出当前播放队列（`▶` 标记当前曲目），`--json` 输出原始 `QueueSnapshot` |
 | `boxpigma msg next` / `boxpigma msg previous` | 下一首 / 上一首 |
 | `boxpigma msg pause` / `boxpigma msg play` | 暂停 / 播放（`boxpigma msg play <song-id>` 按 id 跳播队列中的歌曲） |
-| `boxpigma msg search <keyword>` | 搜索并返回歌曲数据（解析顺序：NCM 失败重试一次 → sonar → 云盘兜底，标出 `source` 和 `id`），再 `boxpigma msg play <id>` 播放选中的那首 |
+| `boxpigma msg search <keyword>` | 搜索并返回歌曲数据（解析顺序：NCM 失败重试一次 → 云盘兜底，标出 `source` 和 `id`），再 `boxpigma msg play <id>` 播放选中的那首 |
 | `boxpigma msg toggle_play` | 播放/暂停切换 |
 | `boxpigma msg mode` | 切换播放模式 |
 | `boxpigma msg like` / `boxpigma msg dislike` | 喜欢 / 不喜欢 |

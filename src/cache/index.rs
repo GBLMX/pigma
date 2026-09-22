@@ -25,8 +25,6 @@ pub(super) struct CacheEntry {
     pub(super) pic_url: String,
     #[serde(default)]
     pub(super) uploaded_at: u64,
-    #[serde(default)]
-    pub(super) thirdparty: Option<Arc<sonar::Song>>,
 }
 
 impl Serialize for CacheEntry {
@@ -34,8 +32,7 @@ impl Serialize for CacheEntry {
         let n = 2
             + usize::from(self.accessed_at > 0)
             + usize::from(!self.pic_url.is_empty())
-            + usize::from(self.uploaded_at > 0)
-            + usize::from(self.thirdparty.is_some());
+            + usize::from(self.uploaded_at > 0);
         let mut map = serializer.serialize_map(Some(n))?;
         map.serialize_entry("filename", &self.filename)?;
         map.serialize_entry("duration", &self.duration)?;
@@ -47,9 +44,6 @@ impl Serialize for CacheEntry {
         }
         if self.uploaded_at > 0 {
             map.serialize_entry("uploaded_at", &self.uploaded_at)?;
-        }
-        if let Some(song) = &self.thirdparty {
-            map.serialize_entry("thirdparty", song)?;
         }
         map.end()
     }
@@ -179,16 +173,6 @@ impl CacheManager {
         }
     }
 
-    /// The original third-party (sonar) song recorded for a cached song id, if
-    /// any. Used to re-resolve playback/lyrics/covers after a restart.
-    pub fn thirdparty_song(&self, song_id: u64) -> Option<Arc<sonar::Song>> {
-        self.index
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .get(&song_id)
-            .and_then(|e| e.thirdparty.clone())
-    }
-
     pub fn mark_uploaded(&self, song_id: u64) {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -273,15 +257,15 @@ mod tests {
         assert_eq!(e.pic_url, "http://p");
     }
 
+    /// An index written by a build that recorded the original third-party song must keep
+    /// loading: users have such files on disk, and `CacheEntry` ignores the unknown key.
     #[test]
-    fn parses_inline_thirdparty() {
+    fn ignores_unknown_keys() {
         let idx = parse(
-            r#"{"songs":{"11201139274454706721":{"filename":"a.mp3","duration":1,"thirdparty":{"id":11201139274454706721,"source_id":"47444754","name":"x","singer":"y","album":"z","duration":1,"source":"Kuwo","pic_url":"","meta":{"high_hash":null,"lossless_hash":null,"album_id":""}}}}}"#,
+            r#"{"songs":{"186150":{"filename":"a.mp3","duration":1,"legacy_provider":{"id":7,"source_id":"1","name":"x","singer":"y","album":"z","duration":1,"pic_url":"","meta":{"high_hash":null,"lossless_hash":null,"album_id":""}}}}}"#,
         );
-        let e = idx.songs.get(&11201139274454706721).unwrap();
-        let tp = e.thirdparty.as_ref().unwrap();
-        assert_eq!(tp.source_id, "47444754");
-        assert_eq!(tp.singer, "y");
+        let e = idx.songs.get(&186150).unwrap();
+        assert_eq!(e.filename, "a.mp3");
     }
 
     #[test]
@@ -295,7 +279,6 @@ mod tests {
                 accessed_at: 1,
                 pic_url: "http://p".into(),
                 uploaded_at: 0,
-                thirdparty: None,
             },
         );
         let file = CacheIndexFile { songs };

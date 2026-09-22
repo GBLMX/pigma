@@ -2,7 +2,7 @@ use std::{
     fs::{self, File, OpenOptions},
     io,
     path::PathBuf,
-    sync::{Arc, atomic::Ordering},
+    sync::atomic::Ordering,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -122,7 +122,7 @@ impl CacheManager {
     /// completes, so the index never contains entries for incomplete/failed
     /// downloads. Persists the index so a completed download survives an
     /// immediate quit.
-    pub fn mark_cached(&self, song: &SongInfo, ext: &str, thirdparty: Option<sonar::Song>) {
+    pub fn mark_cached(&self, song: &SongInfo, ext: &str) {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_secs())
@@ -141,7 +141,6 @@ impl CacheManager {
                     accessed_at: now,
                     pic_url: song.pic_url.clone(),
                     uploaded_at: 0,
-                    thirdparty: thirdparty.map(Arc::new),
                 },
             );
         self.cached_total_bytes

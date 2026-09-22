@@ -3,7 +3,7 @@ use std::{fs, path::PathBuf, sync::Arc};
 use ncm_api::SongInfo;
 use serde::{Deserialize, Serialize};
 
-use super::{NCM_SEARCH_QUEUE_KEY, PlayMode, THIRD_PARTY_QUEUE_KEY};
+use super::{NCM_SEARCH_QUEUE_KEY, PlayMode};
 use crate::utils::sanitize_filename;
 
 /// File name for the unified NCM search queue.
@@ -11,16 +11,10 @@ pub const NCM_SEARCH_FILE: &str = "ncm_search.json";
 /// Stable id for the NCM search queue: a single shared file, no date/hash.
 const NCM_SEARCH_ID: &str = "q_ncm_search";
 
-/// File name for the unified third-party (sonar) search queue.
-pub const THIRD_PARTY_FILE: &str = "thirdparty_source.json";
-/// Stable id for the third-party queue: a single shared file, no date/hash.
-const THIRD_PARTY_ID: &str = "q_thirdparty";
-
 /// Map a fixed search-queue key to its stable `(id, file)` pair.
 fn special_queue(key: &str) -> Option<(&'static str, &'static str)> {
     match key {
         NCM_SEARCH_QUEUE_KEY => Some((NCM_SEARCH_ID, NCM_SEARCH_FILE)),
-        THIRD_PARTY_QUEUE_KEY => Some((THIRD_PARTY_ID, THIRD_PARTY_FILE)),
         _ => None,
     }
 }
@@ -29,7 +23,6 @@ fn special_queue(key: &str) -> Option<(&'static str, &'static str)> {
 fn special_queue_by_id(id: &str) -> Option<(&'static str, &'static str)> {
     match id {
         NCM_SEARCH_ID => Some((NCM_SEARCH_QUEUE_KEY, NCM_SEARCH_FILE)),
-        THIRD_PARTY_ID => Some((THIRD_PARTY_QUEUE_KEY, THIRD_PARTY_FILE)),
         _ => None,
     }
 }
@@ -177,14 +170,8 @@ impl PlaylistStorage {
                 }
             }
         }
-        for (id, file) in [NCM_SEARCH_ID, THIRD_PARTY_ID]
-            .into_iter()
-            .zip([NCM_SEARCH_FILE, THIRD_PARTY_FILE])
-        {
-            if self.base_dir.join(file).exists() {
-                let display = special_queue_by_id(id).map(|(d, _)| d).unwrap_or(id);
-                queues.push((id.to_string(), display.to_string()));
-            }
+        if self.base_dir.join(NCM_SEARCH_FILE).exists() {
+            queues.push((NCM_SEARCH_ID.to_string(), NCM_SEARCH_QUEUE_KEY.to_string()));
         }
         queues.sort();
         queues
@@ -395,5 +382,28 @@ mod tests {
         }"#;
         let saved: SavedQueue = serde_json::from_str(json).unwrap();
         assert_eq!(saved.history, vec![11, 22]);
+    }
+
+    /// A queue id that no longer exists — one written by an older build — is simply
+    /// unknown: it resolves to no display name and loads nothing instead of panicking,
+    /// and a stray `.json` file that is not a queue is not listed. The old fallback
+    /// queue's id and file are exactly this case on disk after an upgrade.
+    #[test]
+    fn unknown_queue_ids_and_stray_files_degrade_to_none() {
+        let dir = std::env::temp_dir().join(format!(
+            "boxpigma-storage-test-{}-unknown",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let storage = PlaylistStorage::new(dir.clone());
+        std::fs::write(dir.join("playlists/legacy_source.json"), "{}").expect("write stray file");
+
+        assert!(storage.display_for_id("q_gone").is_none());
+        assert!(storage.load_queue_by_id("q_gone").is_none());
+        assert!(
+            !storage.list_queues().iter().any(|(id, _)| id == "q_gone"),
+            "a stray file must not show up as a queue"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

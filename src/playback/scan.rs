@@ -117,9 +117,10 @@ pub fn scan_local_music(dir: &std::path::Path) -> Vec<SongInfo> {
         let album = tags.album.unwrap_or_else(|| path_text.clone());
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         path.to_string_lossy().hash(&mut hasher);
-        // Clear the top bit so the id can never collide with the sonar song-id
-        // flag (1<<63); otherwise ~half of local files get misrouted to the
-        // network resolver instead of `resolve_local`.
+        // The top bit is cleared to keep the ids stable: it used to separate these local ids
+        // from the (now removed) network-source ids, and the masked values are already written
+        // into the on-disk queue files. Dropping the mask would change the id of roughly half of
+        // all local files and orphan their saved queues.
         let id = hasher.finish() & !(1u64 << 63);
         songs.push(SongInfo {
             id,
@@ -230,8 +231,8 @@ mod tests {
             Some(audio.to_string_lossy().as_ref()),
             "the player needs the real file, not the album tag"
         );
-        // The top bit marks sonar ids; a local id carrying it would be routed to
-        // the network resolver instead of the file on disk.
+        // The top bit is kept clear for id stability across versions; a local id carrying it
+        // would no longer match the ids already saved in the queue files.
         assert_eq!(song.id & (1 << 63), 0);
 
         fs::remove_dir_all(&dir).ok();

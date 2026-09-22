@@ -25,7 +25,6 @@ use ncm_api::SongList;
 use ratatui::{DefaultTerminal, Frame, layout::Rect, widgets::TableState};
 use ratatui_image::picker::Picker;
 use reqwest::Client;
-use sonar::{SonarFinder, Song};
 use splash::send_event;
 
 use crate::{
@@ -33,11 +32,11 @@ use crate::{
     config::{Config, ThemeRegistry, init_symbols, symbols},
     event::{AuthEvent, EventHandler},
     ipc::{IpcEvent, QueueSnapshot, StatusSnapshot},
-    playback::{NCM_SEARCH_QUEUE_KEY, PlaybackEngine, THIRD_PARTY_QUEUE_KEY},
+    playback::{NCM_SEARCH_QUEUE_KEY, PlaybackEngine},
     service::{ApiEndpoint, ApiService},
     state::{
         ContentState, LoginState, NavState, NavigationState, Page, PromptState, QueueHits,
-        SearchProvider, SearchState, SplashState, State, TableMode,
+        SearchState, SplashState, State, TableMode,
     },
     ui,
     utils::{
@@ -63,11 +62,7 @@ pub struct App {
     /// HTTP client for one-shot cover downloads (honours the proxy config); bounded by
     /// [`Self::build_cover_client`]'s total deadline, since a cover is never streamed.
     pub cover_http: Client,
-    /// Shared sonar finder used for per-provider search and playback fallback.
-    pub finder: Arc<SonarFinder>,
-    /// Original sonar songs for search results, keyed by synthetic song id.
-    pub sonar_songs: Arc<Mutex<HashMap<u64, Arc<Song>>>>,
-    /// Registry of recently searched songs (NCM and sonar) keyed by song id,
+    /// Registry of recently searched songs keyed by song id,
     /// shared with the IPC `search` engine so `boxpigma msg play <id>` can enqueue
     /// and play a search result that is not in the playback queue.
     pub search_results: SearchResults,
@@ -147,17 +142,15 @@ impl App {
 
         let command_panel = Self::build_command_panel(&theme_registry);
 
-        // `normal` (domestic default): only YouTube goes through the proxy;
-        // `reversed` (overseas): everything except YouTube; `both`: everything.
-        let ncm_proxy = Self::proxy_for(&config, builder::ProxyKind::NonYoutube);
-        let search_proxy = Self::proxy_for(&config, builder::ProxyKind::NonYoutube);
-        let youtube_proxy = Self::proxy_for(&config, builder::ProxyKind::Youtube);
-        let stream_proxy = search_proxy;
+        // One proxy for everything on the network — the NCM API, covers and the audio
+        // streams. `proxy` is absent by default ("直连"); the v1 key that used to scope it
+        // to a subset of the sources is gone (see `Config::migrate_from`).
+        let proxy = config.proxy.clone().unwrap_or_default();
 
         let cookie_path = boxpigma_config_dir().join("cookies.json");
         let mut api_builder = ncm_api::NcmClient::builder().cookie_path(cookie_path);
-        if !ncm_proxy.is_empty() {
-            api_builder = api_builder.proxy(ncm_proxy);
+        if !proxy.is_empty() {
+            api_builder = api_builder.proxy(&proxy);
         }
         let api = Arc::new(api_builder.build()?);
 
@@ -177,21 +170,6 @@ impl App {
         };
         let base_dir = boxpigma_cache_dir();
 
-        let finder = Self::build_finder(&config, search_proxy, youtube_proxy)?;
-
-        // Search providers offered in the search bar: NetEase Cloud always first,
-        // followed by the configured sonar fallback sources.
-        let mut search_providers = vec![SearchProvider::Ncm];
-        for source in finder
-            .sources()
-            .iter()
-            .map(|s| SearchProvider::from_sonar(*s))
-        {
-            if !search_providers.contains(&source) {
-                search_providers.push(source);
-            }
-        }
-
         let cache = Arc::new(CacheManager::new(
             cache_dir,
             base_dir.clone(),
@@ -208,14 +186,11 @@ impl App {
             with_terminal && std::io::stdin().is_terminal(),
         );
 
-        let stream_client = Self::build_stream_client(stream_proxy)?;
-        let cover_http = Self::build_cover_client(search_proxy)?;
+        let stream_client = Self::build_stream_client(&proxy)?;
+        let cover_http = Self::build_cover_client(&proxy)?;
 
-        let sonar_enabled = config.source_fallback.enabled;
-        let sonar_songs: Arc<Mutex<HashMap<u64, Arc<sonar::Song>>>> =
-            Arc::new(Mutex::new(HashMap::new()));
         let liked_ids: Arc<Mutex<HashSet<u64>>> = Arc::new(Mutex::new(HashSet::new()));
-        let mut state = State {
+        let state = State {
             running: true,
             events,
             border,
@@ -274,15 +249,11 @@ impl App {
             like_areas: Default::default(),
             volume_before_mute: None,
         };
-        state.navigation.search.providers = search_providers;
         let search_results: SearchResults = Arc::new(Mutex::new(HashMap::new()));
         let searcher = Arc::new(SearchEngine::new(
             service.clone(),
-            Arc::clone(&finder),
-            Arc::clone(&sonar_songs),
             Arc::clone(&search_results),
             config.search_limit as usize,
-            state.navigation.search.providers.clone(),
         ));
         let (status_tx, _status_rx) = tokio::sync::broadcast::channel(16);
         Ok(Self {
@@ -299,9 +270,6 @@ impl App {
                 audio.clone(),
                 save_on_play,
                 stream_client,
-                Arc::clone(&finder),
-                sonar_enabled,
-                Arc::clone(&sonar_songs),
                 Arc::clone(&liked_ids),
             ),
             state,
@@ -309,8 +277,6 @@ impl App {
             terminal_background,
             picker,
             cover_http,
-            finder,
-            sonar_songs,
             search_results,
             searcher,
             liked_ids,
@@ -466,8 +432,7 @@ impl App {
                     // Jump to a song in the active queue and play it. Songs
                     // returned by `boxpigma msg search` are not queued, so fall
                     // back to the shared search-result registry and enqueue the
-                    // result (sonar songs keep their synthetic id, which the
-                    // playback source resolves via `sonar_songs`).
+                    // result into the NCM search queue.
                     if !self.playback.play_song_by_id(id)
                         && let Some(song) = self
                             .search_results
@@ -475,12 +440,8 @@ impl App {
                             .ok()
                             .and_then(|m| m.get(&id).cloned())
                     {
-                        let key = if sonar::is_sonar_song_id(id) {
-                            THIRD_PARTY_QUEUE_KEY
-                        } else {
-                            NCM_SEARCH_QUEUE_KEY
-                        };
-                        self.playback.append_and_play_key(key, &[song], 0);
+                        self.playback
+                            .append_and_play_key(NCM_SEARCH_QUEUE_KEY, &[song], 0);
                     }
                     let name = self
                         .playback
