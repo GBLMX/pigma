@@ -700,3 +700,186 @@ mod tests {
         );
     }
 }
+
+/// `cargo test --release --lib -- --ignored --nocapture decoding_and_the_chain_cost`
+///
+/// What the samples cost on their way to the device. The other benches answer what the
+/// *analysis* side and the frames cost; this is the account the listener pays for the sound
+/// itself: symphonia decoding the file, then whatever `[audio]` asked the chain to do to it.
+///
+/// The number that means something is the ratio to the audio's own length: a chain that spends
+/// 1% of a core per second of audio is one nobody can hear as a cost. A memory-source control
+/// runs first, so the numbers can be read as "decoding and the chain" rather than "this loop".
+#[cfg(test)]
+mod chain_bench {
+    use std::{
+        fs,
+        io::BufReader,
+        num::NonZero,
+        path::{Path, PathBuf},
+        time::Instant,
+    };
+
+    use rodio::{Decoder, Source, buffer::SamplesBuffer};
+
+    use crate::config::{AudioConfig, EqBand, LoudnessConfig};
+
+    /// The device the chain is built for. 48 kHz is what this machine's sink reports and what a
+    /// 44.1 kHz file has to be converted to; the file's own rate is measured, not assumed.
+    const DEVICE_RATE: u32 = 48_000;
+
+    /// The material: a real file, because decoding cost depends on the codec and on the file.
+    /// `BOXPIGMA_BENCH_AUDIO` names one; otherwise the first MP3 of the user's own download
+    /// cache. With neither, a printed line and a skip — the contract `scan_bench` has.
+    fn material() -> Option<PathBuf> {
+        if let Ok(path) = std::env::var("BOXPIGMA_BENCH_AUDIO") {
+            let path = PathBuf::from(path);
+            if path.is_file() {
+                return Some(path);
+            }
+            println!("  BOXPIGMA_BENCH_AUDIO 不是一个文件：{}", path.display());
+        }
+
+        let dir = crate::utils::boxpigma_cache_dir().join("downloads");
+        let mut files: Vec<PathBuf> = fs::read_dir(&dir)
+            .ok()?
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("mp3"))
+            })
+            .collect();
+        files.sort();
+        files.into_iter().next()
+    }
+
+    fn decode(path: &Path) -> Option<Box<dyn Source<Item = f32> + Send>> {
+        let file = fs::File::open(path).ok()?;
+        Decoder::new(BufReader::new(file))
+            .ok()
+            .map(|decoder| Box::new(decoder) as Box<dyn Source<Item = f32> + Send>)
+    }
+
+    /// Drain a source one sample at a time, the way the sink pulls it, and hand back
+    /// `(wall seconds, audio seconds, samples)`.
+    fn drain(mut source: Box<dyn Source<Item = f32> + Send>) -> (f64, f64, u64) {
+        let rate = f64::from(source.sample_rate().get());
+        let channels = f64::from(source.channels().get());
+        let start = Instant::now();
+        let mut samples = 0u64;
+        while source.next().is_some() {
+            samples += 1;
+        }
+        let wall = start.elapsed().as_secs_f64();
+        (wall, samples as f64 / (rate * channels), samples)
+    }
+
+    /// One line per case: cost per second of audio, and what share of one core that is when the
+    /// audio is played in real time.
+    fn report(label: &str, wall: f64, audio: f64, samples: u64) {
+        let audio = audio.max(f64::EPSILON);
+        println!(
+            "  {label:<38} {:>8.2} µs/音频秒 → 实时占单核 {:>5.2}%   ({} 采样 / {:.0} 秒)",
+            wall / audio * 1e6,
+            wall / audio * 100.0,
+            samples,
+            audio,
+        );
+    }
+
+    #[test]
+    #[ignore = "measures decoding and the [audio] chain against a real file"]
+    fn decoding_and_the_chain_cost() {
+        let Some(path) = material() else {
+            println!(
+                "  没有可用的素材，跳过：把音频放进 {} 或用 BOXPIGMA_BENCH_AUDIO 指定",
+                crate::utils::boxpigma_cache_dir()
+                    .join("downloads")
+                    .display()
+            );
+            return;
+        };
+
+        // The file's own shape, from a decode that is not timed. The length is *not* asked of
+        // the container: a VBR MP3 without the header that carries it reports `None`, and a
+        // header that lies is worse than no number — each line below counts its own samples.
+        let Some(first) = decode(&path) else {
+            println!("  解不开 {}，跳过", path.display());
+            return;
+        };
+        let file_rate = first.sample_rate().get();
+        let channels = first.channels().get();
+        drop(first);
+        println!(
+            "  {}（{file_rate} Hz / {channels} 声道，设备 {DEVICE_RATE} Hz）:",
+            path.file_name().unwrap_or_default().to_string_lossy(),
+        );
+
+        // The control: the same pull loop over samples already in memory. Everything below is
+        // read against this floor.
+        {
+            let file = fs::File::open(&path).expect("open for the control");
+            let decoded: Vec<f32> = Decoder::new(BufReader::new(file))
+                .expect("decode for the control")
+                .collect();
+            let memory = SamplesBuffer::new(
+                NonZero::new(channels).expect("channels"),
+                NonZero::new(file_rate).expect("rate"),
+                decoded,
+            );
+            let (wall, audio, samples) = drain(Box::new(memory));
+            report("（对照）内存源空转", wall, audio, samples);
+        }
+
+        // The bit-perfect path: nothing is configured and the device runs at the file's rate,
+        // so the sink is handed the decoder's own samples.
+        let (wall, audio, samples) = drain(decode(&path).expect("decoded above"));
+        report("解码（未配置 = 位完美路径）", wall, audio, samples);
+
+        // …plus the conversion a device at another rate needs.
+        let converting = AudioConfig {
+            resample: true,
+            ..AudioConfig::default()
+        };
+        let source = super::build(
+            decode(&path).expect("decoded above"),
+            DEVICE_RATE,
+            &converting,
+        );
+        let (wall, audio, samples) = drain(source);
+        report("解码 + 重采样", wall, audio, samples);
+
+        // …plus everything `[audio]` can ask for: two EQ bands and a loudness target.
+        let full = AudioConfig {
+            resample: true,
+            eq: vec![
+                EqBand {
+                    freq: 105.0,
+                    gain_db: -3.0,
+                    q: 1.0,
+                },
+                EqBand {
+                    freq: 10_000.0,
+                    gain_db: 2.0,
+                    q: 0.7,
+                },
+            ],
+            loudness: Some(LoudnessConfig {
+                target_lufs: -14.0,
+                max_gain_db: 12.0,
+            }),
+            exclusive: false,
+        };
+        let source = super::build(decode(&path).expect("decoded above"), DEVICE_RATE, &full);
+        let (wall, audio, samples) = drain(source);
+        report(
+            "解码 + 重采样 + EQ(2 段) + 响度(EBU R128)",
+            wall,
+            audio,
+            samples,
+        );
+
+        println!("  → 播放时这一项再加分析帧（见 analysis_bench）与整帧（frame_bench）即整机开销");
+    }
+}
