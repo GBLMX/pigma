@@ -145,7 +145,7 @@ impl App {
 
         // One proxy for everything on the network — the NCM API, covers and the audio
         // streams. `proxy` is absent by default ("直连"); the v1 key that used to scope it
-        // to a subset of the sources is gone (see `Config::migrate_from`).
+        // to a subset of the sources is gone (see `config::migrate_document`).
         let proxy = config.proxy.clone().unwrap_or_default();
 
         let cookie_path = boxpigma_config_dir().join("cookies.json");
