@@ -202,7 +202,12 @@ jobs:
       - name: Cache Cargo dependencies
         uses: Swatinem/rust-cache@v2
       - name: Run the benchmark suite
-        run: cargo test --release --locked --lib -- --ignored --nocapture 2>&1 | tee bench-output.txt
+        # The trailing `bench` argument is the test *filter*: every bench lives in a module with
+        # `bench` in its path (`dsp_bench`, `chain_bench`, `frame_bench`, ...), and the other
+        # `#[ignore]`d tests (the contrast audit and the preview shots) do not — so the artifact
+        # holds the numbers instead of their printouts. stderr is left alone on purpose: that is
+        # cargo's own downloading/compiling chatter, not the run.
+        run: cargo test --release --locked --lib -- --ignored --nocapture bench | tee bench-output.txt
       - name: Upload the run as an artifact
         uses: actions/upload-artifact@v7
         with:
