@@ -38,8 +38,8 @@
 
 1. **克隆仓库**：
    ```bash
-   git clone --recurse-submodules https://github.com/GBLMX/pigma.git
-   cd boxpigma
+   git clone https://github.com/GBLMX/pigma.git
+   cd pigma
    ```
 
 2. **确保 Rust 已安装**：

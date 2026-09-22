@@ -136,7 +136,7 @@ boxpigma 把网易云音乐与本地音频播放带进终端：流式播放、�
 - [x] 歌手详情页：简介 / 热门曲目 / **专辑 / 相似歌手** —— 三个列表共用一个光标（`Tab`/`Shift+Tab` 循环），专辑可走可开（`Enter` 打开该专辑，`Esc` 回到歌手页），相似歌手 `Enter` 直接跳过去；鼠标点哪栏就选中哪栏，滚轮走指针所在那栏
 - [x] 推荐生态接入既有侧栏与内容页：相似歌曲 / 包含该歌的歌单 / 听歌排行（本周 · 全部）/ 推荐电台 / 私人 FM（`:simi` `:simiplaylist` `:fm` `:fmtrash`）
 - [x] `[audio]` 播放链（解码之后、设备之前）：`rubato` 采样率转换（采样率与设备一致时样本不做处理）、`biquad` 参量 EQ、`ebur128` 响度归一化、Windows 上 WASAPI **独占**输出（设备拒绝时回退共享模式并说明原因）
-- [ ] landing page
+- [x] landing page（`docs/index.html`，随 Pages 部署）
 
 ## Preview
 
@@ -538,7 +538,7 @@ cat /proc/<pid>/task/*/wchan                   # 内核视角
 ## Development
 
 ```sh
-git clone --recurse-submodules https://github.com/GBLMX/pigma.git
+git clone https://github.com/GBLMX/pigma.git
 cd pigma
 cargo run                                             # 交互界面
 cargo test --locked --workspace --all-features
@@ -551,9 +551,10 @@ cargo +nightly fmt
 
 ## Plan
 
-- 完善 waybar/systemd 集成文档与示例配置
-- 守护进程模式下更多端点的支持（榜单/歌单自动展开）
-- `boxpigma msg` 更多动作（seek、queue 操作等）
+- [x] waybar 集成：`waybar/` 下的状态模块脚本与 `config.jsonc` / `style.css` 片段，README 有成段说明
+- [ ] systemd：给守护进程补一个 unit 示例（`systemctl --user`）
+- [x] 守护进程的端点展开（`-d <endpoint[:N]>`，如 `toplist:3`）
+- [ ] `boxpigma msg` 更多动作（seek、queue 操作等）
 
 ## License
 
