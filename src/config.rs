@@ -307,11 +307,12 @@ impl Config {
             None
         };
 
-        let mut config = if let Some(mut cfg) = parsed {
-            cfg.migrate_from(config_path);
-            cfg
-        } else {
-            Config::default()
+        let (mut config, migrated) = match parsed {
+            Some(mut cfg) => {
+                let migrated = cfg.migrate_from(config_path);
+                (cfg, migrated)
+            }
+            None => (Config::default(), false),
         };
         // A config read from the user's file is the user's: the app that loaded it may write it
         // back. (`Config::deserialize` cannot know this — `persist` is skipped on the way in —
@@ -319,15 +320,27 @@ impl Config {
         // terminal".)
         config.persist = true;
 
-        // Only a missing file is (re)created: a file that exists but failed to parse is
-        // left alone rather than overwritten with defaults.
-        if !config_path.exists() {
-            if let Some(dir) = config_path.parent() {
-                let _ = fs::create_dir_all(dir);
+        // Write the file back when this call changed it: there was no file (a fresh default),
+        // or `migrate_from` just upgraded one (after the backup it took). Doing it here rather
+        // than at the next `save()` is what makes a migration visible at once — the keys the
+        // new schema dropped stop sitting in the user's file — and it is why the write targets
+        // the path that was loaded rather than `save()`'s own directory.
+        //
+        // A file that is already current is left byte-for-byte alone, which is what keeps a
+        // user's own comments, and a file that exists but failed to parse is left alone too:
+        // overwriting it with defaults would silently discard what they wrote.
+        let fresh = !config_path.exists();
+        if fresh || migrated {
+            if fresh {
+                if let Some(dir) = config_path.parent() {
+                    let _ = fs::create_dir_all(dir);
+                }
             }
             let content = config.to_toml();
-            if let Err(e) = fs::write(config_path, content) {
-                log::warn!("Failed to write default config: {e}");
+            if content.is_empty() {
+                log::error!("Refusing to overwrite config.toml with an empty document");
+            } else if let Err(e) = fs::write(config_path, content) {
+                log::warn!("Failed to write config.toml: {e}");
             }
         }
         config
@@ -336,19 +349,22 @@ impl Config {
     /// Upgrade a config parsed from disk to [`CONFIG_VERSION`].
     ///
     /// The previous file is copied to `config.toml.bak-v{old}` first, so a user can always
-    /// roll back; the upgraded config is written on the next `save()`. A file from a newer
-    /// build is left as it is (its unknown fields are ignored) instead of being downgraded.
-    fn migrate_from(&mut self, config_path: &Path) {
+    /// roll back. Returns whether anything was upgraded, which is what tells the caller to
+    /// write the migrated file back at once: a migration the user cannot see on disk has not
+    /// happened as far as the next reader of that file is concerned. A file from a newer
+    /// build is left as it is (its unknown fields are ignored) instead of being downgraded,
+    /// and reports `false` so it is not written either.
+    fn migrate_from(&mut self, config_path: &Path) -> bool {
         let from = self.config_version;
         if from == CONFIG_VERSION {
-            return;
+            return false;
         }
         if from > CONFIG_VERSION {
             log::warn!(
                 "config.toml is schema v{from}, this build understands v{CONFIG_VERSION}: \
                  newer fields are ignored"
             );
-            return;
+            return false;
         }
 
         let backup = config_path.with_extension(format!("toml.bak-v{from}"));
@@ -386,6 +402,8 @@ impl Config {
         }
 
         self.config_version = CONFIG_VERSION;
+
+        true
     }
 
     pub fn save(&self) {
@@ -538,6 +556,17 @@ mod tests {
             dir.join("config.toml.bak-v0").exists(),
             "the pre-versioning file must be backed up"
         );
+        let rewritten = fs::read_to_string(&path).expect("read migrated config");
+        assert!(
+            rewritten.contains(&format!("config_version = {CONFIG_VERSION}")),
+            "the migrated file must be written back at startup, not at the next save:\n{rewritten}"
+        );
+        assert!(
+            fs::read_to_string(dir.join("config.toml.bak-v0"))
+                .expect("read the backup")
+                .contains("search_limit = 42"),
+            "the backup has to hold the file as it was, or it is not a rollback"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -576,10 +605,19 @@ mod tests {
                 dir.join("config.toml.bak-v1").exists(),
                 "the v1 file must be backed up"
             );
-            let rendered = cfg.to_toml();
+            let on_disk = fs::read_to_string(&path).expect("read the migrated config");
             assert!(
-                !rendered.contains("proxy_target") && !rendered.contains("source_fallback"),
-                "a saved config must not carry the removed keys back:\n{rendered}"
+                on_disk.contains(&format!("config_version = {CONFIG_VERSION}")),
+                "the file must be brought to the new schema at startup:\n{on_disk}"
+            );
+            assert!(
+                !on_disk.contains("proxy_target") && !on_disk.contains("source_fallback"),
+                "the keys the new schema dropped must be gone from the user's file:\n{on_disk}"
+            );
+            let backup = fs::read_to_string(dir.join("config.toml.bak-v1")).expect("read backup");
+            assert!(
+                backup.contains("proxy_target") && backup.contains("[source_fallback]"),
+                "the backup is the rollback path and must keep the v1 file verbatim:\n{backup}"
             );
             let _ = fs::remove_dir_all(&dir);
         }
@@ -610,6 +648,55 @@ mod tests {
             !dir.join(format!("config.toml.bak-v{CONFIG_VERSION}"))
                 .exists(),
             "a config at the current version must not be migrated"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A file already at the current schema is not rewritten: it is the user's file, and what
+    /// they wrote in it — comments included — is part of it. Only a migration overwrites it,
+    /// and only after taking a backup.
+    #[test]
+    fn a_current_config_is_left_byte_for_byte_alone() {
+        let dir = scratch_dir("current-untouched");
+        let path = dir.join("config.toml");
+        let authored = format!(
+            "# 手写的一行注释：重写就会丢\n\
+             config_version = {CONFIG_VERSION}\n\
+             default_theme = \"dracula\"\n\
+             search_limit = 7\n"
+        );
+        fs::write(&path, &authored).expect("write current config");
+
+        let cfg = Config::load_from(&path);
+
+        assert_eq!(cfg.search_limit, 7, "the value must still be read");
+        assert_eq!(
+            fs::read_to_string(&path).expect("read config"),
+            authored,
+            "a config that was not migrated must not be rewritten"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A file from a newer build is used as it is and never written back: this build does not
+    /// understand its fields, and rewriting it would drop them.
+    #[test]
+    fn a_newer_config_is_read_but_never_rewritten() {
+        let dir = scratch_dir("newer");
+        let path = dir.join("config.toml");
+        let authored = format!(
+            "config_version = {}\nsearch_limit = 9\nfuture_key = \"kept\"\n",
+            CONFIG_VERSION + 1
+        );
+        fs::write(&path, &authored).expect("write newer config");
+
+        let cfg = Config::load_from(&path);
+
+        assert_eq!(cfg.search_limit, 9, "the fields this build knows are read");
+        assert_eq!(
+            fs::read_to_string(&path).expect("read config"),
+            authored,
+            "a file from a newer schema must be left alone, not downgraded"
         );
         let _ = fs::remove_dir_all(&dir);
     }
