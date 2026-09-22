@@ -296,6 +296,7 @@ cargo build --release
 | `:theme <名字>` | 切换主题（`Tab` 会列出全部主题名） |
 | `:volume 75` / `:volume +5` / `:volume -10` | 音量（与 `boxpigma msg volume` 同一套语法） |
 | `:seek 90` / `:seek +15` / `:seek -30` / `:seek 50%` | 跳到某秒 / 相对跳转 / 百分比 |
+| `:clear` | 清空当前播放队列（与 `boxpigma msg clear` 同一动作） |
 | `:visualizer on\|off` | 频谱显示开关（同 `v` 键） |
 | `:signin <账号> <密码>` | 邮箱或手机号 + 密码登录（`:login` 仍是二维码页） |
 | `:sms <手机号>` | 发送短信验证码 |
@@ -364,6 +365,7 @@ Add-Content $PROFILE '. "$HOME/.config/powershell/boxpigma.ps1"'
 | `boxpigma msg seek +15` | 向后跳 15 秒（`-30` 向前；与 TUI 的 `:seek` 同一套语法与校验） |
 | `boxpigma msg seek 50%` | 跳到播放进度的一半（也可以直接给秒数：`boxpigma msg seek 90`） |
 | `boxpigma msg clear` | 清空当前播放队列（等价于 TUI 的 `:clear`） |
+| `boxpigma msg capabilities` | 打印这份 IPC 契约：接口版本、程序版本、动作清单（含别名与是否吃参数）；`--json` 供脚本解析，细节见 [SKILLS](./SKILLS.md) |
 
 `boxpigma status` 的 `--template` 支持占位符：`{name}` `{artist}` `{album}` `{current}`/`{position}`
 `{duration}` `{volume}` `{status}` `{mode}` `{id}` `{liked}`。
