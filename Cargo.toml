@@ -1,6 +1,6 @@
 [package]
 name = "boxpigma"
-version = "1.6.0"
+version = "1.6.1"
 edition = "2024"
 description = "A netease cloud music client (GBLMX fork)"
 repository = "https://github.com/GBLMX/pigma"
