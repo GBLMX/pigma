@@ -79,12 +79,16 @@ pub enum ImageProtocolChoice {
 /// `queried` is what the terminal answered when asked (the kitty graphics query, or
 /// the sixel flag in DA1). That answer is the only signal that tells a graphics-capable
 /// terminal apart from a shell that merely inherited the variables, so it is trusted
-/// ahead of anything read from the environment — with two exceptions, both of which
-/// come from upstream's compatibility matrix:
+/// ahead of anything read from the environment — with three exceptions:
 ///
-/// * WezTerm, Rio and iTerm2 answer the kitty graphics query, but that matrix is
-///   explicit that only iTerm2's own protocol renders bug-free there ("would support
-///   Sixel and Kitty, but only iTerm2 actually works bug-free").
+/// * Herdr is not the terminal: it emulates each pane's terminal and draws the images
+///   itself, so the covers have to be spoken to *it* — and herdr implements the kitty
+///   graphics protocol only. Its panes still carry the outer terminal's `TERM_PROGRAM`
+///   (WezTerm), which would otherwise get the iTerm2 correction below, a protocol herdr
+///   never parses.
+/// * WezTerm, Rio and iTerm2 answer the kitty graphics query, but upstream's
+///   compatibility matrix is explicit that only iTerm2's own protocol renders bug-free
+///   there ("would support Sixel and Kitty, but only iTerm2 actually works bug-free").
 /// * Inside tmux, graphics only reach the real terminal when the user turned
 ///   passthrough on, and there is no way to ask. Guessing wrong paints graphics over
 ///   the UI, so half blocks win; `image_protocol` overrides that.
@@ -104,6 +108,13 @@ pub fn choose_image_protocol(
 
     if tmux_detected {
         return None;
+    }
+
+    // Herdr answers for its panes, not the outer terminal: it parses kitty graphics and
+    // draws the images itself. `TERM_PROGRAM` still names the terminal Herdr runs in, so
+    // this has to come before the corrections below — herdr never looks at iTerm2 bytes.
+    if is_herdr_terminal(&lookup) {
+        return Some(ImageProtocol::Kitty);
     }
 
     if matches!(
@@ -149,6 +160,17 @@ pub(super) fn is_kitty_terminal(lookup: &impl Fn(&str) -> Option<String>) -> boo
         lookup("TERM").as_deref(),
         Some(t) if t.to_lowercase().contains("kitty") || t == "xterm-ghostty"
     )
+}
+
+/// Whether the pane is inside [herdr](https://herdr.dev), which sets `HERDR_ENV` (and the
+/// socket path) in every pane it spawns.
+///
+/// Herdr is a workspace manager, not a terminal: it emulates the pane's terminal and
+/// forwards the images to the outer terminal itself, in the kitty graphics protocol
+/// only (`[terminal] kitty_graphics`, on by default). So this is a fact about the
+/// graphics protocol the pane should speak, not about the terminal that ends up drawing.
+fn is_herdr_terminal(lookup: &impl Fn(&str) -> Option<String>) -> bool {
+    lookup("HERDR_ENV").is_some() || lookup("HERDR_SOCKET_PATH").is_some()
 }
 
 fn sixel_available(lookup: &impl Fn(&str) -> Option<String>) -> bool {
@@ -371,6 +393,28 @@ mod terminal_mode_tests {
                 "{program}"
             );
         }
+    }
+
+    /// Herdr emulates the pane's terminal and only speaks kitty graphics, while its panes
+    /// still carry the outer terminal's `TERM_PROGRAM` — so the correction above has to
+    /// stand down there, or the covers are sent as bytes herdr never parses.
+    #[test]
+    fn herdr_panes_get_kitty_graphics_not_the_outer_terminals_protocol() {
+        let env = [
+            ("TERM", "xterm-256color"),
+            ("TERM_PROGRAM", "WezTerm"),
+            ("HERDR_ENV", "1"),
+        ];
+        assert_eq!(
+            auto(&env, Some(ImageProtocol::Kitty)),
+            Some(ImageProtocol::Kitty),
+            "herdr parses kitty graphics from its panes and re-draws them outward"
+        );
+        assert_eq!(
+            auto(&env, None),
+            Some(ImageProtocol::Kitty),
+            "herdr's own answer is not needed: kitty is what it implements"
+        );
     }
 
     /// Inside tmux, graphics only reach the real terminal when the user enabled

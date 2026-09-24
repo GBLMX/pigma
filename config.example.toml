@@ -198,8 +198,12 @@ spinning_cover = false
 # 自动模式还会避开 tmux（图形不一定透传，猜错会画花界面）与已知"答得比画得好"的终端
 # （WezTerm / Rio / iTerm2 会应答 kitty 查询，但只有 iTerm2 协议在那里无 bug）。
 #
+# herdr 是另一回事：窗格里的终端由 herdr 自己仿真，它只解析 kitty 图形协议、再自己画到外层
+# 终端，而窗格里的进程仍然带着**外层**终端的 TERM_PROGRAM。所以在 herdr 窗格里一律用 kitty
+# 协议，据 `HERDR_ENV` 判定，先于上面那条 WezTerm 修正。
+#
 #   "auto"       —— 问终端（推荐）
-#   "kitty"      —— kitty 图形协议（kitty 0.28+ / ghostty 等）
+#   "kitty"      —— kitty 图形协议（kitty 0.28+ / ghostty / herdr 窗格等）
 #   "iterm2"     —— iTerm2 内联图片协议（WezTerm / Rio / iTerm2）
 #   "sixel"      —— 六像素图（foot / mlterm / xterm -ti 340 ...）
 #   "halfblocks" —— 不用图形协议，用半块字符画（任何终端都能看）

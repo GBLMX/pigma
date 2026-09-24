@@ -1,3 +1,9 @@
+## [unreleased]
+
+### 🐛 Bug Fixes
+
+- *(terminal)* **在 herdr 的窗格里封面一张都画不出来**：herdr（终端工作区管理器）把窗格里的终端**自己仿真**了 —— 它只解析 kitty 图形协议、再自己把图片画到外层终端 —— 而窗格里的进程带着的是**外层**终端的 `TERM_PROGRAM`（这里是 `WezTerm`），于是 `auto` 命中「WezTerm 改用 iTerm2 协议」那条修正，把 `OSC 1337 File=` 送给从不解析它的 herdr，图片被静默丢掉。现在窗格内一律用 kitty 协议：据 `HERDR_ENV`（herdr 在每个窗格都设）判定，且先于外层终端那条修正；`[playerbar] image_protocol` 仍可写死覆盖。实测（外层 WezTerm 20260716 / herdr 0.9.1，无头 KWin 截图）：同一张红色测图，kitty 协议画得出来（8800 像素），`OSC 1337` 什么都不显示
+
 ## [1.6.0] - 2026-09-22
 
 ### 🚀 Features
