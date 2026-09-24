@@ -219,7 +219,7 @@ boxpigma update --rollback         # 切回上一个版本（连按两次会在�
 boxpigma update --mirror https://ghproxy.example --dir D:\tools\boxpigma
 ```
 
-`--mirror` 相当于脚本里的 `--host` / `-Mirror`，`--dir` / `--checksums` / `--force` 与脚本同名参数一致。它只处理 `releases/` 已经存在的目录：**首次安装仍然走上面的脚本**（建目录、写 `PATH`、装 `.cmd` shim 都是脚本的事）。同一个版本已装好时是 no-op，`--force` 重装。
+`--mirror` 相当于脚本里的 `--host` / `-Mirror`，`--dir` / `--checksums` / `--force` 与脚本同名参数一致；`--check` 的版本查询与资产探测也走镜像（跟脚本里 `--host` 覆盖 latest 查询一样），所以只能连镜像的环境照样能 check。它只处理 `releases/` 已经存在的目录：**首次安装仍然走上面的脚本**（建目录、写 `PATH`、装 `.cmd` shim 都是脚本的事）。同一个版本已装好时是 no-op，`--force` 重装。
 
 ### Linux / macOS（手动）
 

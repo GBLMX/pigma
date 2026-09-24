@@ -81,7 +81,7 @@ pub async fn run(opts: Options) -> Result<()> {
     let client = http_client()?;
 
     if opts.check {
-        check(&client, &layout).await?;
+        check(&client, &layout, host_of(opts.mirror.as_deref())).await?;
         return Ok(());
     }
     if opts.rollback {
@@ -343,9 +343,15 @@ async fn install(client: &Client, layout: &Layout, opts: &Options) -> Result<()>
     println!("  平台       {TARGET}");
     println!("  资产       {asset_url}");
     println!(
-        "  安装       {}\\{}-{TARGET}\\{BIN}",
-        layout.releases().display(),
-        pinned.as_deref().unwrap_or("<下载后确定>")
+        "  安装       {}",
+        layout
+            .releases()
+            .join(format!(
+                "{}-{TARGET}",
+                pinned.as_deref().unwrap_or("<下载后确定>")
+            ))
+            .join(BIN)
+            .display()
     );
     println!("  current    {}", layout.current().display());
     match opts.checksums.as_deref() {
@@ -373,8 +379,8 @@ async fn install(client: &Client, layout: &Layout, opts: &Options) -> Result<()>
     };
     if let Some(existing) = &existing {
         println!(
-            "  已存在     {}\\{existing} 校验一致，跳过下载（--force 可强制重装）",
-            layout.releases().display()
+            "  已存在     {} 校验一致，跳过下载（--force 可强制重装）",
+            layout.releases().join(existing).display()
         );
     }
 
@@ -466,7 +472,11 @@ async fn install(client: &Client, layout: &Layout, opts: &Options) -> Result<()>
 
 /// `--check`: report what is installed and whether a newer release exists. Reads only —
 /// `current` and the lock file are never touched, and being out of date is not an error.
-async fn check(client: &Client, layout: &Layout) -> Result<()> {
+///
+/// `host` is what `--mirror` resolved to. Both the release lookup and the asset probe go
+/// through it — hardcoding `HOST` here left the people who need a mirror most (the ones who
+/// cannot reach `github.com` at all) with a `--check` that could only fail.
+async fn check(client: &Client, layout: &Layout, host: &str) -> Result<()> {
     let rel = layout.current_target();
     let installed = rel
         .as_deref()
@@ -476,7 +486,7 @@ async fn check(client: &Client, layout: &Layout) -> Result<()> {
         (Some(rel), None) => format!("releases/{rel}"),
         (None, _) => "（未安装）".to_string(),
     };
-    let latest = latest_tag(client).await?;
+    let latest = latest_tag(client, host).await?;
 
     println!("  安装目录   {}", layout.dir.display());
     println!("  当前       {current}");
@@ -489,7 +499,7 @@ async fn check(client: &Client, layout: &Layout) -> Result<()> {
     println!("  有新版     运行 `boxpigma update` 升级");
     // Worth knowing before downloading ~15 MB that this platform has nothing in that release.
     let asset = asset_name();
-    let asset_url = format!("{HOST}/{REPO}/releases/latest/download/{asset}");
+    let asset_url = format!("{host}/{REPO}/releases/latest/download/{asset}");
     if let Ok(response) = client.head(&asset_url).send().await
         && response.status() == reqwest::StatusCode::NOT_FOUND
     {
@@ -498,12 +508,13 @@ async fn check(client: &Client, layout: &Layout) -> Result<()> {
     Ok(())
 }
 
-/// The newest release tag, read off the redirect `…/releases/latest` lands on.
+/// The newest release tag, read off the redirect `…/releases/latest` lands on. `host` is
+/// `--mirror` when given and `https://github.com` otherwise.
 ///
 /// Deliberately not `api.github.com`: anonymous API calls are capped at 60/hour, while the
 /// redirect is not, and the install scripts have always used it.
-async fn latest_tag(client: &Client) -> Result<String> {
-    let url = format!("{HOST}/{REPO}/releases/latest");
+async fn latest_tag(client: &Client, host: &str) -> Result<String> {
+    let url = format!("{host}/{REPO}/releases/latest");
     let response = client
         .head(&url)
         .send()
@@ -560,7 +571,7 @@ fn rollback(layout: &Layout, dry_run: bool) -> Result<()> {
         "  current    {} -> releases/{target}",
         layout.current().display()
     );
-    println!("  可执行     {}\\{BIN}", layout.current().display());
+    println!("  可执行     {}", layout.current().join(BIN).display());
     println!("  上一个版本 {}", current.as_deref().unwrap_or("（无）"));
     println!(
         "  回滚命令   boxpigma update --dir {} --rollback",
@@ -820,13 +831,16 @@ impl Layout {
         self.write_lock(rel, number, prev.as_deref().unwrap_or(""))?;
         self.prune_versions(rel);
 
-        println!("  已安装     {}\\{rel}\\{BIN}", self.releases().display());
+        println!(
+            "  已安装     {}",
+            self.releases().join(rel).join(BIN).display()
+        );
         println!("  版本       {number}");
         println!(
             "  current    {} -> releases/{rel}",
             self.current().display()
         );
-        println!("  可执行     {}\\{BIN}", self.current().display());
+        println!("  可执行     {}", self.current().join(BIN).display());
         match prev.as_deref() {
             Some(prev) if prev == rel => {
                 println!("  上一个版本 （没有变化，current 本来就指向它）");
@@ -942,6 +956,11 @@ fn not_a_tarball(asset: &str) -> color_eyre::Report {
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        io::{BufRead, BufReader, Write},
+        sync::{Arc, Mutex},
+    };
+
     use super::*;
 
     /// A scratch install directory this test owns; `label` keeps parallel tests apart.
@@ -1187,6 +1206,113 @@ mod tests {
         write_archive(&escaping, "../escaped", b"nope");
         assert!(extract(&escaping, &dest).is_err());
         assert!(!layout.dir.join("escaped").exists());
+        cleanup(&layout);
+    }
+
+    /// A loopback release host with the shape `latest_tag` and the asset probe expect:
+    /// `…/releases/latest` answers 302 to `…/releases/tag/<tag>`, that tag path answers 200,
+    /// and everything else — the asset probe included — answers 404.
+    ///
+    /// Every requested path is recorded, which is what lets a test pin *which* host was asked:
+    /// a URL built from the constant instead of the argument never reaches this server. The
+    /// listener is on the loopback interface only; the thread is detached and dies with the
+    /// test process.
+    fn release_host(tag: &str) -> (String, Arc<Mutex<Vec<String>>>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind a loopback port");
+        let host = format!(
+            "http://{}",
+            listener.local_addr().expect("loopback address")
+        );
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let recorder = Arc::clone(&seen);
+        let base = host.clone();
+        let tag = tag.to_string();
+
+        std::thread::spawn(move || {
+            for mut stream in listener.incoming().flatten() {
+                let mut reader = BufReader::new(stream.try_clone().expect("clone the stream"));
+                let mut request_line = String::new();
+                if reader.read_line(&mut request_line).is_err() || request_line.is_empty() {
+                    continue;
+                }
+                // Drain the headers up to the blank line. `HEAD` never has a body, so there is
+                // nothing else to wait for.
+                loop {
+                    let mut header = String::new();
+                    match reader.read_line(&mut header) {
+                        Ok(0) | Err(_) => break,
+                        Ok(_) if header == "\r\n" => break,
+                        Ok(_) => {}
+                    }
+                }
+
+                let path = request_line
+                    .split_whitespace()
+                    .nth(1)
+                    .unwrap_or_default()
+                    .to_string();
+                recorder
+                    .lock()
+                    .expect("record the request")
+                    .push(path.clone());
+
+                let response = if path == "/GBLMX/pigma/releases/latest" {
+                    format!(
+                        "HTTP/1.1 302 Found\r\nLocation: {base}/GBLMX/pigma/releases/tag/{tag}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    )
+                } else if path.starts_with("/GBLMX/pigma/releases/tag/") {
+                    "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_string()
+                } else {
+                    "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                        .to_string()
+                };
+                let _ = stream.write_all(response.as_bytes());
+                let _ = stream.flush();
+            }
+        });
+
+        (host, seen)
+    }
+
+    /// `--check` has to ask the mirror: `--mirror` reaches both requests, the release lookup
+    /// and the asset probe. Both used to name `HOST` directly, so a mirror user — precisely
+    /// someone who cannot reach `github.com` — got a `--check` that could only fail.
+    #[tokio::test]
+    async fn check_asks_the_mirror_for_both_the_release_and_the_asset() {
+        let (host, seen) = release_host("v9.9.9");
+        // Same one-liner `main.rs` runs at startup; `http_client` builds a `rustls-no-provider`
+        // client and would panic without it.
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let client = http_client().expect("http client");
+
+        assert_eq!(
+            latest_tag(&client, &host).await.expect("read the tag"),
+            "9.9.9"
+        );
+
+        // A version directory with no binary in it: `check` cannot read an installed version,
+        // so it goes on to the asset probe instead of returning early.
+        let layout = fixture("check-mirror");
+        let rel = format!("1.5.0-{TARGET}");
+        version_dir(&layout, &rel);
+        layout
+            .create_link(&layout.current(), &rel)
+            .expect("point current at the installed version");
+
+        check(&client, &layout, &host).await.expect("check");
+
+        let paths = seen.lock().expect("read the recorded paths").clone();
+        let asset_path = format!("/GBLMX/pigma/releases/latest/download/{}", asset_name());
+        assert!(
+            paths
+                .iter()
+                .any(|path| path == "/GBLMX/pigma/releases/latest"),
+            "the release lookup never reached {host}: {paths:?}"
+        );
+        assert!(
+            paths.iter().any(|path| path == &asset_path),
+            "the asset probe never reached {host}: {paths:?}"
+        );
         cleanup(&layout);
     }
 }
