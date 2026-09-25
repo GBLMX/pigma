@@ -1,10 +1,32 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+};
 
 use ncm_api::SongInfo;
 
 use super::mode::PlayStrategy;
 
 const MAX_HISTORY: usize = 200;
+
+/// Source of every queue version.
+///
+/// The counter lives outside [`PlaylistQueue`] because a queue is *replaced*
+/// wholesale (`Engine::load_songs`, session restore) rather than mutated in
+/// place. A fresh instance numbering its mutations from 0 again hands a consumer
+/// a version it has already seen: the IPC queue snapshot caches on this number
+/// (`App::last_queue_version`), so after `boxpigma msg switch-list local_music`
+/// `boxpigma msg list` kept printing the previous queue until an unrelated
+/// mutation pushed the number past the cached one.
+static NEXT_VERSION: AtomicU64 = AtomicU64::new(1);
+
+/// A version no live queue has handed out before.
+fn next_version() -> u64 {
+    NEXT_VERSION.fetch_add(1, Ordering::Relaxed)
+}
 
 #[derive(Debug, Clone)]
 pub struct PlaylistQueue {
@@ -25,7 +47,7 @@ impl PlaylistQueue {
             id_index: HashMap::new(),
             history: Vec::new(),
             current_index: None,
-            version: 0,
+            version: next_version(),
         }
     }
 
@@ -36,7 +58,7 @@ impl PlaylistQueue {
     /// Mark the queue as changed. Used when callers mutate `current_index`
     /// directly (outside the methods that bump automatically).
     pub(super) fn bump(&mut self) {
-        self.version = self.version.wrapping_add(1);
+        self.version = next_version();
     }
 
     pub(super) fn from_songs(songs: Vec<Arc<SongInfo>>, index: usize) -> Self {
@@ -45,7 +67,7 @@ impl PlaylistQueue {
             id_index: HashMap::new(),
             history: Vec::new(),
             current_index: Some(index),
-            version: 0,
+            version: next_version(),
         };
         q.rebuild_index();
         q
@@ -72,7 +94,7 @@ impl PlaylistQueue {
             id_index: HashMap::new(),
             history,
             current_index,
-            version: 0,
+            version: next_version(),
         };
         q.rebuild_index();
         q
@@ -215,5 +237,57 @@ mod tests {
         let q = PlaylistQueue::from_parts(vec![song(7), song(8)], vec![7], Some(0));
         assert_eq!(q.find_song_index(8), Some(1));
         assert_eq!(q.history, vec![7]);
+    }
+
+    /// Consumers cache on `version()` (`App::last_queue_version` decides whether the
+    /// IPC queue snapshot is rebuilt), so a *replaced* queue must never hand out a
+    /// number a consumer has already seen. `load_songs` swaps the whole `PlaylistQueue`
+    /// in, and when a fresh instance restarted at 0 the snapshot of the previous queue
+    /// survived the switch — `boxpigma msg list` printed the old songs after
+    /// `msg switch-list`, until an unrelated mutation moved the number.
+    #[test]
+    fn a_replaced_queue_never_reuses_a_seen_version() {
+        let previous = PlaylistQueue::from_songs(vec![song(1)], 0);
+        let seen = previous.version();
+
+        let switched = PlaylistQueue::from_songs(vec![song(2), song(3)], 0);
+        assert_ne!(
+            switched.version(),
+            seen,
+            "a queue loaded over another one must look changed to its consumers"
+        );
+
+        // Restoring a session (`from_parts`) and an empty queue (`new`) are the two
+        // other ways a queue object replaces the live one.
+        assert_ne!(
+            PlaylistQueue::from_parts(vec![song(4)], vec![], None).version(),
+            seen
+        );
+        assert_ne!(PlaylistQueue::new().version(), seen);
+        assert_ne!(PlaylistQueue::new().version(), switched.version());
+    }
+
+    #[test]
+    fn every_mutation_advances_the_version() {
+        let mut q = PlaylistQueue::from_songs(vec![song(1), song(2)], 0);
+        let step = |q: &PlaylistQueue, seen: u64, what: &str| {
+            assert!(
+                q.version() > seen,
+                "{what} left the version at {} (was {seen})",
+                q.version()
+            );
+            q.version()
+        };
+        let seen = q.version();
+        q.append(&[song(3)]);
+        let seen = step(&q, seen, "append");
+        q.insert_next(vec![song(4)]);
+        let seen = step(&q, seen, "insert_next");
+        q.set_songs(vec![song(5)]);
+        let seen = step(&q, seen, "set_songs");
+        q.advance_to(0);
+        let seen = step(&q, seen, "advance_to");
+        q.bump();
+        step(&q, seen, "bump");
     }
 }

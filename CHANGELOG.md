@@ -3,6 +3,7 @@
 ### 🐛 Bug Fixes
 
 - *(playback)* **本地音乐按曲名排，唱片的顺序会被打乱**：`scan_local_music` 收尾那句 `songs.sort_by(|a, b| a.name.cmp(&b.name))` 把音轨号整个丢掉了 —— 一张 13 轨、`TRACKNUMBER=01..13` 的碟进队列后是 `Airport Arrival` 排在 `Airport Take Off` 前面，中文曲名再按 Unicode 码位一路 `再见(518D) → 十七岁(5341) → 心乱飞(5FC3) → … → 飞机场(98DE)` 排下去，碟序一轨不剩。现在按**专辑 → 碟号 → 音轨号 → 路径**排：碟号与音轨号取自 `ItemKey::DiscNumber` / `TrackNumber`（`01`、`3/13`、`1 of 2` 这类写法都认，解析不出来的退到下一级），没有音轨标签的曲库退化为按路径排 —— 原来的兜底其实是 `read_dir` 的顺序，同一个目录两次扫描都可以不一样
+- *(ipc)* **切到别的队列之后 `msg list` 还在吐上一个队列**：队列版本号（`PlaylistQueue::version`）每次变更自增，`App::last_queue_version` 就靠「版本变没变」决定要不要重建 IPC 队列快照 —— 而切换端点是 `Engine::load_songs`，它把整个 `PlaylistQueue` **换掉**，新实例的计数器又从 0 开始，于是新队列的版本可能正好是消费者手里那个（0 == 0）：快照被判成「没变」，`boxpigma msg list` 继续打印旧队列，直到某次无关的变更把版本推过去。现在版本号由一个进程级的 `AtomicU64`（`playback::queue::NEXT_VERSION`）发放，任何一次替换或变更都拿到一个此前没被用过的号
 
 ## [1.6.1] - 2026-09-24
 
