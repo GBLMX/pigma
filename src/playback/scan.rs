@@ -23,6 +23,10 @@ struct LocalTags {
     album: Option<String>,
     /// Milliseconds; read off the container header, without decoding a sample.
     duration: Option<u64>,
+    /// Position in the album, as the tags carry it. Only used to order the
+    /// scan's output (see [`TrackPosition`]); nothing displays it.
+    disc: Option<u32>,
+    track: Option<u32>,
 }
 
 /// Read title/artist/album/duration from a file's tags.
@@ -57,6 +61,18 @@ fn read_tags(path: &Path) -> LocalTags {
             .filter(|s| !s.is_empty())
             .map(str::to_string)
     };
+    // Track/disc numbers are text in every tag format this reads, and taggers
+    // pad and decorate them freely ("03", "3/13", "1 of 2"), so the number is
+    // taken up to the first separator and anything unparsable stays `None`
+    // rather than throwing the whole position away.
+    let number = |key: ItemKey| -> Option<u32> {
+        text(key)?
+            .split(['/', ' '])
+            .next()?
+            .trim()
+            .parse::<u32>()
+            .ok()
+    };
     let properties = tagged.properties().duration();
     LocalTags {
         title: text(ItemKey::TrackTitle),
@@ -65,6 +81,8 @@ fn read_tags(path: &Path) -> LocalTags {
         artist: text(ItemKey::TrackArtist).or_else(|| text(ItemKey::AlbumArtist)),
         album: text(ItemKey::AlbumTitle),
         duration: (!properties.is_zero()).then_some(properties.as_millis() as u64),
+        disc: number(ItemKey::DiscNumber),
+        track: number(ItemKey::TrackNumber),
     }
 }
 
@@ -82,14 +100,45 @@ fn decoded_duration(path: &Path) -> u64 {
 }
 
 pub fn scan_local_music(dir: &std::path::Path) -> Vec<SongInfo> {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return vec![];
-    };
     let mut songs = Vec::new();
+    scan_local_dir(dir, &mut songs);
+    // Album order: the album a file belongs to, then its position in it, then the
+    // path. Sorting on the title alone (`a.name.cmp(&b.name)`) is what played a CD
+    // rip out of order — `Airport Arrival` came before `Airport Take Off`, and the
+    // rest followed whatever their titles collated to. The path is the tiebreak for
+    // a library with no track tags at all, where it is at least the same order on
+    // every machine; `read_dir` order, which used to leak into the queue, is not.
+    songs.sort_by(|a, b| {
+        a.1.album
+            .cmp(&b.1.album)
+            .then_with(|| a.0.cmp(&b.0))
+            .then_with(|| a.1.local_path.cmp(&b.1.local_path))
+    });
+    songs.into_iter().map(|(_, song)| song).collect()
+}
+
+/// Disc and track number of one file, both `None` when its tags carry neither.
+///
+/// `Option`'s `Ord` compares `None` below `Some`, so untagged files of an album
+/// sort ahead of its numbered ones. Arbitrary, but the same everywhere, which is
+/// the whole point of ordering here.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct TrackPosition {
+    disc: Option<u32>,
+    track: Option<u32>,
+}
+
+/// Walk `dir`, appending every audio file it holds (and the subtrees under it)
+/// together with the position that orders it. The traversal order is deliberately
+/// meaningless — [`scan_local_music`] sorts what it collects.
+fn scan_local_dir(dir: &Path, songs: &mut Vec<(TrackPosition, SongInfo)>) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
     for entry in entries.filter_map(|e| e.ok()) {
         let path = entry.path();
         if path.is_dir() {
-            songs.extend(scan_local_music(&path));
+            scan_local_dir(&path, songs);
             continue;
         }
         if !path.is_file() {
@@ -122,24 +171,28 @@ pub fn scan_local_music(dir: &std::path::Path) -> Vec<SongInfo> {
         // into the on-disk queue files. Dropping the mask would change the id of roughly half of
         // all local files and orphan their saved queues.
         let id = hasher.finish() & !(1u64 << 63);
-        songs.push(SongInfo {
-            id,
-            name,
-            singer: tags.artist.unwrap_or_else(|| "本地".into()),
-            artist_id: 0,
-            album,
-            album_id: 0,
-            pic_url: String::new(),
-            duration,
-            mv: 0,
-            copyright: ncm_api::SongCopyright::Free,
-            // The album field may now hold the album tag, so the file the track
-            // plays from travels in its own field (see `playback::source`).
-            local_path: Some(path_text),
-        });
+        songs.push((
+            TrackPosition {
+                disc: tags.disc,
+                track: tags.track,
+            },
+            SongInfo {
+                id,
+                name,
+                singer: tags.artist.unwrap_or_else(|| "本地".into()),
+                artist_id: 0,
+                album,
+                album_id: 0,
+                pic_url: String::new(),
+                duration,
+                mv: 0,
+                copyright: ncm_api::SongCopyright::Free,
+                // The album field may now hold the album tag, so the file the track
+                // plays from travels in its own field (see `playback::source`).
+                local_path: Some(path_text),
+            },
+        ));
     }
-    songs.sort_by(|a, b| a.name.cmp(&b.name));
-    songs
 }
 
 #[cfg(test)]
@@ -272,6 +325,93 @@ mod tests {
         assert_eq!(partial_song.singer, "有歌手");
         assert_eq!(partial_song.album, partial.to_string_lossy().as_ref());
         assert_eq!(partial_song.duration, 1000);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A rip's tags say in what order its tracks play; the scan sorted on the title
+    /// instead, which played an album in whatever order its titles collated to
+    /// (`Airport Arrival` before `Airport Take Off`). Both the directory order and a
+    /// title sort fail this: the files are written out of order and their titles sort
+    /// the opposite way from their track numbers.
+    #[test]
+    fn tracks_follow_their_album_position_not_their_title() {
+        let dir = temp_dir("track-order");
+        let write = |file: &str, disc: &str, track: &str, title: &str| {
+            let path = dir.join(file);
+            write_wav(&path, SAMPLES);
+            write_tags(
+                &path,
+                &[
+                    (ItemKey::AlbumTitle, "专辑"),
+                    (ItemKey::DiscNumber, disc),
+                    (ItemKey::TrackNumber, track),
+                    (ItemKey::TrackTitle, title),
+                ],
+            );
+        };
+        write("03 - zzz.wav", "1", "3", "Zzz");
+        write("01 - mmm.wav", "1", "1", "Mmm");
+        write("02 - aaa.wav", "1", "2", "Aaa");
+
+        let names: Vec<String> = scan_local_music(&dir)
+            .iter()
+            .map(|s| s.name.clone())
+            .collect();
+        assert_eq!(names, ["Mmm", "Aaa", "Zzz"]);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A multi-disc album lives in one folder, so the disc number has to come before
+    /// the track number. Taggers write these as `1/13`, which is why the number is
+    /// taken up to the separator.
+    #[test]
+    fn discs_play_before_tracks_and_totals_do_not_confuse_the_number() {
+        let dir = temp_dir("disc-order");
+        let write = |file: &str, disc: &str, track: &str, title: &str| {
+            let path = dir.join(file);
+            write_wav(&path, SAMPLES);
+            write_tags(
+                &path,
+                &[
+                    (ItemKey::AlbumTitle, "双碟"),
+                    (ItemKey::DiscNumber, disc),
+                    (ItemKey::TrackNumber, track),
+                    (ItemKey::TrackTitle, title),
+                ],
+            );
+        };
+        write("disc-2-track-1.wav", "2/2", "1/9", "第二碟第一首");
+        write("disc-1-track-2.wav", "1/2", "2/9", "第一碟第二首");
+        write("disc-1-track-1.wav", "1/2", "1/9", "第一碟第一首");
+
+        let names: Vec<String> = scan_local_music(&dir)
+            .iter()
+            .map(|s| s.name.clone())
+            .collect();
+        assert_eq!(names, ["第一碟第一首", "第一碟第二首", "第二碟第一首"]);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A library with no track tags anywhere still has to come out in the same order
+    /// on every machine: the path decides, not the filesystem. `read_dir` order used
+    /// to reach the queue unchanged, which is why a scan of the same directory could
+    /// list the same songs differently from one run to the next.
+    #[test]
+    fn a_library_without_track_tags_is_ordered_by_its_paths() {
+        let dir = temp_dir("untagged-order");
+        for file in ["c - third.wav", "a - first.wav", "b - second.wav"] {
+            write_wav(&dir.join(file), SAMPLES);
+        }
+
+        // Titles fall back on the file stems, so the names double as the paths' order.
+        let names: Vec<String> = scan_local_music(&dir)
+            .iter()
+            .map(|s| s.name.clone())
+            .collect();
+        assert_eq!(names, ["a - first", "b - second", "c - third"]);
 
         fs::remove_dir_all(&dir).ok();
     }

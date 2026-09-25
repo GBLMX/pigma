@@ -1,3 +1,9 @@
+## [unreleased]
+
+### 🐛 Bug Fixes
+
+- *(playback)* **本地音乐按曲名排，唱片的顺序会被打乱**：`scan_local_music` 收尾那句 `songs.sort_by(|a, b| a.name.cmp(&b.name))` 把音轨号整个丢掉了 —— 一张 13 轨、`TRACKNUMBER=01..13` 的碟进队列后是 `Airport Arrival` 排在 `Airport Take Off` 前面，中文曲名再按 Unicode 码位一路 `再见(518D) → 十七岁(5341) → 心乱飞(5FC3) → … → 飞机场(98DE)` 排下去，碟序一轨不剩。现在按**专辑 → 碟号 → 音轨号 → 路径**排：碟号与音轨号取自 `ItemKey::DiscNumber` / `TrackNumber`（`01`、`3/13`、`1 of 2` 这类写法都认，解析不出来的退到下一级），没有音轨标签的曲库退化为按路径排 —— 原来的兜底其实是 `read_dir` 的顺序，同一个目录两次扫描都可以不一样
+
 ## [1.6.1] - 2026-09-24
 
 ### 🐛 Bug Fixes
