@@ -17,7 +17,9 @@ use std::sync::{Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 /// Lock `mutex`, ignoring poisoning.
 pub fn mutex<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// Take `lock` for reading, ignoring poisoning.
@@ -27,5 +29,6 @@ pub fn read<T>(lock: &RwLock<T>) -> RwLockReadGuard<'_, T> {
 
 /// Take `lock` for writing, ignoring poisoning.
 pub fn write<T>(lock: &RwLock<T>) -> RwLockWriteGuard<'_, T> {
-    lock.write().unwrap_or_else(|poisoned| poisoned.into_inner())
+    lock.write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }

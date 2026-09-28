@@ -7,9 +7,9 @@
 //! The protocol never learns what the endpoint is: the listener yields an
 //! `AcceptedStream` and that `AsyncRead + AsyncWrite` is all the server loop ever names.
 
-use std::fs;
 use std::{
     cell::RefCell,
+    fs,
     path::{Path, PathBuf},
     sync::OnceLock,
 };

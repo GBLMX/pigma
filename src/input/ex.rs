@@ -1189,7 +1189,6 @@ mod tests {
         );
         assert!(config.mouse);
         assert_eq!(out, ENABLE_MOUSE);
-
     }
 
     /// Same for the cursor: the config keeps the shape, and the terminal is asked for it now.

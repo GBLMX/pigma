@@ -129,17 +129,16 @@ impl CacheManager {
         let filename = self.resolve_filename(song, ext);
         let path = self.downloads_dir.join(&filename);
         let file_bytes = fs::metadata(&path).ok().map(|m| m.len()).unwrap_or(0);
-        sync::write(&self.index)
-            .insert(
-                song.id,
-                CacheEntry {
-                    filename,
-                    duration: song.duration,
-                    accessed_at: now,
-                    pic_url: song.pic_url.clone(),
-                    uploaded_at: 0,
-                },
-            );
+        sync::write(&self.index).insert(
+            song.id,
+            CacheEntry {
+                filename,
+                duration: song.duration,
+                accessed_at: now,
+                pic_url: song.pic_url.clone(),
+                uploaded_at: 0,
+            },
+        );
         self.cached_total_bytes
             .fetch_add(file_bytes, Ordering::Relaxed);
         self.save_index();
