@@ -34,6 +34,7 @@ impl NcmClient {
             .request_weapi("/weapi/radio/trash/add", &params)
             .await?;
         let value: Value = serde_json::from_str(&result)?;
+        Self::check_api_code(&value)?;
         parse_msg(&value).map_err(|e| NcmError::parse(e, &value))
     }
 
@@ -51,6 +52,7 @@ impl NcmClient {
             .request_weapi("/api/v2/discovery/recommend/dislike", &params)
             .await?;
         let value: Value = serde_json::from_str(&result)?;
+        Self::check_api_code(&value)?;
         let data = value
             .get("data")
             .ok_or_else(|| NcmError::parse("missing data", &value))?;

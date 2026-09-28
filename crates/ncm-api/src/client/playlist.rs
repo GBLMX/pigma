@@ -252,6 +252,7 @@ impl NcmClient {
         let params = vec![("id", id_str.as_str())];
         let result = self.request_weapi(path, &params).await?;
         let value: Value = serde_json::from_str(&result)?;
+        Self::check_api_code(&value)?;
         parse_msg(&value).map_err(|e| NcmError::parse(e, &value))
     }
 
