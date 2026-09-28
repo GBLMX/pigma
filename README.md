@@ -193,7 +193,7 @@ curl -fsSL https://raw.githubusercontent.com/GBLMX/pigma/main/install.sh | sh
 | `--rollback` | — | — （切回上一个版本；配 `--dry-run` 只看计划） |
 | `--dry-run` / `--force` | — | — |
 
-先看一眼它打算做什么：`sh install.sh --dry-run`。目标版本已装好时是 no-op（`--force` 重装）；`SHA256SUMS` 拿不到（旧版本发布）会**明说「未校验」**而不是假装校验过。
+先看一眼它打算做什么：`sh install.sh --dry-run`。目标版本已装好时是 no-op（`--force` 重装）；`SHA256SUMS` 取不到（网络不通，或旧版本发布时根本没发这个文件）会**拒绝安装**，而不是偷偷跳过校验 —— 用 `--checksums <url>` 指定一份，或用 `--insecure` 明确放行。
 
 ### 升级：`boxpigma update`
 
@@ -205,10 +205,18 @@ boxpigma update --check            # 只看当前版本 / 最新版本，不下�
 boxpigma update --dry-run          # 只打印计划：下什么、装到哪、校验哪个文件
 boxpigma update --version v1.5.0   # 指定版本（`latest` 之外的都按 tag 下载）
 boxpigma update --rollback         # 切回上一个版本（连按两次会在两个版本间来回）
-boxpigma update --mirror https://ghproxy.example --dir ~/.local/bin
+boxpigma update --mirror https://mirror.example --dir ~/.local/bin
+boxpigma update --insecure         # SHA256SUMS 取不到时也装（不做完整性校验）
 ```
 
-`--mirror` 相当于脚本里的 `--host`，`--dir` / `--checksums` / `--force` 与脚本同名参数一致；`--check` 的版本查询与资产探测也走镜像（跟脚本里 `--host` 覆盖 latest 查询一样），所以只能连镜像的环境照样能 check。它只处理 `releases/` 已经存在的目录：**首次安装仍然走上面的脚本**（建目录、装进 `releases/`、提示 `PATH` 都是脚本的事）。同一个版本已装好时是 no-op，`--force` 重装。
+`--mirror` 相当于脚本里的 `--host`，`--dir` / `--checksums` / `--force` / `--insecure` 与脚本同名参数一致；`--check` 的版本查询与资产探测也走镜像（跟脚本里 `--host` 覆盖 latest 查询一样），所以只能连镜像的环境照样能 check。它只处理 `releases/` 已经存在的目录：**首次安装仍然走上面的脚本**（建目录、装进 `releases/`、提示 `PATH` 都是脚本的事）。同一个版本已装好时是 no-op，`--force` 重装。
+
+`--mirror` 是**前缀替换**：把 URL 里的 `https://github.com` 换成你给的那串。
+
+- 自建镜像就架在 `github.com` 的位置：`--mirror https://mirror.example`。
+- ghproxy 这类把**完整原 URL** 当路径的代理，要连原 URL 一起给：`--mirror https://proxy.example/https://github.com` —— 只给主机名会拼出 `https://proxy.example/GBLMX/pigma/...` 而 404。
+
+`SHA256SUMS` 取不到时，`update` 与 `install.sh` 默认都**拒绝安装**（不做完整性校验就不装），并说明两条出路：`--checksums <URL|本地文件>` 自己指定一份，或 `--insecure` 明确放行。`--dry-run` 只报告、不中止。
 
 ### Linux（手动）
 

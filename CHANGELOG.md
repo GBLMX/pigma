@@ -1,5 +1,13 @@
 ## [unreleased]
 
+### 🐛 Bug Fixes
+
+- *(update)* **取不到 `SHA256SUMS` 时不再默认安装**：`boxpigma update` 与 `install.sh` 此前都只打印一句「这次没有校验就安装」然后照装 —— 自更新器静默放弃完整性校验，而且恰好发生在最需要它的场景里（`github.com` 连不上、只能走镜像时，`SHA256SUMS` 最可能取不到）。现在两者默认**拒绝安装**并给出两条出路：`--checksums <URL|本地文件>` 自己指定一份，或 `--insecure` 明确放行；`--dry-run` 仍只报告、不中止（真跑会被拒这件事本身就是计划的一部分）。两个参数在两个入口同名。
+
+### 📚 Documentation
+
+- *(readme)* `--mirror` 是**前缀替换**这件事写清楚：自建镜像给 `https://mirror.example`，ghproxy 这类把完整原 URL 当路径的代理要给 `https://proxy.example/https://github.com` —— 只给主机名会拼出 `…/GBLMX/pigma/…` 而 404（实测）
+
 ## [1.6.2] - 2026-09-29
 
 ### 🐛 Bug Fixes

@@ -134,6 +134,9 @@ pub enum Command {
         /// Reinstall even when this version is already installed.
         #[arg(long)]
         force: bool,
+        /// Install even when `SHA256SUMS` cannot be fetched (no integrity check).
+        #[arg(long)]
+        insecure: bool,
         /// Print the plan; download nothing, write nothing.
         #[arg(long)]
         dry_run: bool,
@@ -560,6 +563,7 @@ pub async fn run_cli(mut cli: Cli) -> color_eyre::Result<Option<App>> {
             mirror,
             checksums,
             force,
+            insecure,
             dry_run,
             rollback,
         }) => {
@@ -570,6 +574,7 @@ pub async fn run_cli(mut cli: Cli) -> color_eyre::Result<Option<App>> {
                 mirror: mirror.clone(),
                 checksums: checksums.clone(),
                 force: *force,
+                insecure: *insecure,
                 dry_run: *dry_run,
                 rollback: *rollback,
             })

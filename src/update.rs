@@ -42,6 +42,8 @@ pub struct Options {
     pub mirror: Option<String>,
     pub checksums: Option<String>,
     pub force: bool,
+    /// Install even when `SHA256SUMS` cannot be fetched, i.e. without an integrity check.
+    pub insecure: bool,
     pub dry_run: bool,
     pub rollback: bool,
 }
@@ -352,12 +354,24 @@ async fn install(client: &Client, layout: &Layout, opts: &Options) -> Result<()>
 
     let want = match fetch_checksums(client, &checksums_source).await? {
         Some(want) => Some(want),
-        None => {
-            // Older releases never published this file; say so rather than imply it was
-            // verified.
-            println!("  校验       拿不到 {checksums_source} —— 这次没有校验就安装");
+        // No list means no verification, and an updater that installs unverified bytes is
+        // exactly what a mirror user — the one most likely to be missing this file — must not
+        // get by accident. So this is a refusal with two ways out, not a warning: `--insecure`
+        // says it out loud, `--checksums` supplies a list of your own, and `--dry-run` (which
+        // writes nothing) only reports what a real run would do.
+        None if opts.insecure => {
+            println!("  校验       拿不到 {checksums_source} —— --insecure 已放行，这次不做校验");
             None
         }
+        None if opts.dry_run => {
+            println!(
+                "  校验       拿不到 {checksums_source} —— 真跑会被拒（要 --checksums 或 --insecure）"
+            );
+            None
+        }
+        None => bail!(
+            "取不到校验和 {checksums_source} —— 已中止：没有校验就不安装。\n               自己指定一份：--checksums <URL|本地文件>\n               或明确放行：  --insecure（不做完整性校验）"
+        ),
     };
 
     // The reuse check is read-only — no download, no write — so `--dry-run` reports its verdict
@@ -1230,6 +1244,64 @@ mod tests {
             paths.iter().any(|path| path == &asset_path),
             "the asset probe never reached {host}: {paths:?}"
         );
+        cleanup(&layout);
+    }
+
+    /// The options a test's `install` call needs; the two switches these tests are about are
+    /// left to the caller.
+    fn opts_for(host: String, dry_run: bool, insecure: bool) -> Options {
+        Options {
+            check: false,
+            version: "latest".into(),
+            dir: None,
+            mirror: Some(host),
+            checksums: None,
+            force: false,
+            insecure,
+            dry_run,
+            rollback: false,
+        }
+    }
+
+    /// No `SHA256SUMS`, no install. The published list is the only thing that makes the download
+    /// trustworthy, and a mirror user — the one most likely to be missing it — must not get an
+    /// unverified binary by accident. The refusal has to name both ways out, and it has to
+    /// happen before anything is written.
+    #[tokio::test]
+    async fn install_refuses_when_the_checksums_cannot_be_fetched() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let client = http_client().expect("http client");
+        let layout = fixture("no-checksums");
+        let (host, _seen) = release_host("v1.6.0");
+
+        let error = install(&client, &layout, &opts_for(host, false, false))
+            .await
+            .expect_err("must refuse without a checksum list");
+        let message = error.to_string();
+        assert!(message.contains("--checksums"), "{message}");
+        assert!(message.contains("--insecure"), "{message}");
+        assert_eq!(
+            fs::read_dir(layout.releases())
+                .expect("read releases")
+                .count(),
+            0,
+            "a refused run must not write a version directory"
+        );
+        cleanup(&layout);
+    }
+
+    /// `--dry-run` exists to show the plan, so a missing list is reported rather than fatal:
+    /// that a real run would refuse is part of the plan.
+    #[tokio::test]
+    async fn dry_run_reports_a_missing_checksum_list_without_failing() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let client = http_client().expect("http client");
+        let layout = fixture("no-checksums-dry");
+        let (host, _seen) = release_host("v1.6.0");
+
+        install(&client, &layout, &opts_for(host, true, false))
+            .await
+            .expect("dry-run must not fail on a missing checksum list");
         cleanup(&layout);
     }
 }

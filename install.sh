@@ -24,11 +24,14 @@
 #   --rollback               把 current 切回上一个版本
 #   --dry-run                只打印计划，不下载不写入
 #   --force                  同一版本也重新下载安装
+#   --insecure               取不到 SHA256SUMS 也继续安装（不做完整性校验）
 #
 # 行为：
 #
 #   * 先下载并校验，装进新的 releases/<版本>-<目标平台> 目录，最后一步才切换 current；
 #     校验失败不会切换，切换失败会还原旧链接并以非 0 退出。
+#   * SHA256SUMS 取不到时**拒绝安装**（没有校验就不装）：--checksums 指定一份，
+#     或 --insecure 明确放行。
 #   * 同一个版本重复安装时，目录已在且校验一致就跳过下载（--force 可强制重装）。
 #   * 只保留最近 3 个版本目录，current 指向的那个永不删除。
 #   * 提示与 PATH 都用 <dir>/current/boxpigma。
@@ -44,6 +47,7 @@ CHECKSUMS="${BOXPIGMA_CHECKSUMS:-}"
 DRY_RUN=0
 FORCE=0
 ROLLBACK=0
+INSECURE=0
 
 # 保留多少个版本目录（含当前版本）；current 指向的那个无论如何都留着。
 KEEP=3
@@ -80,6 +84,7 @@ while [ $# -gt 0 ]; do
         --rollback) ROLLBACK=1; shift ;;
         --dry-run) DRY_RUN=1; shift ;;
         --force) FORCE=1; shift ;;
+        --insecure) INSECURE=1; shift ;;
         -h | --help) usage ;;
         *) die "未知参数：$1（试试 --help）" ;;
     esac
@@ -447,6 +452,11 @@ if fetch_optional "$CHECKSUMS" "$TMP/SHA256SUMS"; then
     if [ -z "$WANT" ]; then
         die "SHA256SUMS 里没有 $ASSET 的记录（$CHECKSUMS）"
     fi
+elif [ "$INSECURE" = 1 ]; then
+    # 明确放行才走这里：没有校验的安装必须是说出来的，不是默认的。
+    log "  verify     拿不到 $CHECKSUMS —— --insecure 已放行，这次不做校验"
+else
+    die "取不到校验和 $CHECKSUMS —— 已中止（没有校验就不安装）。指定一份：--checksums <url>，或明确放行：--insecure"
 fi
 
 # 已经装过同一个版本：目录里的记录和 release 的 SHA256SUMS 对得上就不用再下载。
