@@ -69,6 +69,8 @@
   代价：被删掉的键**连同它自己的注释**一起走（备份 `config.toml.bak-v{旧版本}` 里都在）；
   `save()` 仍是整份序列化，"运行中改设置再保存"依旧不保留注释 —— 这一条只关于启动时的迁移。
 
+- **"取锁"与"原子写"各只写一次（2026-09-29）**：取锁的 poison 决策此前散成四种写法（`unwrap`、`unwrap_or_else(into_inner)`、`if let Ok` 静默跳过、`map_err` 转 `io::Error`），其中 `ipc` 的四处 `unwrap` 会在别的线程 panic 之后把进程带走；而"临时文件 + rename"的原子写只有 `cookie.rs` 一处，应用侧的配置与缓存索引还是原地截断。现在 `utils::sync::{mutex, read, write}` 提供"其他线程的 panic 与这份数据无关，取走它"，`utils::fs::write_atomic` 提供同目录临时文件 + `rename`；唯一保留的例外是 `playback::player` 把 poison 转成 `io::Error`（调用方有那条通道），理由写在 `utils::sync` 的模块文档里。除两处刻意的行为变化（`ipc` 不再 panic、`cache` 的两处 `if let Ok` 不再静默跳过）外调用点零变化
+
 ## 二、已否决（附依据）
 
 | 候选 | 否决理由（实测） |
