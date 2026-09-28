@@ -8,8 +8,8 @@ description: 网易云音乐 TUI 客户端 boxpigma 的 CLI 控制技能（statu
 
 ## Overview
 **boxpigma** 是一个网易云音乐 TUI 客户端（ratatui）。不带子命令直接运行即进入交互界面；同时提供
-`boxpigma status` / `boxpigma msg` 两个子命令，通过 IPC（Linux/macOS 为 Unix socket
-`~/.cache/boxpigma/boxpigma.sock`，Windows 为命名管道 `\\.\pipe\boxpigma`）查询或控制**正在运行**的实例
+`boxpigma status` / `boxpigma msg` 两个子命令，通过 IPC（Unix socket
+`~/.cache/boxpigma/boxpigma.sock`）查询或控制**正在运行**的实例
 （交互界面或 `-d` 守护进程均可）。适合脚本、状态栏（Waybar）、远程控制。
 
 ---
@@ -39,7 +39,7 @@ cargo build --release
 |---|---|
 | `-v, --version` | 打印版本号并退出 |
 | `-d, --daemon [<ENDPOINT[:N]>]` | 无头守护进程模式；省略 ENDPOINT 默认 `liked`，`:N` 选第 N 个歌单（可与子命令冲突，见下） |
-| `--socket <SOCKET>` | 自定义 IPC socket/管道路径（Unix 或 Windows 管道名） |
+| `--socket <SOCKET>` | 自定义 IPC socket 路径 |
 | `-h, --help` | 显示帮助 |
 
 > `args_conflicts_with_subcommands = true`：`-d`/`--socket` 等全局选项不能与子命令混用；
@@ -161,7 +161,7 @@ boxpigma msg caps                  # 别名，等价
 ```
 
 `--json` / socket 返回的形状（`api` 是契约版本，`version` 是程序版本，`actions` 按 `name` 升序，
-`socket` 是这个实例实际监听的 socket / 命名管道路径；下面只留了前几个动作）：
+`socket` 是这个实例实际监听的 socket 路径；下面只留了前几个动作）：
 
 ```json
 {
@@ -187,10 +187,10 @@ boxpigma msg caps                  # 别名，等价
 
 ---
 
-## IPC 协议（直接走 socket/管道）
+## IPC 协议（直接走 socket）
 
-子命令底层就是往 socket/管道发一行 JSON、收一行 JSON（需换行结尾）。
-`msg` 成功回 `{"ok":true}`。可用 socat / PowerShell / 脚本直接控制。
+子命令底层就是往 socket 发一行 JSON、收一行 JSON（需换行结尾）。
+`msg` 成功回 `{"ok":true}`。可用 socat / 脚本直接控制。
 
 > `action` 是内部标签对象，必须写成 `{"cmd":"msg","action":{"action":...}}` 的嵌套形式
 > （即 `boxpigma msg` 实际发送的 JSON）；写成 `{"action":"play"}` 会被服务端丢弃。
@@ -216,7 +216,7 @@ printf '{"cmd":"msg","action":{"action":"volume","delta":0.05}}\n'    | socat - 
 printf '{"cmd":"msg","action":{"action":"switch_list","endpoint":"toplist","playlist":2}}\n' | socat - "$HOME/.cache/boxpigma/boxpigma.sock"
 ```
 
-Windows 命名管道协议相同，socket 路径可用 `--socket <pipe-name>` 自定义。
+socket 路径可用 `--socket <path>` 自定义。
 
 ---
 
@@ -298,7 +298,7 @@ boxpigma msg --socket /tmp/music.sock play
 ---
 
 ## Notes
-- 所有子命令都是即发即走（非阻塞），走本地 socket/管道，无需网络。
+- 所有子命令都是即发即走（非阻塞），走本地 socket，无需网络。
 - 交互界面与守护进程都暴露同一 IPC；守护进程可挂 systemd / Waybar。
 - 补全脚本：`boxpigma completions bash|zsh|fish|elvish|powershell`。
 - 完整帮助：`boxpigma --help`、`boxpigma status --help`、`boxpigma msg --help`。

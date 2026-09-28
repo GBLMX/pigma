@@ -79,7 +79,7 @@ lyric_translation = true
 # 国内用户: 保持注释 (直连)
 # proxy = "http://127.0.0.1:7890"
 
-# 桌面通知（默认关闭）。用 OSC 9 触发，kitty / WezTerm / foot / iTerm2 / Windows Terminal 支持
+# 桌面通知（默认关闭）。用 OSC 9 触发，kitty / WezTerm / foot 支持
 [notify]
 # 切歌时通知当前曲目（歌名 — 歌手）
 song_change = false

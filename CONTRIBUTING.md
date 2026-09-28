@@ -27,7 +27,7 @@
 
 在提交 Issue 前，请先搜索现有 Issues，避免重复。
 
-- **Bug 报告**：请使用 `Bug report` 模板，并详细描述复现步骤、预期行为与实际行为、环境信息（OS、版本等）。
+- **Bug 报告**：请使用 `Bug report` 模板，并详细描述复现步骤、预期行为与实际行为、环境信息（发行版、版本等）。
 - **功能请求**：请使用 `Feature request` 模板，清晰说明使用场景和预期收益。
 - **其他需求**：请使用 `Other`模板，清晰描述问题。
 
@@ -84,7 +84,7 @@
   ```bash
   git config core.hooksPath .githooks   # 只需一次：装上提交前的格式闸门
   rustup toolchain install nightly --component rustfmt
-  cargo +nightly fmt          # Windows 上加：-- --config newline_style=Windows
+  cargo +nightly fmt
   ```
 
   stable 的 `cargo fmt` **看不到**这些选项，会把未格式化的树报成"没问题"，而 CI 会红——`.githooks/pre-commit` 就是为这件事存在的：它跑与 CI 相同的检查，失败时就地格式化并拦下这次提交。另外运行 `cargo clippy --workspace --all-targets --all-features -- -D warnings`（CI 现在把 clippy 警告当失败，本地照这个跑就不会红）。
@@ -148,7 +148,7 @@ cat /proc/<pid>/task/*/wchan                      # 内核视角：线程卡在�
 | 页面表（绘制/布局/按键三处分发合一） | `src/state/page.rs`、`src/ui.rs`、`src/layout.rs` |
 | 主题内部（`palette` 对比度、`random`、稳定排序） | `src/config/theme.rs`、`src/app/theme.rs` |
 | 启动画面字形（FIGlet `Calvin S` 的渲染结果） | `src/ui/splash.rs` |
-| 一键安装脚本（上游没有）与它依赖的发布契约 | `install.sh`、`install.ps1`、`.github/workflows/release.yml` 里生成 `SHA256SUMS` 的那一步（上游若改发布作业，这里必然冲突） |
+| 一键安装脚本（上游没有）与它依赖的发布契约 | `install.sh`、`.github/workflows/release.yml` 里生成 `SHA256SUMS` 的那一步（上游若改发布作业，这里必然冲突） |
 
 同步方式是**按提交挑**，不合并：
 

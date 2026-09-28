@@ -19,10 +19,8 @@ boxpigma 把网易云音乐与本地音频播放带进终端：流式播放、�
 - [Features](#features)
 - [Preview](#preview)
 - [Install](#install)
-  - [一键安装（Linux / macOS）](#一键安装linux--macos)
-  - [一键安装（Windows / PowerShell）](#一键安装windows--powershell)
-  - [Linux / macOS（手动）](#linux--macos手动)
-  - [Windows（手动）](#windows手动)
+  - [一键安装（Linux）](#一键安装linux)
+  - [Linux（手动）](#linux手动)
   - [从源码](#从源码)
 - [Usage](#usage)
   - [快捷键](#快捷键)
@@ -49,7 +47,7 @@ boxpigma 把网易云音乐与本地音频播放带进终端：流式播放、�
 | 二进制 | `boxpigma` |
 | 配置 | `~/.config/boxpigma/`（原 `~/.config/pigma/`） |
 | 缓存与队列 | `~/.cache/boxpigma/`（原 `~/.cache/pigma/`） |
-| IPC | `boxpigma.sock` / Windows 命名管道 `\\.\pipe\boxpigma` |
+| IPC | `boxpigma.sock`（Unix socket） |
 
 首次运行会把旧的 `pigma` 目录整体搬过来（配置、cookie、队列、封面缓存都在里面），日志里留一行 `adopted … from before the rename`；搬不动（旧实例还在跑、权限不足）就继续用旧目录，不会静默从空配置开始。
 
@@ -67,7 +65,7 @@ boxpigma 把网易云音乐与本地音频播放带进终端：流式播放、�
 
 **一、结构性差异**（上游不会覆盖；每次同步必然冲突，冲突时保留本仓库版本）
 
-- **项目身份**：包名与二进制名 `boxpigma`（上游为 `pigma`），配置目录 `~/.config/boxpigma`、缓存目录 `~/.cache/boxpigma`、IPC socket `boxpigma.sock` 与 Windows 命名管道一并改名；首次运行会把旧的 `pigma` 目录整体接管过来（搬不动就继续用旧目录），不丢配置与缓存
+- **项目身份**：包名与二进制名 `boxpigma`（上游为 `pigma`），配置目录 `~/.config/boxpigma`、缓存目录 `~/.cache/boxpigma`、IPC socket `boxpigma.sock` 一并改名；首次运行会把旧的 `pigma` 目录整体接管过来（搬不动就继续用旧目录），不丢配置与缓存
 - **构建**：独立的 crate 收进一个 Cargo workspace —— 依赖版本统一（rustls 三份规格合一）、`cargo test/clippy --workspace` 覆盖全部成员，CI 增加 ubuntu 与成员检查
 - **日志栈**：`tracing` + `tracing-appender`（按天轮转、保留最近 7 个、行内带模块路径与本地时间）；135 处 `log::*!` 由 `tracing-log` 桥接，调用点无需改动
 - **UI 内部结构**：页面分发、页面按键与键位表合并为一张表（新增一个页面从改 9 个文件降到 2 个）；铺底色改用 `Fill`
@@ -79,9 +77,9 @@ boxpigma 把网易云音乐与本地音频播放带进终端：流式播放、�
 
 - **修复**：下载缓存条目只在流完成后记录 · 默认日志级别改为 INFO · 清空的 `sections`/`columns` 序列化不再 panic · eapi 非 2xx 只告警 · IPC socket 权限收窄到属主 · `.gitignore` 忽略调试残留 · 搜索、封面、音频流补齐连接与读超时（音频流刻意**不加**总超时，否则会截断正在播放的下载）
 - **播放**：解析失败按类型分类（网络失败重试一次、无版权/无地址直接走云盘兜底），不再靠错误字符串前缀判断
-- **外观**：符号预设（`nerd`／`unicode`／`ascii`，不装 Nerd Font 也能用）· 按终端能力降级真彩色 · 依据终端背景自动选明/暗主题（Linux/macOS 问终端 OSC 11，Windows 读控制台调色板）· **背景也由主题绘制**（此前只给文字上色，浅色主题在深色终端上会变成零星灰字）· 内置 20 套主题 + `[themes.<名>]` 继承式自定义 · 高亮行的前景色按对比度自动选取，浅色主题下也读得出来
+- **外观**：符号预设（`nerd`／`unicode`／`ascii`，不装 Nerd Font 也能用）· 按终端能力降级真彩色 · 依据终端背景自动选明/暗主题（向终端发 OSC 11 查询）· **背景也由主题绘制**（此前只给文字上色，浅色主题在深色终端上会变成零星灰字）· 内置 20 套主题 + `[themes.<名>]` 继承式自定义 · 高亮行的前景色按对比度自动选取，浅色主题下也读得出来
 - **新增**：频谱可视化 · 音高读数（自实现 YIN，无新增依赖）· 鼠标交互（点击 seek／切区／播放控制／模式／喜欢／静音）· vim 风格 `:` 命令行与 Tab 补全（密码/短信登录、退出登录、签到）· 听歌打卡（播满约 30 秒即上报，与官方客户端口径一致；短于 30 秒的歌以播完为准）· **面板可拖拽可开关**（框内顶栏/侧栏/播放条/MV 栏：鼠标拖边界改尺寸、双击折叠还原、`Ctrl+方向键` 同义，尺寸与折叠态写回配置；**外框不动**）· **进度条样式预设**（`:progress`，一种样式一个词，逐键仍可覆盖）· **歌词五种显示样式**（`:lyrics window|one_line|ktv|flow|plain`，`ktv` 是单色卡拉OK填充、颜色由 `lyric_ktv_color` 定）· 译文与原文一眼分得开（译文行带标记，`y` ／`:translation` 开关）· 歌词严格按解码位置对轴 · 终端开关：`mouse`／`cursor_style`／`[notify]` 桌面通知 · 随仓库提供的性能基准
-- **终端协议**：kitty 图形协议封面（可用 `[playerbar] image_protocol` 强制）· 同步刷新（整帧一次性呈现，也是 kitty 放图的规范要求）· kitty 键盘协议（`Esc` 不再被读成 `Alt+<key>`）· 括号粘贴 · 封面协议以**终端的回答**为准，tmux 内自动回退（Windows 的 ConPTY 不回答该查询，故按环境判定，见 [Windows](#windows)），herdr 窗格内固定用 kitty（窗格里的终端由 herdr 自己仿真，它只吃 kitty 图形，见 `[playerbar] image_protocol`）· kitty 的桌面通知用其自有的 `OSC 99`（标题与正文分开、Base64 负载、`f=` 声明应用名），其余终端保持 `OSC 9` 逐字节不变
+- **终端协议**：kitty 图形协议封面（可用 `[playerbar] image_protocol` 强制）· 同步刷新（整帧一次性呈现，也是 kitty 放图的规范要求）· kitty 键盘协议（`Esc` 不再被读成 `Alt+<key>`）· 括号粘贴 · 封面协议以**终端的回答**为准，tmux 内自动回退，herdr 窗格内固定用 kitty（窗格里的终端由 herdr 自己仿真，它只吃 kitty 图形，见 `[playerbar] image_protocol`）· kitty 的桌面通知用其自有的 `OSC 99`（标题与正文分开、Base64 负载、`f=` 声明应用名），其余终端保持 `OSC 9` 逐字节不变
 
 **注意：**
 
@@ -121,7 +119,7 @@ boxpigma 把网易云音乐与本地音频播放带进终端：流式播放、�
 **集成与打包**
 
 - [x] 命令行控制（`status` / `msg`）+ JSON IPC（waybar 等）· 守护进程模式（`boxpigma -d`）
-- [x] 系统包管理器安装（yay / paru / scoop）· shell 补全（bash / zsh / fish / elvish / powershell）
+- [x] 系统包管理器安装（yay / paru）· shell 补全（bash / zsh / fish / elvish / powershell）
 
 **开发**
 
@@ -135,7 +133,7 @@ boxpigma 把网易云音乐与本地音频播放带进终端：流式播放、�
 - [x] 本地音频歌词、元数据重写（`lofty` 读标签；同名侧车 `.lrc` 复用既有歌词管线）
 - [x] 歌手详情页：简介 / 热门曲目 / **专辑 / 相似歌手** —— 三个列表共用一个光标（`Tab`/`Shift+Tab` 循环），专辑可走可开（`Enter` 打开该专辑，`Esc` 回到歌手页），相似歌手 `Enter` 直接跳过去；鼠标点哪栏就选中哪栏，滚轮走指针所在那栏
 - [x] 推荐生态接入既有侧栏与内容页：相似歌曲 / 包含该歌的歌单 / 听歌排行（本周 · 全部）/ 推荐电台 / 私人 FM（`:simi` `:simiplaylist` `:fm` `:fmtrash`）
-- [x] `[audio]` 播放链（解码之后、设备之前）：`rubato` 采样率转换（采样率与设备一致时样本不做处理）、`biquad` 参量 EQ、`ebur128` 响度归一化、Windows 上 WASAPI **独占**输出（设备拒绝时回退共享模式并说明原因）
+- [x] `[audio]` 播放链（解码之后、设备之前）：`rubato` 采样率转换（采样率与设备一致时样本不做处理）、`biquad` 参量 EQ、`ebur128` 响度归一化
 - [x] landing page（`docs/index.html`，随 Pages 部署）
 
 ## Preview
@@ -164,7 +162,7 @@ boxpigma 把网易云音乐与本地音频播放带进终端：流式播放、�
 
 > 本节命令都对应本仓库的 [releases](https://github.com/GBLMX/pigma/releases)；通过上游渠道装到的是不含本仓库改动的版本。
 
-### 一键安装（Linux / macOS）
+### 一键安装（Linux）
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/GBLMX/pigma/main/install.sh | sh
@@ -194,21 +192,9 @@ curl -fsSL https://raw.githubusercontent.com/GBLMX/pigma/main/install.sh | sh
 
 先看一眼它打算做什么：`sh install.sh --dry-run`。目标版本已装好时是 no-op（`--force` 重装）；`SHA256SUMS` 拿不到（旧版本发布）会**明说「未校验」**而不是假装校验过。
 
-### 一键安装（Windows / PowerShell）
-
-```powershell
-irm https://raw.githubusercontent.com/GBLMX/pigma/main/install.ps1 | iex
-```
-
-按 `RuntimeInformation.OSArchitecture` 选 `x86_64-pc-windows-msvc` 或 `aarch64-pc-windows-msvc`（不是 `PROCESSOR_ARCHITECTURE`：后者在 ARM64 上跑 x64 模拟 shell 时会报错平台），校验和逻辑与上面一致，装到 `%LOCALAPPDATA%\Programs\boxpigma`：
-
-```powershell
-.\install.ps1 -Dir 'D:\tools\boxpigma' -AddToPath   # -Version / -Checksums / -Mirror / -DryRun / -Force
-```
-
 ### 升级：`boxpigma update`
 
-装过一次之后就不必再跑脚本：`boxpigma update` 把上面那套流程在进程内重做一遍——下载对应资产、按 `SHA256SUMS` 校验、解压进新的 `releases/<版本>-<目标>`，校验通过才切 `current`，切换失败就退回旧链接。需要 shell、curl、tar 的那部分它自己实现了，所以 Windows 上也不必开 PowerShell。
+装过一次之后就不必再跑脚本：`boxpigma update` 把上面那套流程在进程内重做一遍——下载对应资产、按 `SHA256SUMS` 校验、解压进新的 `releases/<版本>-<目标>`，校验通过才切 `current`，切换失败就退回旧链接。需要 shell、curl、tar 的那部分它自己实现了。
 
 ```sh
 boxpigma update                    # 装最新版，保留最近 3 个版本（current 指向的那个永不删）
@@ -216,38 +202,23 @@ boxpigma update --check            # 只看当前版本 / 最新版本，不下�
 boxpigma update --dry-run          # 只打印计划：下什么、装到哪、校验哪个文件
 boxpigma update --version v1.5.0   # 指定版本（`latest` 之外的都按 tag 下载）
 boxpigma update --rollback         # 切回上一个版本（连按两次会在两个版本间来回）
-boxpigma update --mirror https://ghproxy.example --dir D:\tools\boxpigma
+boxpigma update --mirror https://ghproxy.example --dir ~/.local/bin
 ```
 
-`--mirror` 相当于脚本里的 `--host` / `-Mirror`，`--dir` / `--checksums` / `--force` 与脚本同名参数一致；`--check` 的版本查询与资产探测也走镜像（跟脚本里 `--host` 覆盖 latest 查询一样），所以只能连镜像的环境照样能 check。它只处理 `releases/` 已经存在的目录：**首次安装仍然走上面的脚本**（建目录、写 `PATH`、装 `.cmd` shim 都是脚本的事）。同一个版本已装好时是 no-op，`--force` 重装。
+`--mirror` 相当于脚本里的 `--host`，`--dir` / `--checksums` / `--force` 与脚本同名参数一致；`--check` 的版本查询与资产探测也走镜像（跟脚本里 `--host` 覆盖 latest 查询一样），所以只能连镜像的环境照样能 check。它只处理 `releases/` 已经存在的目录：**首次安装仍然走上面的脚本**（建目录、装进 `releases/`、提示 `PATH` 都是脚本的事）。同一个版本已装好时是 no-op，`--force` 重装。
 
-### Linux / macOS（手动）
+### Linux（手动）
 
 ```sh
 # https://github.com/marcosnils/bin
 bin install https://github.com/GBLMX/pigma
 ```
 
-或从 [releases](https://github.com/GBLMX/pigma/releases) 下载 `boxpigma-<target>.tar.gz`（`x86_64` / `aarch64`，macOS 为 `apple-darwin`），解包后把 `boxpigma` 放进 `$PATH`。
+或从 [releases](https://github.com/GBLMX/pigma/releases) 下载 `boxpigma-x86_64-unknown-linux-gnu.tar.gz` 或 `boxpigma-aarch64-unknown-linux-gnu.tar.gz`，解包后把 `boxpigma` 放进 `$PATH`。
 
 > `gnu` 构建依赖系统音频库（如 `alsa-lib`）。
 
-### Windows（手动）
-
-从 [releases](https://github.com/GBLMX/pigma/releases) 下载 `boxpigma-x86_64-pc-windows-msvc.zip`（或 `aarch64` 版），解包后把 `boxpigma.exe` 放进 `%PATH%`。
-
-**Windows Terminal 上的行为**（Windows 没有 `/dev/tty`，ConPTY 夹在程序与终端之间，所以两处探测走的是 Windows 自己的接口）：
-
-| 能力 | 在 Windows Terminal 上 |
-| :--- | :--- |
-| 鼠标（点击 seek／切区／播放控制／模式／喜欢／静音） | 正常：走控制台输入模式（`ENABLE_MOUSE_INPUT`），这也是回收终端自身文本选择的方式 |
-| 括号粘贴、`Esc` 歧义 | `CSI ? 2004 h` 与 `CSI > 1 u` 照常发出；**是否生效由终端决定**，不实现的终端忽略它们（`Esc` 保持原有歧义），启动不受影响 |
-| 桌面通知 | 走 `OSC 9`（Windows Terminal 支持该形式） |
-| 明/暗主题（`background = auto`） | 读控制台的背景色与调色板（`GetConsoleScreenBufferInfoEx`），跟随当前配色方案 |
-| 封面 | 图形查询在 ConPTY 下拿不到回答，因此按环境判定：`WT_SESSION` → sixel（需较新的 WT 且未被禁用）。**单元格像素尺寸因此未知**，若封面大小或位置不对，用 `[playerbar] image_protocol = "halfblocks"` 退回半块，或 `"sixel"` 强制 |
-
-> Windows 与 Linux 的发布产物都按 `target-cpu=x86-64-v3` 构建，即需要 **AVX2**（2013 年后的 CPU）。
-
+> x86_64 发布产物按 `target-cpu=x86-64-v3` 构建，即需要 **AVX2**（2013 年后的 CPU）。
 
 ### 从源码
 
@@ -389,10 +360,8 @@ Add-Content $PROFILE '. "$HOME/.config/powershell/boxpigma.ps1"'
 
 #### 直接走 Unix socket（socat / 脚本）
 
-
-> **仅 Linux/macOS**：`status` / `msg` 子命令底层就是往 `~/.cache/boxpigma/boxpigma.sock`
-> 发一行 JSON。Windows 用的是命名管道，见下节。
-> 不想用 `boxpigma` 二进制时，可用 `socat` 或任何 Unix socket 客户端直接控制：
+> `status` / `msg` 子命令底层就是往 `~/.cache/boxpigma/boxpigma.sock`
+> 发一行 JSON。不想用 `boxpigma` 二进制时，可用 `socat` 或任何 Unix socket 客户端直接控制：
 
 ```bash
 # 查询状态（返回一行 JSON）
@@ -421,28 +390,6 @@ printf '{"cmd":"msg","action":{"action":"switch_list","endpoint":"toplist","play
 
 约定：每行请求须以换行结尾，服务端每连接处理一个请求并回一行 JSON
 （`msg` 成功回 `{"ok":true}`）。socket 路径可用 `--socket <path>` 自定义。
-
-#### Windows：命名管道控制（PowerShell）
-
-Windows 上 IPC 走命名管道 `\\.\pipe\boxpigma`（可用 `--socket <pipe-name>` 自定义），
-协议相同（一行 JSON + 换行，服务端回一行 JSON）。用 PowerShell 控制：
-
-```powershell
-function Send-boxpigma($json) {
-    $pipe = New-Object System.IO.Pipes.NamedPipeClientStream('.', 'boxpigma', [System.IO.Pipes.PipeDirection]::InOut)
-    $pipe.Connect(5000)
-    $sw = New-Object System.IO.StreamWriter($pipe)
-    $sw.NewLine = "`n"
-    $sw.WriteLine($json); $sw.Flush()
-    $sr = New-Object System.IO.StreamReader($pipe)
-    return $sr.ReadLine()
-}
-
-Send-boxpigma '{"cmd":"status"}'                 # 查询状态
-Send-boxpigma '{"cmd":"list"}'                   # 列出播放队列
-Send-boxpigma '{"cmd":"msg","action":{"action":"next"}}'    # 下一首
-Send-boxpigma '{"cmd":"msg","action":{"action":"volume","absolute":0.75}}'  # 音量 75%
-```
 
 ### 无头守护进程模式（boxpigma -d）
 
@@ -535,7 +482,7 @@ journalctl --user -u boxpigma -f     # 日志
 | `[terminal]` | 鼠标捕获与光标形状 |
 | `[notify]` | 桌面通知开关（切歌 / 出错） |
 | `[cache]` | 内容缓存与 save-on-play |
-| `[audio]` | 播放链：`resample`（用 `rubato` 转换采样率，采样率一致时不动样本）、`[[audio.eq]]`（每段 `freq`/`gain_db`/`q`，参量峰值滤波）、`[audio.loudness]`（`target_lufs`/`max_gain_db`，EBU R128 响度归一化）、`exclusive`（Windows：WASAPI 独占输出，失败自动回退共享模式并说明原因） |
+| `[audio]` | 播放链：`resample`（用 `rubato` 转换采样率，采样率一致时不动样本）、`[[audio.eq]]`（每段 `freq`/`gain_db`/`q`，参量峰值滤波）、`[audio.loudness]`（`target_lufs`/`max_gain_db`，EBU R128 响度归一化） |
 
 改完可用 `:save` 立即写回；`:` 命令行里 `:theme <Tab>`、`:layout <Tab>` 都能补全可用取值。
 
