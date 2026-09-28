@@ -314,7 +314,7 @@
   <section id="install" aria-labelledby="install-title">
     <div class="wrap">
       <h2 id="install-title">安装</h2>
-      <p class="section-note">下面这条命令从本仓库的 release 下载，并校验随发布附带的 <code>SHA256SUMS</code>。安装按版本分目录、<code>current</code> 指向当前版本，升级不覆盖正在跑的那份，出问题一条命令回退。</p>
+      <p class="section-note">下面这条命令从本仓库的 release 下载，并校验随发布附带的 <code>SHA256SUMS</code>（取不到就拒绝安装，<code>--insecure</code> 可明确放行）。安装按版本分目录、<code>current</code> 指向当前版本，升级不覆盖正在跑的那份，出问题一条命令回退。</p>
 
       <div class="install-grid">
         <article>
