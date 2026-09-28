@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
-    path::PathBuf,
+    collections::{HashMap, HashSet},
+    path::{Path, PathBuf},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -23,6 +23,13 @@ fn generate_device_id() -> String {
 pub struct CookieStore {
     /// Persistent cookies (from set-cookie, serialized to disk)
     cookies: HashMap<String, String>,
+    /// Cookie names that were already on disk when this store was created.
+    /// Used by [`Self::flush`] to write back only what this instance actually
+    /// changed, so a second concurrently-running instance cannot clobber
+    /// cookies it did not fetch.
+    loaded: HashSet<String>,
+    /// Cookie names this instance has set or removed since creation.
+    dirty: HashSet<String>,
     /// Session-level random identifiers (regenerated at each startup, not persisted)
     session: SessionCookies,
     /// Disk path
@@ -33,7 +40,7 @@ pub struct CookieStore {
     last_save: Instant,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct Persisted {
     cookies: HashMap<String, String>,
 }
@@ -68,15 +75,54 @@ impl SessionCookies {
     }
 }
 
+/// Best-effort cross-process lock held in `<cookies>.lock` next to the cookie
+/// file. `create_new` is atomic on every platform, so this needs no extra
+/// dependency; a lock left behind by a killed process is broken after 5 s.
+struct FileLock {
+    path: PathBuf,
+}
+
+impl FileLock {
+    fn acquire(cookie_path: &Path) -> Option<Self> {
+        let path = cookie_path.with_extension("lock");
+        for _ in 0..200 {
+            match std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&path)
+            {
+                Ok(_) => return Some(Self { path }),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    let stale = std::fs::metadata(&path)
+                        .and_then(|m| m.modified())
+                        .ok()
+                        .and_then(|t| t.elapsed().ok())
+                        .is_some_and(|age| age > Duration::from_secs(5));
+                    if stale {
+                        let _ = std::fs::remove_file(&path);
+                    } else {
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                }
+                // Unwritable directory and friends: degrade to the unlocked merge.
+                Err(_) => return None,
+            }
+        }
+        None
+    }
+}
+
+impl Drop for FileLock {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
 impl CookieStore {
     pub fn new(path: PathBuf) -> Self {
-        let persisted: Persisted = std::fs::read_to_string(&path)
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or(Persisted {
-                cookies: HashMap::new(),
-            });
+        let persisted = read_persisted(&path).unwrap_or_default();
 
+        let loaded = persisted.cookies.keys().cloned().collect();
         let mut cookies = persisted.cookies;
         // Device fingerprint: persisted and kept consistent across restarts (reduces the chance of triggering risk control)
         if !cookies.contains_key("deviceId") {
@@ -87,6 +133,8 @@ impl CookieStore {
 
         Self {
             cookies,
+            loaded,
+            dirty: HashSet::new(),
             session: SessionCookies::new(),
             path,
             csrf,
@@ -155,6 +203,7 @@ impl CookieStore {
 
             if self.cookies.get(&name) != Some(&value) {
                 changed = true;
+                self.dirty.insert(name.clone());
                 self.cookies.insert(name, value);
             }
         }
@@ -177,35 +226,66 @@ impl CookieStore {
     /// Remove the specified cookie
     pub fn remove(&mut self, name: &str) {
         self.cookies.remove(name);
+        self.dirty.insert(name.to_string());
     }
 
-    /// Force a write to disk
+    /// Force a write to disk.
+    ///
+    /// The current on-disk state is re-read and only this instance's changes
+    /// are applied on top of it, then the result is written atomically (temp
+    /// file + rename). This prevents a second concurrently-running instance
+    /// from clobbering cookies it did not fetch, and stops a concurrent reader
+    /// from ever observing a truncated/empty file.
     pub fn flush(&mut self) {
-        let persisted = Persisted {
-            cookies: self.cookies.clone(),
-        };
-        if let Some(parent) = self.path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        if let Ok(json) = serde_json::to_string_pretty(&persisted) {
-            #[cfg(unix)]
-            let written = {
-                use std::os::unix::fs::OpenOptionsExt;
-                std::fs::OpenOptions::new()
-                    .write(true)
-                    .create(true)
-                    .truncate(true)
-                    .mode(0o600)
-                    .open(&self.path)
-                    .and_then(|mut f| std::io::Write::write_all(&mut f, json.as_bytes()))
-            };
-            #[cfg(not(unix))]
-            let written = std::fs::write(&self.path, &json);
-            if let Err(e) = written {
-                log::warn!("failed to write cookie file {:?}: {}", self.path, e);
+        // Serialize with other instances (the TUI plus `boxpigma -d`): without
+        // this, two instances that flush inside the same read-modify-write
+        // window silently drop each other's freshly written keys. Best effort:
+        // if the lock cannot be taken, fall back to the unlocked merge.
+        let _lock = FileLock::acquire(&self.path);
+        let merged = self.merged_for_disk();
+        match write_persisted(&self.path, &merged) {
+            Ok(()) => {
+                // Only ever grow: a key that disappeared from the file because
+                // another instance removed it must not look like one we created.
+                self.loaded.extend(merged.keys().cloned());
+                self.dirty.clear();
             }
+            Err(e) => log::warn!("failed to write cookie file {:?}: {}", self.path, e),
         }
         self.last_save = Instant::now();
+    }
+
+    /// Re-read the file and overlay only this instance's changes. A persisted
+    /// `deviceId` always wins over a locally generated one, so a store that
+    /// failed to load (e.g. started mid-write) cannot replace the fingerprint.
+    fn merged_for_disk(&self) -> HashMap<String, String> {
+        let Some(disk) = read_persisted(&self.path) else {
+            // No readable file (missing or corrupt): fall back to our full
+            // in-memory state, which also restores cookies if the file was
+            // deleted underneath us.
+            return self.cookies.clone();
+        };
+
+        let mut merged = disk.cookies;
+        let disk_has_device_id = merged.contains_key("deviceId");
+
+        for (name, value) in &self.cookies {
+            if name == "deviceId" && disk_has_device_id {
+                continue;
+            }
+            if self.dirty.contains(name) || !self.loaded.contains(name) {
+                merged.insert(name.clone(), value.clone());
+            }
+        }
+
+        // Explicit removals win over anything still on disk.
+        for name in &self.dirty {
+            if !self.cookies.contains_key(name) {
+                merged.remove(name);
+            }
+        }
+
+        merged
     }
 
     fn flush_if_stale(&mut self) {
@@ -213,6 +293,66 @@ impl CookieStore {
             self.flush();
         }
     }
+}
+
+/// Read and parse the persisted cookie file, returning `None` when it is
+/// missing or cannot be parsed.
+fn read_persisted(path: &Path) -> Option<Persisted> {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+}
+
+/// Atomically write the persisted cookies to `path`.
+///
+/// A unique temp file is written in the same directory (mode `0600` on Unix)
+/// and then renamed over the target — `rename` is atomic, so a concurrent
+/// reader always sees either the old or the new complete file.
+fn write_persisted(path: &Path, cookies: &HashMap<String, String>) -> std::io::Result<()> {
+    let persisted = Persisted {
+        cookies: cookies.clone(),
+    };
+    let json = serde_json::to_string_pretty(&persisted)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+
+    let dir = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    std::fs::create_dir_all(dir)?;
+
+    let file_name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("cookies.json");
+    let tmp = dir.join(format!(
+        ".{file_name}.{}.{}.tmp",
+        std::process::id(),
+        rand::random::<u32>()
+    ));
+
+    if let Err(e) = write_temp_file(&tmp, json.as_bytes()) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+    if let Err(e) = std::fs::rename(&tmp, path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+    Ok(())
+}
+
+fn write_temp_file(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    let mut file = opts.open(path)?;
+    std::io::Write::write_all(&mut file, bytes)?;
+    file.sync_all()
 }
 
 impl Drop for CookieStore {
@@ -224,6 +364,85 @@ impl Drop for CookieStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn read_cookies(path: &std::path::Path) -> Persisted {
+        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+    }
+
+    fn set_cookie(store: &mut CookieStore, name: &str, value: &str) {
+        let mut h = reqwest::header::HeaderMap::new();
+        h.append(
+            "set-cookie",
+            format!("{name}={value}; Path=/").parse().unwrap(),
+        );
+        store.update_from_response(&h);
+    }
+
+    /// Another instance logs out: this stale instance must not roll that
+    /// removal back on a later flush.
+    #[test]
+    fn external_removal_is_not_rolled_back() {
+        let path = temp_cookie_path();
+        let mut s = CookieStore::new(path.clone());
+        set_cookie(&mut s, "MUSIC_U", "aaaa");
+        set_cookie(&mut s, "__csrf", "cccc");
+        s.flush();
+
+        // Simulate the other instance's logout: rewrite the file without MUSIC_U.
+        let mut disk = read_cookies(&path).cookies;
+        disk.remove("MUSIC_U");
+        let json = serde_json::to_string_pretty(&Persisted { cookies: disk }).unwrap();
+        std::fs::write(&path, json).unwrap();
+
+        s.flush();
+        s.flush();
+        let second = read_cookies(&path).cookies;
+        assert!(
+            !second.contains_key("MUSIC_U"),
+            "a stale instance rolled the other instance's logout back"
+        );
+        assert_eq!(second.get("__csrf").map(String::as_str), Some("cccc"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// Two instances flushing at the same time must not drop each other's keys.
+    #[test]
+    fn concurrent_instances_do_not_lose_keys() {
+        fn keys(tag: &'static str) -> Vec<String> {
+            (0..60).map(|i| format!("{tag}{i}")).collect()
+        }
+
+        let path = temp_cookie_path();
+        let spawn = |tag: &'static str| {
+            let path = path.clone();
+            std::thread::spawn(move || {
+                let mut store = CookieStore::new(path);
+                store.flush();
+                for (i, name) in keys(tag).into_iter().enumerate() {
+                    set_cookie(&mut store, &name, &format!("v{i}"));
+                    store.flush();
+                }
+                store
+            })
+        };
+        let ta = spawn("a");
+        let tb = spawn("b");
+        let _a = ta.join().unwrap();
+        let _b = tb.join().unwrap();
+
+        let disk = read_cookies(&path).cookies;
+        let missing: Vec<String> = keys("a")
+            .into_iter()
+            .chain(keys("b"))
+            .filter(|k| !disk.contains_key(k))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "keys lost to a concurrent writer: {missing:?}"
+        );
+        assert!(disk.contains_key("deviceId"), "file must stay readable");
+        let _ = std::fs::remove_file(&path);
+    }
 
     fn temp_cookie_path() -> PathBuf {
         let dir = std::env::temp_dir().join("ncm_cookie_test");
@@ -333,6 +552,66 @@ mod tests {
             .cookies
             .insert("__csrf".to_string(), "csrf".to_string());
         assert!(store.is_logged_in());
+        let _ = std::fs::remove_file(path);
+    }
+
+    fn read_disk(path: &Path) -> HashMap<String, String> {
+        read_persisted(path).map(|p| p.cookies).unwrap_or_default()
+    }
+
+    #[test]
+    fn flush_does_not_clobber_another_instances_cookies() {
+        let path = temp_cookie_path();
+
+        // Instance A logs in and persists a session.
+        let mut a = CookieStore::new(path.clone());
+        a.cookies.insert("MUSIC_U".into(), "token".into());
+        a.dirty.insert("MUSIC_U".into());
+        a.flush();
+        let device = a.device_id().to_string();
+
+        // Instance B started while A was writing, so it loaded nothing: only a
+        // freshly generated deviceId. On shutdown it must not wipe A's login.
+        let mut b = CookieStore::new(path.clone());
+        b.cookies.clear();
+        b.cookies.insert("deviceId".into(), "B".into());
+        b.loaded.clear();
+        b.dirty.clear();
+        b.flush();
+
+        let disk = read_disk(&path);
+        assert_eq!(
+            disk.get("MUSIC_U").map(String::as_str),
+            Some("token"),
+            "instance B wiped instance A's login cookie"
+        );
+        assert_eq!(
+            disk.get("deviceId").map(String::as_str),
+            Some(device.as_str()),
+            "a persisted deviceId must not be replaced by a generated one"
+        );
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn removal_is_persisted_without_dropping_unrelated_cookies() {
+        let path = temp_cookie_path();
+        let mut a = CookieStore::new(path.clone());
+        a.cookies.insert("MUSIC_U".into(), "token".into());
+        a.cookies.insert("__csrf".into(), "csrf".into());
+        a.dirty.extend(["MUSIC_U".into(), "__csrf".into()]);
+        a.flush();
+
+        // A second instance logs out: only MUSIC_U is removed.
+        let mut b = CookieStore::new(path.clone());
+        b.remove("MUSIC_U");
+        b.flush();
+
+        let disk = read_disk(&path);
+        assert!(!disk.contains_key("MUSIC_U"));
+        assert_eq!(disk.get("__csrf").map(String::as_str), Some("csrf"));
+
         let _ = std::fs::remove_file(path);
     }
 }

@@ -5,6 +5,8 @@
 - *(playback)* **本地音乐按曲名排，唱片的顺序会被打乱**：`scan_local_music` 收尾那句 `songs.sort_by(|a, b| a.name.cmp(&b.name))` 把音轨号整个丢掉了 —— 一张 13 轨、`TRACKNUMBER=01..13` 的碟进队列后是 `Airport Arrival` 排在 `Airport Take Off` 前面，中文曲名再按 Unicode 码位一路 `再见(518D) → 十七岁(5341) → 心乱飞(5FC3) → … → 飞机场(98DE)` 排下去，碟序一轨不剩。现在按**专辑 → 碟号 → 音轨号 → 路径**排：碟号与音轨号取自 `ItemKey::DiscNumber` / `TrackNumber`（`01`、`3/13`、`1 of 2` 这类写法都认，解析不出来的退到下一级），没有音轨标签的曲库退化为按路径排 —— 原来的兜底其实是 `read_dir` 的顺序，同一个目录两次扫描都可以不一样
 - *(ipc)* **切到别的队列之后 `msg list` 还在吐上一个队列**：队列版本号（`PlaylistQueue::version`）每次变更自增，`App::last_queue_version` 就靠「版本变没变」决定要不要重建 IPC 队列快照 —— 而切换端点是 `Engine::load_songs`，它把整个 `PlaylistQueue` **换掉**，新实例的计数器又从 0 开始，于是新队列的版本可能正好是消费者手里那个（0 == 0）：快照被判成「没变」，`boxpigma msg list` 继续打印旧队列，直到某次无关的变更把版本推过去。现在版本号由一个进程级的 `AtomicU64`（`playback::queue::NEXT_VERSION`）发放，任何一次替换或变更都拿到一个此前没被用过的号
 
+- *(ncm-api)* **两个实例同时写 `cookies.json` 会互相丢 cookie**：上游 akirco/pigma 的 `1da4003` 把「整份覆盖 + `truncate` 直写」换成「读盘 → 只覆盖自己的改动 → 临时文件 + `rename`」，读方再看不到半截文件（实测 5.8% 的读是空的/撕裂 → 0/21164），但它没给「读盘 → `rename`」这一段加互斥：对方在这个窗口里的 `rename` 会把刚写下的键盖掉，而自己的 `dirty` 已经清空、键名又回过 `loaded`，于是**这些键再也不会被写回**（两个实例各写 60 个键、交替 flush 的压测里永久丢 11/120）。现在 flush 全程持一把跨进程锁（`cookies.lock`：`create_new` 原子创建、无新依赖、5 秒陈旧锁自动打破、拿不到就降级为无锁合并），同一个压测 **0/120**（连跑 10 次全 0）。顺带修掉一个更隐蔽的：`flush` 成功后 `loaded` 改成只增不减 —— 上游那句 `loaded = merged.keys()` 会把「被别的实例删掉的键」从 `loaded` 里摘掉，下一轮它又满足 `!loaded.contains(name)` 而被从内存写回，于是**别人登出之后，这个陈旧实例的第二次 flush 就把 `MUSIC_U` 复活了**。两个新用例（`concurrent_instances_do_not_lose_keys`、`external_removal_is_not_rolled_back`）都先验证过「撤掉修复即失败」：丢键用例在有锁/无锁下分别是 0 与 52–60/120
+
 ## [1.6.1] - 2026-09-24
 
 ### 🐛 Bug Fixes
