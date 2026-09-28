@@ -1,8 +1,9 @@
 use std::{
+    collections::HashSet,
     fs,
     hash::{Hash, Hasher},
     io::BufReader,
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 use ncm_api::SongInfo;
@@ -101,7 +102,8 @@ fn decoded_duration(path: &Path) -> u64 {
 
 pub fn scan_local_music(dir: &std::path::Path) -> Vec<SongInfo> {
     let mut songs = Vec::new();
-    scan_local_dir(dir, &mut songs);
+    let mut visited = HashSet::new();
+    scan_local_dir(dir, &mut songs, &mut visited);
     // Album order: the album a file belongs to, then its position in it, then the
     // path. Sorting on the title alone (`a.name.cmp(&b.name)`) is what played a CD
     // rip out of order — `Airport Arrival` came before `Airport Take Off`, and the
@@ -131,14 +133,33 @@ struct TrackPosition {
 /// Walk `dir`, appending every audio file it holds (and the subtrees under it)
 /// together with the position that orders it. The traversal order is deliberately
 /// meaningless — [`scan_local_music`] sorts what it collects.
-fn scan_local_dir(dir: &Path, songs: &mut Vec<(TrackPosition, SongInfo)>) {
+///
+/// `visited` holds the canonical path of every directory already walked. `Path::is_dir` follows
+/// symlinks, so a link back into an ancestor — `~/Music/loop -> ~/Music`, or two album folders
+/// linking to each other — would otherwise be walked again at every level, adding another copy of
+/// every track it holds: the kernel's own symlink limit stops the recursion, so the result is a
+/// queue full of duplicates rather than a crash, which is why it survives unnoticed. Remembering
+/// the real path instead of refusing links keeps the useful case (albums that live elsewhere and
+/// are linked in) working: such a directory is walked once, not skipped. One `canonicalize` per
+/// directory, against a scan that parses every file's tags.
+fn scan_local_dir(
+    dir: &Path,
+    songs: &mut Vec<(TrackPosition, SongInfo)>,
+    visited: &mut HashSet<PathBuf>,
+) {
+    let Ok(real) = dir.canonicalize() else {
+        return;
+    };
+    if !visited.insert(real) {
+        return;
+    }
     let Ok(entries) = fs::read_dir(dir) else {
         return;
     };
     for entry in entries.filter_map(|e| e.ok()) {
         let path = entry.path();
         if path.is_dir() {
-            scan_local_dir(&path, songs);
+            scan_local_dir(&path, songs, visited);
             continue;
         }
         if !path.is_file() {
@@ -257,6 +278,38 @@ mod tests {
 
     /// 8000 samples at 8 kHz: the duration has to come back as exactly 1000 ms.
     const SAMPLES: u32 = 8000;
+
+    /// A link from inside the tree back to its own root must not be walked again. Before the
+    /// visited set the recursion was stopped only by the kernel's symlink limit, leaving forty
+    /// copies of the same track in the queue.
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_loop_does_not_duplicate_tracks() {
+        let dir = temp_dir("symlink-loop");
+        write_wav(&dir.join("track.wav"), SAMPLES);
+        std::os::unix::fs::symlink(&dir, dir.join("loop")).expect("create symlink");
+
+        let songs = scan_local_music(&dir);
+
+        assert_eq!(songs.len(), 1, "the track must be found exactly once");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A symlinked album directory is a library layout, not a mistake: it is followed — once.
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_directory_is_followed_once() {
+        let root = temp_dir("symlink-dir");
+        let real = root.join("real");
+        fs::create_dir_all(&real).expect("create real album dir");
+        write_wav(&real.join("track.wav"), SAMPLES);
+        std::os::unix::fs::symlink(&real, root.join("linked")).expect("create symlink");
+
+        let songs = scan_local_music(&root);
+
+        assert_eq!(songs.len(), 1, "the linked album must be walked once");
+        fs::remove_dir_all(&root).ok();
+    }
 
     #[test]
     fn tags_supply_the_title_artist_album_and_duration() {

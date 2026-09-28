@@ -71,6 +71,7 @@ fn transform(data: &mut [Complex], inverse: bool) {
     if n <= 1 {
         return;
     }
+    debug_assert!(n.is_power_of_two(), "radix-2 FFT needs a power-of-two length, got {n}");
 
     // Bit-reversal permutation.
     let mut j = 0usize;

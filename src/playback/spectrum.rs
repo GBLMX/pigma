@@ -230,6 +230,12 @@ impl Spectrum {
         self.scratch.clear();
         self.scratch
             .extend(self.windowed.iter().map(|value| Complex::new(*value, 0.0)));
+        // The transform is radix-2, so its length must be a power of two, and the band edges
+        // were computed for `WINDOW` bins. A short window — every frame before the ring fills,
+        // and every multichannel layout — is therefore zero-padded back up to `WINDOW` instead
+        // of shrinking the transform. The normalization below divides by the real sample count,
+        // so padding does not change it.
+        self.scratch.resize(WINDOW, Complex::default());
         fft(&mut self.scratch);
 
         let scale = 2.0 / take as f64;
@@ -397,6 +403,49 @@ mod tests {
         assert!(
             mono.iter().all(|s| (*s - 0.25).abs() < f32::EPSILON),
             "channels must be averaged into mono"
+        );
+    }
+
+    /// The ring hands `analyze` whatever it has flushed so far, so its window is short — and not
+    /// a power of two — for the first frames of a track: 768 samples is what a stereo source
+    /// reaches after three flushes, and it used to be handed straight to a radix-2 transform
+    /// that indexes past the end of any non-power-of-two length. Every length `analyze` accepts
+    /// must survive it.
+    #[test]
+    fn every_window_length_the_ring_can_hold_is_transformable() {
+        let mut spectrum = Spectrum::new();
+        for len in 2..=WINDOW {
+            spectrum.analyze(&vec![0.5f32; len], 48000);
+        }
+    }
+
+    /// Zero-padding must keep the bin scale: a short window is still measured against the
+    /// `WINDOW`-bin band edges, so a 440 Hz tone lands in the band that contains 440 Hz.
+    #[test]
+    fn a_short_window_keeps_the_band_scale() {
+        let sample_rate = 48000u32;
+        let mut mono = Vec::with_capacity(768);
+        for i in 0..768 {
+            let t = i as f64 / f64::from(sample_rate);
+            mono.push((2.0 * std::f64::consts::PI * 440.0 * t).sin() as f32);
+        }
+
+        let mut spectrum = Spectrum::new();
+        spectrum.analyze(&mono, sample_rate);
+
+        let peak_band = spectrum
+            .bars()
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.total_cmp(b.1))
+            .map(|(index, _)| index)
+            .expect("bands are never empty");
+        let (start, _) = spectrum.band_bins[peak_band];
+        let bin_hz = f64::from(sample_rate) / WINDOW as f64;
+        assert!(
+            start as f64 * bin_hz <= 440.0,
+            "440 Hz landed above band {peak_band} ({} Hz)",
+            start as f64 * bin_hz
         );
     }
 }
