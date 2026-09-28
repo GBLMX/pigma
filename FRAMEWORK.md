@@ -70,6 +70,8 @@
 
 - **"取锁"与"原子写"各只写一次（2026-09-29）**：取锁的 poison 决策此前散成四种写法（`unwrap`、`unwrap_or_else(into_inner)`、`if let Ok` 静默跳过、`map_err` 转 `io::Error`），其中 `ipc` 的四处 `unwrap` 会在别的线程 panic 之后把进程带走；而"临时文件 + rename"的原子写只有 `cookie.rs` 一处，应用侧的配置与缓存索引还是原地截断。现在 `utils::sync::{mutex, read, write}` 提供"其他线程的 panic 与这份数据无关，取走它"，`utils::fs::write_atomic` 提供同目录临时文件 + `rename`；唯一保留的例外是 `playback::player` 把 poison 转成 `io::Error`（调用方有那条通道），理由写在 `utils::sync` 的模块文档里。除两处刻意的行为变化（`ipc` 不再 panic、`cache` 的两处 `if let Ok` 不再静默跳过）外调用点零变化
 
+- **只保留 Linux（2026-09-29）**：Windows / macOS / BSD 的支持连同代码一起删除 —— WASAPI 独占输出整块（`src/playback/exclusive.rs` 599 行、`[audio] exclusive`、`wasapi` 依赖）、IPC 的命名管道传输（`ipc/transport/windows.rs`）、Windows 控制台背景探测（`terminal/background/windows.rs`）、自更新里的 `.zip` 解包与 `mklink /J` junction、`install.ps1`（570 行），以及全部 `#[cfg(unix)]` / `#[cfg(windows)]` / `cfg!(windows)` 分支（现在无条件编译）；cpal 的 host 选择里 FreeBSD/NetBSD/OpenBSD/DragonFly 一并消失。**刻意保留 14 处 `#[cfg(all(target_os = "linux", target_env = "gnu"))]`**：它编码的是真实的 glibc/ALSA 约束（读 `/proc/self/status` + `libc::malloc_trim`），是唯一在 Linux 上仍可能为假的门，不是可移植性开关。发布契约未动：`boxpigma-<triple>.tar.gz` 与裸名 `SHA256SUMS` 仍是 `install.sh` 的 `awk` 查找和 `src/update.rs` 解析时的格式。同一工具链前后对拍：二进制 **−7,896 B（−0.07%，11,220,552 → 11,212,656 B）** —— 删掉的 Windows 代码本来就不进 Linux 构建，只有 `exclusive.rs` 的平台中立辅助逻辑此前会被编进去。代价：3 个只测 WASAPI 编码/采样率协商的单测随文件删除
+
 ## 二、已否决（附依据）
 
 | 候选 | 否决理由（实测） |
@@ -148,6 +150,8 @@ RSS 大致是**二进制体积 + 约 3 MB**（1.0 的二进制 11.1 MB），换�
 结构性调整决定了哪些文件是"我们的地盘"：同步一律 **cherry-pick、不整体合并**，冲突时保留本仓库
 版本并确认行为没有退化。逐文件清单与验收命令见 [CONTRIBUTING](./CONTRIBUTING.md) 的
 「与上游同步」一节；与上游的差异也按"结构性 / 增量"两分类列在 [README](./README.md)。
+
+**平台**是最大的一处结构性差异：本仓库只构建 Linux。上游的 Windows / macOS 代码（WASAPI 独占输出、命名管道、控制台背景探测、`.zip` 更新与 junction、`install.ps1`）以及全部平台 `#[cfg]` 分支都已删除，所以上游任何平台相关的提交**不挑**；上游若改了发布作业的目标矩阵，冲突时保留本仓库的两个 Linux 目标。
 
 ### 已在 1.1.0 之后核过但**不采纳**的性能候选
 

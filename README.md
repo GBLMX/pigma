@@ -9,6 +9,8 @@
 
 boxpigma 把网易云音乐与本地音频播放带进终端：流式播放、逐字歌词、歌单与队列管理，全部围绕键盘组织，基于 [Ratatui](https://ratatui.rs)。
 
+**只支持 Linux（glibc，x86_64 / aarch64）**：Windows 与 macOS 的支持已整体移除，范围见下文「本仓库与原作者」。
+
 **1.0 是这个名字下的第一个版本**：从 `pigma` 改名而来，二进制、配置与缓存目录、IPC 套接字一并改名，旧数据会被自动接管；同时把一批自写实现换成了成熟方案。
 
 <details>
@@ -72,6 +74,7 @@ boxpigma 把网易云音乐与本地音频播放带进终端：流式播放、�
 - **主题内部**：WCAG 亮度与对比度改用 `palette`，全仓只剩一处颜色数学；`default_theme = "random"` 每次启动随机挑一个、`:theme random` 立刻重掷；主题名排序固定，`:theme` 循环顺序不再随进程变化
 - **启动画面**：字形取自 FIGlet 字体 `Calvin S`，一次渲染后作为常量内嵌（运行时不带字体依赖）
 - **配置**：`config_version` 版本号，旧文件加载时自动升级、备份为 `config.toml.bak-v{旧版本}` 并当场重写为新 schema
+- **平台**：只支持 **Linux（glibc）**。上游的 Windows / macOS 支持已整体移除 —— WASAPI 独占输出（`[audio] exclusive`）、IPC 的命名管道、Windows 控制台背景探测、自更新里的 `.zip` 与 junction 分支、`install.ps1`，以及全部 `#[cfg(unix)]` / `#[cfg(windows)]` 分支（本仓库里这些分支不再存在）。发布资产因此只有 `boxpigma-x86_64-unknown-linux-gnu.tar.gz` 与 `boxpigma-aarch64-unknown-linux-gnu.tar.gz`；保留的 `#[cfg(all(target_os = "linux", target_env = "gnu"))]` 编码的是 glibc/ALSA 约束，不是可移植性开关
 
 **二、增量差异**（可被上游采纳或替代；挑上游提交时优先看这一类）
 

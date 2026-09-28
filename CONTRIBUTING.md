@@ -149,6 +149,7 @@ cat /proc/<pid>/task/*/wchan                      # 内核视角：线程卡在�
 | 主题内部（`palette` 对比度、`random`、稳定排序） | `src/config/theme.rs`、`src/app/theme.rs` |
 | 启动画面字形（FIGlet `Calvin S` 的渲染结果） | `src/ui/splash.rs` |
 | 一键安装脚本（上游没有）与它依赖的发布契约 | `install.sh`、`.github/workflows/release.yml` 里生成 `SHA256SUMS` 的那一步（上游若改发布作业，这里必然冲突） |
+| 平台：**仅 Linux**（上游支持 Windows / macOS / BSD） | `src/ipc/transport.rs`、`src/utils/terminal/background*.rs`、`src/playback/player.rs`、`src/playback/player/device.rs`、`src/update.rs`、`src/app.rs`、`src/cli.rs`、`src/utils/path.rs`、`Cargo.toml` 的 `[target.*]` 依赖块、`.github/workflows/release.yml` 的目标矩阵、`install.sh` —— 上游任何 Windows/macOS 相关提交一律不挑 |
 
 同步方式是**按提交挑**，不合并：
 
@@ -158,7 +159,7 @@ git log --oneline upstream/main ^main     # 上游有哪些我们还没有的提
 git cherry-pick <commit>                  # 一次一个，冲突面就限于这一个提交
 ```
 
-挑之前先看这个提交有没有碰到上表里的文件：碰了就要按"本仓库版本优先"解一次冲突，并确认行为没有退化。挑完必须跑：
+挑之前先看这个提交有没有碰到上表里的文件（**平台相关的提交一律不挑**：本仓库已删掉那些分支与依赖）：碰了就要按"本仓库版本优先"解一次冲突，并确认行为没有退化。挑完必须跑：
 
 ```bash
 cargo test --workspace --all-features && cargo clippy --workspace --all-targets
