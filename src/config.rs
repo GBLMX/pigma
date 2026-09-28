@@ -332,7 +332,7 @@ impl Config {
             let content = migrated.unwrap_or_else(|| config.to_toml());
             if content.is_empty() {
                 log::error!("Refusing to overwrite config.toml with an empty document");
-            } else if let Err(e) = fs::write(config_path, content) {
+            } else if let Err(e) = utils::fs::write_atomic(config_path, content.as_bytes()) {
                 log::warn!("Failed to write config.toml: {e}");
             }
         }
@@ -354,7 +354,7 @@ impl Config {
             log::error!("Refusing to overwrite config.toml with an empty document");
             return;
         }
-        if let Err(e) = fs::write(dir.join("config.toml"), content) {
+        if let Err(e) = utils::fs::write_atomic(&dir.join("config.toml"), content.as_bytes()) {
             log::error!("Failed to write config.toml: {e}");
         }
     }

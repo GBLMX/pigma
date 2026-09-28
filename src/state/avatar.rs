@@ -31,12 +31,10 @@ static PORTRAIT: Mutex<Option<StatefulProtocol>> = Mutex::new(None);
 /// session is dropped when it lands instead of putting that session's face back on the bar.
 static SESSION: AtomicU64 = AtomicU64::new(0);
 
-/// The slot, ignoring a poisoned lock: a panic that happened while a portrait was being
-/// installed says nothing about the frame that wants to draw one.
+/// The slot, ignoring a poisoned lock (the reasoning lives in [`crate::utils::sync`]): a panic
+/// while a portrait was being installed says nothing about the frame that wants to draw one.
 fn slot() -> MutexGuard<'static, Option<StatefulProtocol>> {
-    PORTRAIT
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+    crate::utils::sync::mutex(&PORTRAIT)
 }
 
 /// The portrait for the frame that is being drawn. `None` until the download has landed, and

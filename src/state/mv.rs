@@ -47,12 +47,10 @@ static PANEL: Mutex<Option<MvPanel>> = Mutex::new(None);
 /// follows for its session.
 static GENERATION: AtomicU64 = AtomicU64::new(0);
 
-/// The slot, ignoring a poisoned lock: a panic that happened while a poster was being installed
-/// says nothing about the frame that wants to draw one.
+/// The slot, ignoring a poisoned lock (the reasoning lives in [`crate::utils::sync`]): a panic
+/// while a poster was being installed says nothing about the frame that wants to draw one.
 fn slot() -> MutexGuard<'static, Option<MvPanel>> {
-    PANEL
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+    crate::utils::sync::mutex(&PANEL)
 }
 
 /// The panel for the frame that is being drawn. `None` until the poster has landed, and when

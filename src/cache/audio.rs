@@ -13,7 +13,7 @@ use super::{
     CacheManager,
     index::{CacheEntry, CacheIndex},
 };
-use crate::utils::sanitize_filename;
+use crate::utils::{sanitize_filename, sync};
 
 impl CacheManager {
     fn resolve_filename(&self, song: &SongInfo, ext: &str) -> String {
@@ -51,7 +51,7 @@ impl CacheManager {
     }
 
     pub fn cache_path(&self, id: u64, ext: &str) -> PathBuf {
-        let index = self.index.read().unwrap_or_else(|e| e.into_inner());
+        let index = sync::read(&self.index);
         if let Some(entry) = index.get(&id) {
             return self.downloads_dir.join(&entry.filename);
         }
@@ -70,7 +70,7 @@ impl CacheManager {
         // touching the filesystem. Re-entering the read lock (as `cache_path`
         // does) while a writer is queued could deadlock with `std::sync::RwLock`.
         let path = {
-            let index = self.index.read().unwrap_or_else(|e| e.into_inner());
+            let index = sync::read(&self.index);
             index
                 .get(&id)
                 .map(|e| self.downloads_dir.join(&e.filename))?
@@ -99,9 +99,8 @@ impl CacheManager {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
-        if let Ok(mut index) = self.index.write()
-            && let Some(entry) = index.get_mut(&id)
-        {
+        let mut index = sync::write(&self.index);
+        if let Some(entry) = index.get_mut(&id) {
             entry.accessed_at = now;
         }
         Ok(file)
@@ -130,9 +129,7 @@ impl CacheManager {
         let filename = self.resolve_filename(song, ext);
         let path = self.downloads_dir.join(&filename);
         let file_bytes = fs::metadata(&path).ok().map(|m| m.len()).unwrap_or(0);
-        self.index
-            .write()
-            .unwrap_or_else(|e| e.into_inner())
+        sync::write(&self.index)
             .insert(
                 song.id,
                 CacheEntry {
@@ -180,7 +177,7 @@ impl CacheManager {
 
     pub async fn list_cached_songs_async(&self) -> Vec<SongInfo> {
         {
-            let index = self.index.read().unwrap_or_else(|e| e.into_inner());
+            let index = sync::read(&self.index);
             self.collect_cached_songs(&index)
         }
     }
@@ -254,7 +251,7 @@ impl CacheManager {
         // filenames). All filesystem I/O happens after the lock is released so
         // concurrent readers are never blocked by disk operations.
         let entries: Vec<(u64, String)> = {
-            let index = self.index.read().unwrap_or_else(|e| e.into_inner());
+            let index = sync::read(&self.index);
             let mut by_age: Vec<(u64, u64)> =
                 index.iter().map(|(id, e)| (*id, e.accessed_at)).collect();
             by_age.sort_by_key(|e| e.1);
@@ -283,7 +280,7 @@ impl CacheManager {
         }
 
         {
-            let mut index = self.index.write().unwrap_or_else(|e| e.into_inner());
+            let mut index = sync::write(&self.index);
             for (id, _) in &victims {
                 index.remove(id);
             }

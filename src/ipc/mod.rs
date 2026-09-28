@@ -29,6 +29,7 @@ use tokio::{
 use crate::{
     event::{AppEvent, Event},
     playback::PlayMode,
+    utils::sync,
 };
 
 mod transport;
@@ -586,14 +587,14 @@ async fn handle_connection<S>(
     match request {
         IpcRequest::Status => {
             let reply = {
-                let guard = snapshot.lock().unwrap();
+                let guard = sync::mutex(&snapshot);
                 serde_json::to_string(&*guard).unwrap_or_default()
             };
             let _ = write_reply(&mut stream, &reply).await;
         }
         IpcRequest::List => {
             let reply = {
-                let guard = queue.lock().unwrap();
+                let guard = sync::mutex(&queue);
                 serde_json::to_string(&*guard).unwrap_or_default()
             };
             let _ = write_reply(&mut stream, &reply).await;
@@ -640,7 +641,7 @@ async fn stream_updates<S>(
     S: tokio::io::AsyncWrite + Unpin,
 {
     let mut rx = status_tx.subscribe();
-    let initial = snapshot.lock().unwrap().clone();
+    let initial = sync::mutex(&snapshot).clone();
     let line = serde_json::to_string(&initial).unwrap_or_default();
     if write_reply(&mut stream, &line).await.is_err() {
         return;
@@ -656,7 +657,7 @@ async fn stream_updates<S>(
             // A slow subscriber fell behind; resend the current snapshot so it
             // catches up instead of missing the intermediate state.
             Err(broadcast::error::RecvError::Lagged(_)) => {
-                let current = snapshot.lock().unwrap().clone();
+                let current = sync::mutex(&snapshot).clone();
                 let line = serde_json::to_string(&current).unwrap_or_default();
                 if write_reply(&mut stream, &line).await.is_err() {
                     return;

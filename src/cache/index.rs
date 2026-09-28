@@ -12,6 +12,7 @@ use std::{
 use serde::{Deserialize, Serialize, Serializer, ser::SerializeMap};
 
 use super::{CacheManager, DEFAULT_MAX_CACHE_BYTES};
+use crate::utils::{fs::write_atomic, sync};
 
 /// Entry in the audio cache index, mapping song ID to filename and duration.
 #[derive(Clone, Deserialize)]
@@ -163,12 +164,12 @@ impl CacheManager {
             return;
         }
         let snapshot = {
-            let index = index.read().unwrap_or_else(|e| e.into_inner());
+            let index = sync::read(index);
             let file = CacheIndexFileRef { songs: &index };
             serde_json::to_string(&file).unwrap_or_default()
         };
         let path = Self::index_path(downloads_dir);
-        if let Err(e) = fs::write(&path, snapshot) {
+        if let Err(e) = write_atomic(&path, snapshot.as_bytes()) {
             log::warn!("Failed to write cache index: {e}");
         }
     }
@@ -178,16 +179,15 @@ impl CacheManager {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
-        if let Ok(mut index) = self.index.write()
-            && let Some(entry) = index.get_mut(&song_id)
-        {
+        let mut index = sync::write(&self.index);
+        if let Some(entry) = index.get_mut(&song_id) {
             entry.uploaded_at = now;
         }
         self.save_index();
     }
 
     pub fn remove_from_index(&self, song_id: u64) {
-        let mut index = self.index.write().unwrap_or_else(|e| e.into_inner());
+        let mut index = sync::write(&self.index);
         if let Some(entry) = index.remove(&song_id) {
             let path = self.downloads_dir.join(&entry.filename);
             if let Ok(meta) = fs::metadata(&path) {
@@ -206,7 +206,7 @@ impl CacheManager {
     /// Remove index entries whose files no longer exist or are empty.
     pub fn cleanup_index(&self) {
         let stale: Vec<(u64, String)> = {
-            let index = self.index.read().unwrap_or_else(|e| e.into_inner());
+            let index = sync::read(&self.index);
             index
                 .iter()
                 .filter(|(_, entry)| {
@@ -223,7 +223,7 @@ impl CacheManager {
             return;
         }
         {
-            let mut index = self.index.write().unwrap_or_else(|e| e.into_inner());
+            let mut index = sync::write(&self.index);
             for (id, _) in &stale {
                 index.remove(id);
             }

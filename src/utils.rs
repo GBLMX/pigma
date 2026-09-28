@@ -1,10 +1,12 @@
-//! Cross-cutting helpers: string formatting, gradients, filesystem paths,
-//! terminal setup, and time formatting.
+//! Cross-cutting helpers: string formatting, gradients, filesystem paths and atomic
+//! writes, poisoning-tolerant locks, terminal setup, and time formatting.
 
 pub mod format;
+pub mod fs;
 pub mod gradient;
 pub mod named;
 pub mod path;
+pub mod sync;
 pub mod terminal;
 pub mod time;
 
