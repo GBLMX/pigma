@@ -5,8 +5,7 @@
 //! - `capability` — what the terminal is: colour depth, graphics protocol, cursor shape.
 //! - `color` — the colour maths those answers are built on: the palettes, and the luminance a
 //!   colour works out to.
-//! - `background` — the terminal's own background, with the per-platform probe under it
-//!   (`background::unix`, `background::windows`).
+//! - `background` — the terminal's own background and the probe that reads it off the tty.
 //! - `sequences` — the escape sequences the app emits.
 //!
 //! Every item is re-exported here, so callers keep addressing `crate::utils::terminal::<item>`.
@@ -33,9 +32,9 @@ pub use sequences::{
 };
 
 // Every `pub(crate)` item keeps its old path here, even where the re-export is not what reads
-// it: `rgb_luminance` is reached through `color` by the Windows console probe, and the two
-// palette tables only by the test-only cover dump in `ui::shots` — so a build without
-// `--tests` finds no user for those three names.
+// it: `rgb_luminance` is reached through `color`, and the two palette tables only by the
+// test-only cover dump in `ui::shots` — so a build without `--tests` finds no user for those
+// three names.
 #[allow(unused_imports)]
 pub(crate) use color::{
     ANSI_16, background_from_luminance, color_luminance, palette_rgb, rgb_luminance,

@@ -6,7 +6,6 @@ mod controller;
 mod cover;
 mod dsp;
 mod engine;
-mod exclusive;
 mod heartbeat;
 mod lyrics;
 mod mode;

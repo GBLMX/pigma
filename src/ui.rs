@@ -85,7 +85,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     // screen: half a theme, which reads as no theme at all (and is what the loading list after a
     // song switch looked like). A background the terminal already has, though, is a fill nobody
     // can see doing something everybody can: it covers the terminal's own background, and with it
-    // whatever the user put there — a translucent background, Windows Terminal's acrylic. So
+    // whatever the user put there — a translucent terminal background. So
     // `base` is the theme's background only when the two disagree, and `Reset` (the terminal's
     // own, and a no-op write into a fresh buffer) otherwise: see `BackgroundFill`.
     f.render_widget(Fill::new(" ").style(Style::default().bg(bs.base)), f.area());

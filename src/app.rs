@@ -789,7 +789,6 @@ impl App {
     }
 }
 
-#[cfg(unix)]
 async fn wait_shutdown_signal() {
     let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
         .expect("failed to install SIGTERM handler");
@@ -797,11 +796,6 @@ async fn wait_shutdown_signal() {
         _ = tokio::signal::ctrl_c() => {}
         _ = sigterm.recv() => {}
     }
-}
-
-#[cfg(not(unix))]
-async fn wait_shutdown_signal() {
-    let _ = tokio::signal::ctrl_c().await;
 }
 
 /// The spin's wiring: the frame the app already draws is what turns the cover.

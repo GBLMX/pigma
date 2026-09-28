@@ -150,10 +150,9 @@ impl App {
 ///
 /// `Picker::from_query_stdio()` writes a query and reads the answer from stdin. Its own
 /// timeout only covers the gap *between* reads — the reader restarts it after every read —
-/// so a stdin at end-of-file, or a terminal that answers nothing at all (ConPTY, a pipe),
-/// leaves the loop spinning and the call never returns. That is what hung `App::new`, and
-/// with it every test that builds an app, on Windows; the CI job had to be cancelled after
-/// six hours.
+/// so a stdin at end-of-file, or a terminal that answers nothing at all (a pipe rather than a
+/// tty), leaves the loop spinning and the call never returns. That is what hung `App::new`, and
+/// with it every test that builds an app.
 ///
 /// So the query runs on its own thread and the caller waits with a deadline. On a timeout
 /// the picker is built without asking (half blocks, or whatever the config forces) and the
@@ -165,17 +164,6 @@ impl App {
 /// that do answer. Callers that know no terminal is attached must pass
 /// `ask_the_terminal = false` instead of paying this.
 fn query_picker() -> Option<Picker> {
-    // Windows is asked nothing. Its terminals are all reached through ConPTY, which
-    // ratatui-image documents as not reliably delivering the answer — and a query that is
-    // never answered is worse than no query here: the worker thread below cannot be
-    // cancelled, so it stays parked in a read of the console input and swallows whatever
-    // the user types next. The environment table in `choose_image_protocol` still places
-    // Windows Terminal (sixels) and mintty (sixels) without asking, and
-    // `[playerbar] image_protocol` overrides everything.
-    if cfg!(windows) {
-        return None;
-    }
-
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::Builder::new()
         .name("picker-query".into())

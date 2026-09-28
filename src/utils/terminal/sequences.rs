@@ -20,7 +20,7 @@ use super::capability::is_kitty_terminal;
 ///   payloads Base64-encoded (`e=1`). Base64 is why a song title containing `;`, `BEL` or
 ///   `ESC` — a title is remote data — arrives intact instead of being stripped.
 /// * `OSC 9` — the iTerm2 form, which every terminal with notifications implements (kitty,
-///   WezTerm, foot, Windows Terminal among them). It carries one plain-text string, so
+///   WezTerm, foot among them). It carries one plain-text string, so
 ///   control characters are stripped and the length is capped; a terminal without
 ///   notifications drops the sequence, so nothing needs probing.
 ///
@@ -97,13 +97,9 @@ const POP_KEYBOARD_ENHANCEMENT_FLAGS: &[u8] = b"\x1b[<1u";
 /// Put the terminal into the modes the UI relies on, and take them back out again.
 ///
 /// The sequences are written directly rather than through `crossterm`'s command types,
-/// for one reason that matters on Windows: there those commands go through the legacy
-/// console API instead of writing bytes, and with no console attached they do not
-/// degrade — `PushKeyboardEnhancementFlags` returns
-/// "Keyboard progressive enhancement not implemented for the legacy Windows API". The
-/// rest of the frame already talks to the terminal this way (`OSC 11`, `OSC 99`,
-/// `DECSET 2026`), so this is the same mouth speaking, and the bytes are exactly what
-/// the Unix implementation emitted before.
+/// so that what the terminal receives is the byte sequence itself, not whatever a
+/// platform's command API decides to do with it. The rest of the frame already talks to the
+/// terminal this way (`OSC 11`, `OSC 99`, `DECSET 2026`).
 ///
 /// Neither sequence is probed for: a terminal that does not implement one ignores it,
 /// so there is nothing to break.

@@ -1,8 +1,7 @@
 //! The terminal's background: `COLORFGBG` when it is exported, the OSC 11 query otherwise.
 //!
-//! The query itself is platform-shaped — a tty on Unix, the console API on Windows — so each
-//! half lives under its own `cfg`; what the two share, the reply parser and the luminance
-//! threshold, is here.
+//! The query is put to the terminal over its tty and read back under one deadline; the reply
+//! parser and the luminance threshold, which is all that sits above the I/O, live here.
 
 use std::{
     env,
@@ -12,15 +11,9 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-#[cfg(unix)]
 mod unix;
-#[cfg(windows)]
-mod windows;
 
-#[cfg(unix)]
 use unix::probe_tty_background;
-#[cfg(windows)]
-use windows::probe_console_background;
 
 use super::color::{background_from_luminance, rgb_luminance};
 
@@ -58,8 +51,8 @@ impl BackgroundMode {
 /// The app paints the whole frame with the theme's background so that a theme reads as a theme:
 /// without it, every cell the theme does not explicitly paint keeps the terminal's colours, and
 /// a light theme in a dark terminal becomes thin light-grey text on a dark screen. What that
-/// fill also covers is the terminal's own background — a translucent one, Windows Terminal's
-/// acrylic — which is a thing the user *can* see, unlike a fill that matches the terminal.
+/// fill also covers is the terminal's own background — a translucent or blurred one — which is
+/// a thing the user *can* see, unlike a fill that matches the terminal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum BackgroundFill {
@@ -170,7 +163,6 @@ fn read_osc11_reply<R: BufRead>(reader: &mut R) -> Option<String> {
 }
 
 /// Overall budget for reading the terminal's answer to the OSC 11 query.
-#[cfg(unix)]
 const REPLY_BUDGET: std::time::Duration = std::time::Duration::from_millis(200);
 
 /// Background of the current terminal, detected once.
@@ -187,13 +179,7 @@ fn detect_background() -> Background {
         return background;
     }
 
-    #[cfg(unix)]
     if let Some(luminance) = probe_tty_background() {
-        return background_from_luminance(luminance);
-    }
-
-    #[cfg(windows)]
-    if let Some(luminance) = probe_console_background() {
         return background_from_luminance(luminance);
     }
 
@@ -212,10 +198,7 @@ mod tests {
         *,
     };
 
-    #[cfg(target_os = "linux")]
     use super::unix::query_background_on_tty;
-    #[cfg(windows)]
-    use super::windows::console_color_luminance;
 
     fn env_from(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
         let pairs: Vec<(String, String)> = pairs
@@ -235,7 +218,7 @@ mod tests {
             color_mode_from(env_from(&[("COLORTERM", "24bit"), ("TERM", "screen")])),
             ColorMode::TrueColor
         );
-        // Windows Terminal only advertises itself
+        // a ConPTY host advertises itself only through `WT_SESSION`
         assert_eq!(
             color_mode_from(env_from(&[("WT_SESSION", "1"), ("TERM", "xterm")])),
             ColorMode::TrueColor
@@ -330,21 +313,6 @@ mod tests {
         assert_eq!(background_from_luminance(1.0), Background::Light);
     }
 
-    /// `COLORREF` packs `0x00BBGGRR`, so the byte order has to be read backwards: blue is the
-    /// high byte and the darkest of the three primaries by weight, which is what makes the
-    /// usual `#282c34`-style background come out dark instead of bright red.
-    #[cfg(windows)]
-    #[test]
-    fn a_console_colour_is_read_as_bgr() {
-        assert!(console_color_luminance(0x0000_0000) < 0.01, "black");
-        assert!(console_color_luminance(0x00FF_FFFF) > 0.99, "white");
-        let blue = console_color_luminance(0x00FF_0000);
-        let green = console_color_luminance(0x0000_FF00);
-        let red = console_color_luminance(0x0000_00FF);
-        assert!(blue < red && red < green, "{blue} {red} {green}");
-        assert_eq!(background_from_luminance(blue), Background::Dark);
-    }
-
     #[test]
     fn osc11_replies_map_to_luminance() {
         let dark = parse_osc11_luminance("\x1b]11;rgb:1e1e/1e1e/1e1e\x07").unwrap();
@@ -382,13 +350,8 @@ mod tests {
     /// mode the event loop later uses, and this test is what pins that: a pty plays the
     /// terminal, the probe runs against the pty's other end.
     ///
-    /// Linux only, deliberately. What the test asserts is a *kernel* behaviour — a
-    /// canonical-mode read does not see a reply that carries no newline — and that is what
-    /// was measured and reproduced here. The macOS pty layer is a different implementation
-    /// of the same idea and does not exist on the machine this was written on; the CI macOS
-    /// job is what first said so. The *code* under test is still compiled on every Unix: if
-    /// this is ever run on a Mac, expect to adjust the pty setup, not the probe.
-    #[cfg(target_os = "linux")]
+    /// What the test asserts is a *kernel* behaviour — a canonical-mode read does not see a
+    /// reply that carries no newline — and that is what was measured and reproduced here.
     #[test]
     fn the_background_probe_reads_a_reply_without_a_newline() {
         use std::os::fd::FromRawFd;

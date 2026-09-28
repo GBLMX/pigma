@@ -14,8 +14,7 @@
 //!   answers even before login or with nothing loaded.
 //!
 //! The endpoint the listener sits on, and the streams the two sides talk over, are the
-//! `transport` module's business. Nothing here branches on the platform, so the protocol is
-//! the same whether that endpoint is a Unix socket or a named pipe.
+//! `transport` module's business: a Unix domain socket under the cache directory.
 
 use std::sync::{Arc, Mutex};
 
@@ -374,7 +373,7 @@ pub struct Capabilities {
     pub version: &'static str,
     /// Every action this build implements, ascending by name.
     pub actions: &'static [ActionSpec],
-    /// The socket / named pipe this instance listens on.
+    /// The socket this instance listens on.
     pub socket: String,
 }
 

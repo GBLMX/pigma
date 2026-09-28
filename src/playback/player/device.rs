@@ -1,9 +1,9 @@
-//! Opening the output device, and the one platform shape it has.
+//! Opening the output device.
 //!
 //! Two things put this behind its own module rather than inline in the player loop: the device
-//! is opened once and kept across songs, and on Linux the open is noisy — ALSA writes to stderr
-//! while the device is set up, which lands in the middle of the TUI's frame. The Linux half of
-//! that, the stderr guard, is `imp` below; [`create_sink`] is the portable entry point.
+//! is opened once and kept across songs, and the open is noisy — ALSA writes to stderr while the
+//! device is set up, which lands in the middle of the TUI's frame. The stderr guard that keeps
+//! that quiet is `imp` below; [`create_sink`] is the entry point.
 
 use std::sync::Arc;
 
@@ -15,24 +15,17 @@ use super::{DeviceHealth, stream_error_callback};
 pub(super) fn create_sink(
     health: Arc<DeviceHealth>,
 ) -> Result<rodio::MixerDeviceSink, rodio::DeviceSinkError> {
-    #[cfg(target_os = "linux")]
-    {
-        // The guard has to live across `open_sink_impl`: `let _ = StderrGuard::new()?` would
-        // drop it at the end of that statement, which is exactly the window it exists for —
-        // so it was silencing nothing while the ALSA noise it was written for happened.
-        //
-        // Failing to silence stderr is also not a reason to refuse to open the device:
-        // ALSA chatter in the log beats no audio at all, and `?` here turned a cosmetic
-        // failure into `DeviceSinkError::NoDevice`.
-        let _silencer = imp::StderrGuard::new().map_err(|e| {
-            log::warn!("failed to silence ALSA on stderr: {e}");
-        });
-        open_sink_impl(health)
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        open_sink_impl(health)
-    }
+    // The guard has to live across `open_sink_impl`: `let _ = StderrGuard::new()?` would
+    // drop it at the end of that statement, which is exactly the window it exists for —
+    // so it was silencing nothing while the ALSA noise it was written for happened.
+    //
+    // Failing to silence stderr is also not a reason to refuse to open the device:
+    // ALSA chatter in the log beats no audio at all, and `?` here turned a cosmetic
+    // failure into `DeviceSinkError::NoDevice`.
+    let _silencer = imp::StderrGuard::new().map_err(|e| {
+        log::warn!("failed to silence ALSA on stderr: {e}");
+    });
+    open_sink_impl(health)
 }
 
 /// Prefer PipeWire/PulseAudio ALSA devices so system volume/mute works.
@@ -40,13 +33,6 @@ pub(super) fn create_sink(
 fn open_sink_impl(
     health: Arc<DeviceHealth>,
 ) -> Result<rodio::MixerDeviceSink, rodio::DeviceSinkError> {
-    #[cfg(any(
-        target_os = "linux",
-        target_os = "freebsd",
-        target_os = "netbsd",
-        target_os = "openbsd",
-        target_os = "dragonfly",
-    ))]
     {
         // Only this block talks to cpal directly; elsewhere the traits are not in scope.
         use rodio::cpal::traits::{DeviceTrait, HostTrait};
@@ -82,8 +68,7 @@ fn open_sink_impl(
         .and_then(|b| b.open_sink_or_fallback())
 }
 
-/// The Linux half of opening the device: the guard that keeps ALSA quiet while it happens.
-#[cfg(target_os = "linux")]
+/// The guard that keeps ALSA quiet while the device is opened.
 mod imp {
     /// RAII guard that redirects stderr to /dev/null while alive, restoring it on drop.
     /// Used to suppress ALSA noise during audio device initialization.

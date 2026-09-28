@@ -282,7 +282,6 @@ mod tests {
     /// A link from inside the tree back to its own root must not be walked again. Before the
     /// visited set the recursion was stopped only by the kernel's symlink limit, leaving forty
     /// copies of the same track in the queue.
-    #[cfg(unix)]
     #[test]
     fn a_symlink_loop_does_not_duplicate_tracks() {
         let dir = temp_dir("symlink-loop");
@@ -296,7 +295,6 @@ mod tests {
     }
 
     /// A symlinked album directory is a library layout, not a mistake: it is followed — once.
-    #[cfg(unix)]
     #[test]
     fn a_symlinked_directory_is_followed_once() {
         let root = temp_dir("symlink-dir");

@@ -43,21 +43,9 @@ fn stub_searcher() -> Arc<boxpigma::app::SearchEngine> {
 }
 
 fn tmp_socket(tag: &str) -> std::path::PathBuf {
-    #[cfg(unix)]
-    {
-        let dir = std::env::temp_dir().join(format!("boxpigma-ipc-test-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir.join(format!("{tag}.sock"))
-    }
-    #[cfg(windows)]
-    {
-        // Named pipes live in a global namespace, so make the name unique per
-        // test (parallel-safe) and per process.
-        std::path::PathBuf::from(format!(
-            r"\\.\pipe\boxpigma-test-{}-{tag}",
-            std::process::id()
-        ))
-    }
+    let dir = std::env::temp_dir().join(format!("boxpigma-ipc-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    dir.join(format!("{tag}.sock"))
 }
 
 #[tokio::test(flavor = "multi_thread")]

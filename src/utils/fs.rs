@@ -15,13 +15,12 @@ static TEMP_SEQUENCE: AtomicU32 = AtomicU32::new(0);
 /// start after a crash) between the truncate and the last byte sees an empty or half-written
 /// file — which is how a config or a cache index is silently lost. Here the bytes go to a
 /// uniquely named temp file in the same directory, are flushed to disk, and the temp file is
-/// then renamed over `path`: `rename` replaces the destination in a single step on Unix, and
-/// on Windows `std::fs::rename` passes `MOVEFILE_REPLACE_EXISTING`, so an existing `path` is
-/// replaced there too. The temp file lives beside `path` on purpose — a rename across
-/// filesystems is not atomic and on Unix fails outright.
+/// then renamed over `path`: `rename` replaces the destination in a single step. The temp file
+/// lives beside `path` on purpose — a rename across filesystems is not atomic and fails
+/// outright.
 ///
-/// The directory is not `fsync`ed: that needs platform-specific code, and the file itself being
-/// on disk before the rename is what keeps the file from coming back truncated.
+/// The directory is not `fsync`ed: the file's own data being on disk before the rename is what
+/// keeps it from coming back truncated.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let dir = path
         .parent()

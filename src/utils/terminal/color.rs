@@ -124,8 +124,7 @@ pub fn rgb_to_16(r: u8, g: u8, b: u8) -> u8 {
 
 /// WCAG relative luminance of an sRGB colour with channels in `0.0..=1.0`.
 ///
-/// One implementation for the two ways a background arrives — the terminal's OSC 11 answer
-/// and, on Windows, the console's colour table.
+/// The background probe turns the terminal's OSC 11 answer into a fill with it.
 pub(crate) fn rgb_luminance(r: f64, g: f64, b: f64) -> f64 {
     0.2126 * r + 0.7152 * g + 0.0722 * b
 }

@@ -454,7 +454,7 @@ fn back_up_unreadable(path: &Path) {
 
 /// Atomically write the persisted cookies to `path`.
 ///
-/// A unique temp file is written in the same directory (mode `0600` on Unix)
+/// A unique temp file is written in the same directory, mode `0600`
 /// and then renamed over the target — `rename` is atomic, so a concurrent
 /// reader always sees either the old or the new complete file.
 fn write_persisted(path: &Path, cookies: &HashMap<String, String>) -> std::io::Result<()> {
@@ -492,13 +492,12 @@ fn write_persisted(path: &Path, cookies: &HashMap<String, String>) -> std::io::R
 }
 
 fn write_temp_file(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::os::unix::fs::OpenOptionsExt;
+
     let mut opts = std::fs::OpenOptions::new();
     opts.write(true).create(true).truncate(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        opts.mode(0o600);
-    }
+    // The cookie file carries the session token: readable by this user only.
+    opts.mode(0o600);
     let mut file = opts.open(path)?;
     std::io::Write::write_all(&mut file, bytes)?;
     file.sync_all()

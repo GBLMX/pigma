@@ -67,12 +67,6 @@ pub fn expand_tilde(path: &str) -> PathBuf {
         return home.join(rest);
     }
 
-    if cfg!(windows)
-        && let Some(rest) = path.strip_prefix("~\\")
-    {
-        return home.join(rest);
-    }
-
     PathBuf::from(path)
 }
 
@@ -125,12 +119,8 @@ mod tests {
         let unix_path = expand_tilde("~/.cache/dir/xx");
         assert_eq!(unix_path, home.join(".cache/dir/xx"));
 
+        // A backslash path is not a tilde path: only `~/` is expanded.
         let win_input = r"~\.cache\dir\xx";
-        if cfg!(windows) {
-            let expected = home.join(r".cache\dir\xx");
-            assert_eq!(expand_tilde(win_input), expected);
-        } else {
-            assert_eq!(expand_tilde(win_input), PathBuf::from(win_input));
-        }
+        assert_eq!(expand_tilde(win_input), PathBuf::from(win_input));
     }
 }

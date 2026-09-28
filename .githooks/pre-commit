@@ -26,21 +26,14 @@ if ! cargo +nightly fmt --version >/dev/null 2>&1; then
     exit 0
 fi
 
-# On Windows the working copy is checked out with CRLF and rustfmt would otherwise report every
-# file as unformatted; this keeps the check about formatting and not about line endings.
-case "$(uname -s 2>/dev/null)" in
-    MINGW* | MSYS* | CYGWIN*) NEWLINE="--config newline_style=Windows" ;;
-    *) NEWLINE="" ;;
-esac
-
-if cargo +nightly fmt -- $NEWLINE --check >/dev/null 2>&1; then
+if cargo +nightly fmt --check >/dev/null 2>&1; then
     exit 0
 fi
 
 echo "pre-commit: 格式没跑过（nightly 的选项跟 CI 一致），正在格式化…" >&2
-if cargo +nightly fmt -- $NEWLINE >/dev/null 2>&1; then
+if cargo +nightly fmt >/dev/null 2>&1; then
     echo "pre-commit: 已格式化。请 git add 后再提交（这次的提交被拦下来了）。" >&2
 else
-    echo "pre-commit: 格式化失败，请手动跑：cargo +nightly fmt -- $NEWLINE" >&2
+    echo "pre-commit: 格式化失败，请手动跑：cargo +nightly fmt" >&2
 fi
 exit 1

@@ -869,7 +869,6 @@ mod chain_bench {
                 target_lufs: -14.0,
                 max_gain_db: 12.0,
             }),
-            exclusive: false,
         };
         let source = super::build(decode(&path).expect("decoded above"), DEVICE_RATE, &full);
         let (wall, audio, samples) = drain(source);

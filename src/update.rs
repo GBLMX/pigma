@@ -1,11 +1,11 @@
 //! `boxpigma update`: in-place upgrade and rollback for an installed boxpigma.
 //!
-//! This is the versioned layout and the atomic switch of `current` that `install.sh` /
-//! `install.ps1` already implement, redone inside the process: upgrading no longer needs a
-//! shell, PowerShell, curl or tar. The scripts keep their own job — first installs (creating
-//! the directory, the PATH entry, the `.cmd` shim) and script-side rollback. `update` only
-//! works on a directory the scripts already installed: no `releases/` means there is nothing
-//! to update, and it says so instead of scaffolding a fresh install.
+//! This is the versioned layout and the atomic switch of `current` that `install.sh` already
+//! implements, redone inside the process: upgrading no longer needs a shell, curl or tar. The
+//! script keeps its own job — first installs (creating the directory, the PATH entry) and
+//! script-side rollback. `update` only works on a directory the script already installed: no
+//! `releases/` means there is nothing to update, and it says so instead of scaffolding a fresh
+//! install.
 
 use std::{
     fs,
@@ -22,18 +22,15 @@ use time::{OffsetDateTime, format_description::FormatItem, macros::format_descri
 /// Where releases come from; `--mirror` replaces the `https://github.com` prefix.
 const REPO: &str = "GBLMX/pigma";
 const HOST: &str = "https://github.com";
-/// How many version directories to keep, current included — the scripts' `$Keep`.
+/// How many version directories to keep, current included — install.sh's `$Keep`.
 const KEEP: usize = 3;
 /// The release target this binary was built for. `build.rs` bakes in cargo's own `TARGET` so
-/// the asset name (`boxpigma-<target>.zip` / `.tar.gz`) matches the release even when the
-/// build was cross-compiled.
+/// the asset name (`boxpigma-<target>.tar.gz`) matches the release even when the build was
+/// cross-compiled.
 const TARGET: &str = env!("BOXPIGMA_TARGET");
-#[cfg(windows)]
-const BIN: &str = "boxpigma.exe";
-#[cfg(not(windows))]
 const BIN: &str = "boxpigma";
 
-/// `install.lock`'s timestamp format, the scripts' `date -u '+%Y-%m-%dT%H:%M:%SZ'`.
+/// `install.lock`'s timestamp format, install.sh's `date -u '+%Y-%m-%dT%H:%M:%SZ'`.
 const INSTALLED_AT_FMT: &[FormatItem<'static>] =
     format_description!("[year]-[month]-[day]T[hour]:[minute]:[second]Z");
 
@@ -53,13 +50,13 @@ pub struct Options {
 ///
 /// The order is the behaviour: resolve the directory, refuse anything that is not an install,
 /// then answer `--check` / `--rollback` / install in that order. Nothing here creates the
-/// install directory or touches `PATH` — that is the scripts' job.
+/// install directory or touches `PATH` — that is install.sh's job.
 pub async fn run(opts: Options) -> Result<()> {
     let layout = Layout {
         dir: resolve_dir(opts.dir.as_deref())?,
     };
 
-    // The same three preconditions the install scripts check, in the same order.
+    // The same three preconditions the install script checks, in the same order.
     if layout.dir.exists() && !layout.dir.is_dir() {
         bail!("{} 已经存在，而且不是目录", layout.dir.display());
     }
@@ -73,7 +70,7 @@ pub async fn run(opts: Options) -> Result<()> {
     let releases = layout.releases();
     if !releases.is_dir() {
         bail!(
-            "没有看到安装：{} 不存在 —— 首次安装请用 install.sh / install.ps1",
+            "没有看到安装：{} 不存在 —— 首次安装请用 install.sh",
             releases.display()
         );
     }
@@ -92,8 +89,8 @@ pub async fn run(opts: Options) -> Result<()> {
 }
 
 /// The install root: `--dir` verbatim (a relative path stays relative to the CWD — no
-/// `canonicalize`, so no `\\?\` prefix in the output), else the root the running executable
-/// belongs to, else the platform default.
+/// `canonicalize`, so the path is used exactly as given), else the root the running executable
+/// belongs to, else the default `~/.local/bin`.
 fn resolve_dir(given: Option<&Path>) -> Result<PathBuf> {
     if let Some(dir) = given {
         return Ok(dir.to_path_buf());
@@ -111,10 +108,10 @@ fn resolve_dir(given: Option<&Path>) -> Result<PathBuf> {
 
 /// The install root `exe` lives in, or `None` when it lives outside one.
 ///
-/// The path as given and its canonicalized form are both tried: `current` is a junction or
-/// symlink, so a canonicalized `<dir>/current/boxpigma.exe` resolves to
-/// `<dir>/releases/<rel>/boxpigma.exe`, and both spellings have to be recognized. No
-/// canonicalization is needed for the common case, which is why it comes second.
+/// The path as given and its canonicalized form are both tried: `current` is a symlink, so a
+/// canonicalized `<dir>/current/boxpigma` resolves to `<dir>/releases/<rel>/boxpigma`, and
+/// both spellings have to be recognized. No canonicalization is needed for the common case,
+/// which is why it comes second.
 fn install_dir_from_exe(exe: &Path) -> Option<PathBuf> {
     let canonical = fs::canonicalize(exe).unwrap_or_else(|_| exe.to_path_buf());
     for root in [exe.to_path_buf(), canonical] {
@@ -139,18 +136,12 @@ fn install_dir_from_exe(exe: &Path) -> Option<PathBuf> {
     None
 }
 
-/// Where the install scripts put a fresh install.
-#[cfg(windows)]
-fn default_install_dir() -> Option<PathBuf> {
-    dirs::data_local_dir().map(|base| base.join("Programs").join("boxpigma"))
-}
-
-#[cfg(not(windows))]
+/// Where the install script puts a fresh install.
 fn default_install_dir() -> Option<PathBuf> {
     dirs::home_dir().map(|home| home.join(".local").join("bin"))
 }
 
-/// One client for every request: the 300 s total timeout is the scripts' `curl --max-time 300`
+/// One client for every request: the 300 s total timeout is install.sh's `curl --max-time 300`
 /// (the checksum request shares the ceiling, though it moves a few hundred bytes). The TLS
 /// provider is installed once at startup in `main.rs`.
 fn http_client() -> Result<Client> {
@@ -166,7 +157,7 @@ fn host_of(mirror: Option<&str>) -> &str {
     mirror.filter(|host| !host.is_empty()).unwrap_or(HOST)
 }
 
-/// Where this release's assets live, spelled the way the scripts spell it.
+/// Where this release's assets live, spelled the way install.sh spells it.
 fn base_url(host: &str, version: &str) -> String {
     if version == "latest" {
         format!("{host}/{REPO}/releases/latest/download")
@@ -177,8 +168,7 @@ fn base_url(host: &str, version: &str) -> String {
 
 /// The release archive for this platform.
 fn asset_name() -> String {
-    let extension = if cfg!(windows) { "zip" } else { "tar.gz" };
-    format!("boxpigma-{TARGET}.{extension}")
+    format!("boxpigma-{TARGET}.tar.gz")
 }
 
 /// The version number a pinned `--version` names, or `None` for `latest` (which the binary
@@ -194,7 +184,7 @@ fn explicit_version(version: &str) -> Result<Option<String>> {
     Ok(Some(number.to_string()))
 }
 
-/// `1.6.0-x86_64-pc-windows-msvc` → `1.6.0`, the scripts' `${MATCH%-$TARGET}`.
+/// `1.6.0-x86_64-unknown-linux-gnu` → `1.6.0`, the script's `${MATCH%-$TARGET}`.
 fn version_number_from_dir(name: &str) -> String {
     name.strip_suffix(&format!("-{TARGET}"))
         .unwrap_or(name)
@@ -225,7 +215,7 @@ fn parse_checksums(body: &str, asset: &str) -> Option<String> {
 
 /// Run a binary and pull the version out of its `--version` output: `boxpigma 1.6.0` →
 /// `1.6.0`. That is the first run of digits followed by version-number characters, which is
-/// what the scripts' `sed` / regex extracts.
+/// what install.sh's `sed` / regex extracts.
 fn version_of(bin: &Path) -> Option<String> {
     let output = Command::new(bin).arg("--version").output().ok()?;
     if !output.status.success() {
@@ -245,7 +235,7 @@ fn version_of(bin: &Path) -> Option<String> {
 /// at all (no network, or a release old enough to predate `SHA256SUMS`).
 ///
 /// `source` is a local file when one exists at that path and a URL otherwise — the same
-/// `<url|file>` the install scripts accept.
+/// `<url|file>` install.sh accepts.
 async fn fetch_checksums(client: &Client, source: &str) -> Result<Option<String>> {
     let asset = asset_name();
     let body = if Path::new(source).is_file() {
@@ -301,7 +291,7 @@ fn reused(layout: &Layout, want: Option<&str>, pinned: Option<&str>) -> Option<S
     None
 }
 
-/// Download the release archive, mapping onto the scripts' messages the failures they tell
+/// Download the release archive, mapping onto install.sh's messages the failures it tells
 /// apart: 404 (no asset for this platform, or a wrong tag), a transport error, and anything
 /// else that came back with a status code.
 async fn download(client: &Client, url: &str, version: &str, asset: &str) -> Result<Vec<u8>> {
@@ -427,12 +417,9 @@ async fn install(client: &Client, layout: &Layout, opts: &Options) -> Result<()>
     if !staged_bin.is_file() {
         bail!("压缩包里没有 {BIN}");
     }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&staged_bin, fs::Permissions::from_mode(0o755))
-            .map_err(|e| eyre!("改不了 {} 的权限（{e}）", staged_bin.display()))?;
-    }
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(&staged_bin, fs::Permissions::from_mode(0o755))
+        .map_err(|e| eyre!("改不了 {} 的权限（{e}）", staged_bin.display()))?;
 
     let number = match &pinned {
         Some(number) => number.clone(),
@@ -512,7 +499,7 @@ async fn check(client: &Client, layout: &Layout, host: &str) -> Result<()> {
 /// `--mirror` when given and `https://github.com` otherwise.
 ///
 /// Deliberately not `api.github.com`: anonymous API calls are capped at 60/hour, while the
-/// redirect is not, and the install scripts have always used it.
+/// redirect is not, and install.sh has always used it.
 async fn latest_tag(client: &Client, host: &str) -> Result<String> {
     let url = format!("{host}/{REPO}/releases/latest");
     let response = client
@@ -533,7 +520,7 @@ async fn latest_tag(client: &Client, host: &str) -> Result<String> {
 }
 
 /// `--rollback`: switch `current` to the newest version that is not the current one, the same
-/// rule the scripts use (not the lock's `previous=`, which can name a deleted directory).
+/// rule install.sh uses (not the lock's `previous=`, which can name a deleted directory).
 fn rollback(layout: &Layout, dry_run: bool) -> Result<()> {
     let current = layout.current_target();
     let Some(target) = layout.rollback_target() else {
@@ -605,8 +592,8 @@ impl Layout {
     /// A real version directory under `releases/`, or `None` for a link, a scratch directory
     /// (both start with `.`) or anything that is not a directory.
     ///
-    /// `symlink_metadata` is the point: it describes the link itself, so a symlink or junction
-    /// to a directory is not mistaken for one.
+    /// `symlink_metadata` is the point: it describes the link itself, so a symlink to a
+    /// directory is not mistaken for one.
     fn version_dir(&self, name: &str) -> Option<PathBuf> {
         if name.starts_with('.') {
             return None;
@@ -619,9 +606,7 @@ impl Layout {
 
     /// The directory name `current` points at, or `None` when there is no link.
     ///
-    /// `read_link` answers both halves at once — is this a link, and what does it name — and
-    /// works for a symlink on Unix and a junction on Windows. Windows returns an absolute
-    /// `\\?\`-prefixed target, but `file_name` still yields the directory name alone.
+    /// `read_link` answers both halves at once — is this a link, and what does it name.
     fn current_target(&self) -> Option<String> {
         fs::read_link(self.current())
             .ok()?
@@ -693,7 +678,7 @@ impl Layout {
         history.join(" ")
     }
 
-    /// Write `install.lock` through a temporary file, the way the scripts do.
+    /// Write `install.lock` through a temporary file, the way install.sh does.
     fn write_lock(&self, rel: &str, number: &str, prev: &str) -> Result<()> {
         let installed_at = OffsetDateTime::now_utc()
             .format(INSTALLED_AT_FMT)
@@ -713,10 +698,9 @@ impl Layout {
 
     /// Point `current` at `releases/<rel>`.
     ///
-    /// The new link is built beside the old one and renamed over it: on Unix that replaces the
-    /// symlink in one step. Windows cannot replace a junction like that (and neither install
-    /// script pretends otherwise), so there it degrades to "remove, then rename", and to
-    /// building the link in place as a last resort.
+    /// The new link is built beside the old one and renamed over it, which replaces the
+    /// symlink in one step. If that rename is refused, the old link is removed first and the
+    /// link is built in place as a last resort.
     fn switch_current(&self, rel: &str) -> Result<()> {
         let new = self.dir.join(format!(".current.{}", std::process::id()));
         self.remove_link(&new);
@@ -741,43 +725,21 @@ impl Layout {
     }
 
     /// Create the `current`-style link at `dest`, pointing at `releases/<rel>`.
-    #[cfg(unix)]
     fn create_link(&self, dest: &Path, rel: &str) -> Result<()> {
         // A relative target, like `install.sh`: the whole install directory can then be moved.
         std::os::unix::fs::symlink(Path::new("releases").join(rel), dest)
             .map_err(|e| eyre!("建不出 {} -> releases/{rel}（{e}）", dest.display()))
     }
 
-    /// Create the `current`-style link at `dest`, pointing at `releases/<rel>`.
-    #[cfg(windows)]
-    fn create_link(&self, dest: &Path, rel: &str) -> Result<()> {
-        // `cmd /c mklink /J` is the only way to make a directory junction without either
-        // administrator rights or developer mode: std has no API for one, and `symlink_dir`
-        // needs one of the two. The install scripts take the same two steps, in this order.
-        let _ = Command::new("cmd")
-            .args(["/c", "/Q", "mklink", "/J"])
-            .arg(dest)
-            .arg(self.releases().join(rel))
-            .current_dir(&self.dir)
-            .output();
-        if fs::read_link(dest).is_ok() {
-            return Ok(());
-        }
-        std::os::windows::fs::symlink_dir(self.releases().join(rel), dest)
-            .map_err(|e| eyre!("建不出 {} -> releases/{rel}（{e}）", dest.display()))
-    }
-
     /// Delete the link itself, never what it points at.
     ///
-    /// On Windows `RemoveDirectory` on a junction removes the reparse point, not the release
-    /// directory it names; on Unix the path is not a directory, so it goes through
-    /// `remove_file`. Either way this only runs when there really is a link, so a stray
-    /// directory is left alone — and it never recurses.
+    /// The path is a symlink, so `remove_file` is what removes it. This only runs when there
+    /// really is a link, so a stray directory is left alone — and it never recurses.
     fn remove_link(&self, path: &Path) {
         if fs::read_link(path).is_err() {
             return;
         }
-        let _ = fs::remove_dir(path).or_else(|_| fs::remove_file(path));
+        let _ = fs::remove_file(path);
     }
 
     /// Keep the newest `KEEP` version directories; the one just installed and the one
@@ -793,9 +755,8 @@ impl Layout {
                 continue;
             }
             let path = self.releases().join(name);
-            // Never delete the directory the running executable lives in. On Windows the
-            // deletion would fail anyway, and `update` is usually started through `current`,
-            // so this drops what would only ever be noise.
+            // Never delete the directory the running executable lives in: `update` is usually
+            // started through `current`, so this drops what would only ever be noise.
             let canonical = fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
             if running
                 .as_ref()
@@ -905,47 +866,19 @@ fn extract(archive: &Path, dest: &Path) -> Result<()> {
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_default();
 
-    #[cfg(unix)]
-    {
-        let file = fs::File::open(archive)?;
-        let mut tar = tar::Archive::new(flate2::read::GzDecoder::new(file));
-        for entry in tar.entries().map_err(|_| not_a_tarball(&asset))? {
-            let mut entry = entry.map_err(|_| not_a_tarball(&asset))?;
-            let unpacked = entry.unpack_in(dest).map_err(|_| not_a_tarball(&asset))?;
-            if !unpacked {
-                bail!("解压失败：{asset} 里有跑到 {} 外面的条目", dest.display());
-            }
-        }
-    }
-
-    #[cfg(windows)]
-    {
-        let file = fs::File::open(archive)?;
-        let mut zip = zip::ZipArchive::new(file).map_err(|e| eyre!("解压失败：{asset}（{e}）"))?;
-        for index in 0..zip.len() {
-            let mut entry = zip
-                .by_index(index)
-                .map_err(|e| eyre!("解压失败：{asset}（{e}）"))?;
-            let Some(relative) = entry.enclosed_name() else {
-                bail!("解压失败：{asset} 里有跑到 {} 外面的条目", dest.display());
-            };
-            let out = dest.join(relative);
-            if entry.is_dir() {
-                fs::create_dir_all(&out)?;
-                continue;
-            }
-            if let Some(parent) = out.parent() {
-                fs::create_dir_all(parent)?;
-            }
-            let mut file = fs::File::create(&out)?;
-            std::io::copy(&mut entry, &mut file)?;
+    let file = fs::File::open(archive)?;
+    let mut tar = tar::Archive::new(flate2::read::GzDecoder::new(file));
+    for entry in tar.entries().map_err(|_| not_a_tarball(&asset))? {
+        let mut entry = entry.map_err(|_| not_a_tarball(&asset))?;
+        let unpacked = entry.unpack_in(dest).map_err(|_| not_a_tarball(&asset))?;
+        if !unpacked {
+            bail!("解压失败：{asset} 里有跑到 {} 外面的条目", dest.display());
         }
     }
 
     Ok(())
 }
 
-#[cfg(unix)]
 fn not_a_tarball(asset: &str) -> color_eyre::Report {
     eyre!("解压失败：{asset} 不是有效的 tar.gz")
 }
@@ -989,38 +922,25 @@ mod tests {
     }
 
     fn write_archive(path: &Path, name: &str, contents: &[u8]) {
-        #[cfg(unix)]
-        {
-            let file = fs::File::create(path).expect("create archive");
-            let mut tar = tar::Builder::new(flate2::write::GzEncoder::new(
-                file,
-                flate2::Compression::default(),
-            ));
-            let mut header = tar::Header::new_gnu();
-            header.set_size(contents.len() as u64);
-            header.set_mode(0o755);
-            // `append_data` would go through `Header::set_path`, which refuses `..` outright,
-            // and this helper has to be able to build the archive `extract` is meant to
-            // reject — so the name goes into the header directly.
-            let raw = name.as_bytes();
-            header.as_old_mut().name[..raw.len()].copy_from_slice(raw);
-            header.set_cksum();
-            tar.append(&header, contents).expect("append entry");
-            tar.into_inner()
-                .expect("finish the tar stream")
-                .finish()
-                .expect("finish the gzip stream");
-        }
-        #[cfg(windows)]
-        {
-            use std::io::Write;
-            let file = fs::File::create(path).expect("create archive");
-            let mut zip = zip::ZipWriter::new(file);
-            zip.start_file(name, zip::write::SimpleFileOptions::default())
-                .expect("start entry");
-            zip.write_all(contents).expect("write entry");
-            zip.finish().expect("finish archive");
-        }
+        let file = fs::File::create(path).expect("create archive");
+        let mut tar = tar::Builder::new(flate2::write::GzEncoder::new(
+            file,
+            flate2::Compression::default(),
+        ));
+        let mut header = tar::Header::new_gnu();
+        header.set_size(contents.len() as u64);
+        header.set_mode(0o755);
+        // `append_data` would go through `Header::set_path`, which refuses `..` outright,
+        // and this helper has to be able to build the archive `extract` is meant to
+        // reject — so the name goes into the header directly.
+        let raw = name.as_bytes();
+        header.as_old_mut().name[..raw.len()].copy_from_slice(raw);
+        header.set_cksum();
+        tar.append(&header, contents).expect("append entry");
+        tar.into_inner()
+            .expect("finish the tar stream")
+            .finish()
+            .expect("finish the compressed stream");
     }
 
     #[test]
@@ -1042,7 +962,7 @@ mod tests {
             parse_checksums(&body, &asset).as_deref(),
             Some("abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789")
         );
-        assert_eq!(parse_checksums(&body, "boxpigma-nope.zip"), None);
+        assert_eq!(parse_checksums(&body, "boxpigma-nope.tar.gz"), None);
     }
 
     #[test]
@@ -1113,8 +1033,8 @@ mod tests {
         // Oldest first, and the version just installed is last…
         assert_eq!(layout.lock_history(), ["1.5.0-old", "1.6.0-new"]);
         let lock = fs::read_to_string(layout.lock_file()).unwrap();
-        // …while the first install of the directory records no predecessor at all, which the
-        // scripts write as an empty `previous=`.
+        // …while the first install of the directory records no predecessor at all, which
+        // install.sh writes as an empty `previous=`.
         assert!(lock.contains("\nprevious=1.5.0-old\n"), "{lock}");
         assert!(lock.starts_with("version=1.6.0\n"), "{lock}");
         assert!(lock.contains("\ndir=releases/1.6.0-new\n"), "{lock}");
@@ -1189,17 +1109,14 @@ mod tests {
         write_archive(&archive, BIN, b"boxpigma binary");
         extract(&archive, &dest).expect("extract a release archive");
         assert_eq!(fs::read(dest.join(BIN)).unwrap(), b"boxpigma binary");
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            // The header's mode survives, minus the umask: the archive's own 0o755 can only
-            // lose bits the umask clears, and the caller chmods 0o755 on top of it.
-            let mode = fs::metadata(dest.join(BIN)).unwrap().permissions().mode();
-            assert!(
-                mode & 0o100 != 0,
-                "unpacked binary is not executable: {mode:o}"
-            );
-        }
+        use std::os::unix::fs::PermissionsExt;
+        // The header's mode survives, minus the umask: the archive's own 0o755 can only
+        // lose bits the umask clears, and the caller chmods 0o755 on top of it.
+        let mode = fs::metadata(dest.join(BIN)).unwrap().permissions().mode();
+        assert!(
+            mode & 0o100 != 0,
+            "unpacked binary is not executable: {mode:o}"
+        );
 
         // An entry that climbs out fails the extraction instead of being skipped.
         let escaping = layout.dir.join(format!("escaping.{}", asset_name()));

@@ -1,4 +1,4 @@
-//! The Unix half of the background probe.
+//! The background probe.
 //!
 //! A tty is opened and written the OSC 11 query on, and the reply is read back under one
 //! deadline — see `query_background_on_tty` for why the read cannot be the ordinary one.
@@ -9,7 +9,6 @@ use super::{REPLY_BUDGET, parse_osc11_luminance, read_osc11_reply, write_osc11_q
 ///
 /// A terminal that does not implement OSC 11 simply never answers, so poll first and
 /// give up after a frame instead of blocking startup.
-#[cfg(unix)]
 pub(super) fn probe_tty_background() -> Option<f64> {
     use std::fs::OpenOptions;
 
@@ -31,7 +30,6 @@ pub(super) fn probe_tty_background() -> Option<f64> {
 /// every terminal that does answer. The probe therefore reads the tty the way the event
 /// loop later will: non-canonical, no echo, byte-at-a-time, under one overall deadline.
 /// Measured on a pty: canonical never delivers the reply, non-canonical delivers it at once.
-#[cfg(unix)]
 pub(super) fn query_background_on_tty(tty: &std::fs::File) -> Option<f64> {
     use std::{io::BufReader, os::fd::AsRawFd};
 
@@ -58,12 +56,10 @@ pub(super) fn query_background_on_tty(tty: &std::fs::File) -> Option<f64> {
 /// POSIX lets the read and the `tcsetattr` through when the signal is blocked (or ignored) in
 /// the calling thread, so blocking is enough — and unlike a process-wide `SIG_IGN` it cannot
 /// race with another thread's handler.
-#[cfg(unix)]
 struct NoTtyStopSignals {
     previous: libc::sigset_t,
 }
 
-#[cfg(unix)]
 impl NoTtyStopSignals {
     fn block() -> Option<Self> {
         let mut set = std::mem::MaybeUninit::<libc::sigset_t>::uninit();
@@ -90,7 +86,6 @@ impl NoTtyStopSignals {
     }
 }
 
-#[cfg(unix)]
 impl Drop for NoTtyStopSignals {
     fn drop(&mut self) {
         // SAFETY: `self.previous` is the mask `pthread_sigmask` filled in on creation.
@@ -105,13 +100,11 @@ impl Drop for NoTtyStopSignals {
 /// `read_osc11_reply` reads byte by byte, so the wait has to be bounded per byte *and* in
 /// total: the poll before each read waits for the time that is left, and once nothing is
 /// left the read fails — which the reply parser turns into "no answer".
-#[cfg(unix)]
 struct TtyReaderWithDeadline {
     fd: std::os::fd::RawFd,
     deadline: std::time::Instant,
 }
 
-#[cfg(unix)]
 impl TtyReaderWithDeadline {
     fn new(fd: std::os::fd::RawFd, budget: std::time::Duration) -> Self {
         Self {
@@ -121,7 +114,6 @@ impl TtyReaderWithDeadline {
     }
 }
 
-#[cfg(unix)]
 impl std::io::Read for TtyReaderWithDeadline {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         let remaining = self
@@ -163,13 +155,11 @@ impl std::io::Read for TtyReaderWithDeadline {
 /// Only canonical input buffering and echo change: the probe runs before the UI takes the
 /// terminal over, so everything else is left exactly as the user had it, and the previous
 /// settings are restored even when the probe gives up early.
-#[cfg(unix)]
 struct RawTty {
     fd: std::os::fd::RawFd,
     saved: libc::termios,
 }
 
-#[cfg(unix)]
 impl RawTty {
     fn new(fd: std::os::fd::RawFd) -> Option<Self> {
         let mut saved = std::mem::MaybeUninit::<libc::termios>::uninit();
@@ -193,7 +183,6 @@ impl RawTty {
     }
 }
 
-#[cfg(unix)]
 impl Drop for RawTty {
     fn drop(&mut self) {
         // SAFETY: `self.fd` is the tty this guard was created for and `self.saved` is the

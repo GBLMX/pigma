@@ -92,11 +92,8 @@ async fn main() -> color_eyre::Result<()> {
     // Mouse capture is what makes the player bar clickable, and also what stops the terminal
     // from selecting text; `mouse = false` gives the selection back.
     //
-    // Every one of these is best effort: they are conveniences, and on Windows they go
-    // through the console API, which does not exist when the process was started without a
-    // console (`boxpigma` in a service, under a CI runner, with the terminal replaced by a
-    // pipe). A terminal that refuses them is a terminal that does not get mouse support —
-    // not a reason to refuse to start.
+    // Every one of these is best effort: they are conveniences, and a terminal that refuses
+    // them is a terminal that does not get mouse support — not a reason to refuse to start.
     if app.config.mouse
         && let Err(e) = execute!(stdout(), EnableMouseCapture)
     {
