@@ -17,6 +17,9 @@
 
 - *(utils)* **"取锁"与"原子写"各收敛到一处**：取锁的 poison 决策此前有四种写法（`unwrap`、`unwrap_or_else(into_inner)`、`if let Ok` 静默跳过、`map_err` 转 `io::Error`），其中 `ipc` 的 `unwrap` 会在别的线程 panic 后把进程带走；原子写则只有 `cookie.rs` 一处。现在 `utils::sync::{mutex,read,write}` 收拢了 `ipc`、`cache/audio`、`cache/index`、`state/avatar`、`state/mv` 的十余处取锁（"其他线程的 panic 与这份数据无关，取走它"只写一遍），`utils::fs::write_atomic` 把"临时文件 + rename"从一个地方供给 `config` 与 `cache/index`；`playback::player` 把 poison 转成 `io::Error` 的刻意例外保留，并在 `utils::sync` 的模块文档里写明为什么它是例外
 
+- **[breaking] 只保留 Linux，其余平台整体删除**：Windows / macOS 的支持连同它们的代码一起走 —— WASAPI 独占输出整块（`src/playback/exclusive.rs` 599 行、`[audio] exclusive`、`wasapi` 依赖），IPC 的命名管道传输（`ipc/transport/windows.rs`），Windows 控制台背景探测（`terminal/background/windows.rs`），自更新里的 `.zip` 解包与 `mklink /J` junction 分支，`install.ps1`（570 行），发布矩阵（六个目标 → `x86_64` 与 `aarch64` 两个 Linux gnu 目标）与 CI 的三平台矩阵，以及**全部** `#[cfg(unix)]` / `#[cfg(windows)]` / `cfg!(windows)` 分支（这些分支现在无条件编译）。`FreeBSD`/`NetBSD`/`OpenBSD`/`DragonFly` 也一并从 cpal 的 host 选择里消失。**刻意保留 `#[cfg(all(target_os = "linux", target_env = "gnu"))]`**（`engine.rs` / `player.rs` / `source.rs` 的 `[HEAP]` 诊断）：它编码的是真实的 glibc/ALSA 约束（读 `/proc/self/status` + `libc::malloc_trim`），不是可移植性开关 —— 它是唯一一个在 Linux 上仍可能为假的门。发布资产仍是 `boxpigma-<triple>.tar.gz` 与裸名 `SHA256SUMS`，`install.sh` 的 `awk` 查找与 `src/update.rs` 的解析契约逐字节未动（这是最容易静默弄坏的一条）。代价：随文件删除的 3 个单测（`a_float_device_gets_the_samples_unchanged`、`a_sixteen_bit_device_gets_clamped_pcm`、`the_tracks_rate_is_offered_before_the_devices_own`）测的是只为 WASAPI 设备服务的编码/协商逻辑，其被测对象已不存在
+
+
 ## [1.6.1] - 2026-09-24
 
 ### 🐛 Bug Fixes
