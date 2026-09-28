@@ -155,7 +155,15 @@ impl NcmClient {
 
     /// Check whether the user is logged in (determined via the `MUSIC_U` or `__csrf` cookie)
     pub fn is_logged_in(&self) -> bool {
-        self.store.lock().map(|s| s.is_logged_in()).unwrap_or(false)
+        self.store
+            .lock()
+            .map(|mut s| {
+                // Same reason as `prepare_request`: the answer must reflect the
+                // file, which another instance may have changed.
+                s.sync_if_due();
+                s.is_logged_in()
+            })
+            .unwrap_or(false)
     }
 
     /// Get the internal CookieStore (can be used to inject/read cookies)
@@ -176,10 +184,15 @@ impl NcmClient {
 
     /// Lock once to obtain csrf_token + cookie_header
     fn prepare_request(&self, is_eapi: bool) -> Result<RequestCookies, NcmError> {
-        self.with_store(|store| RequestCookies {
-            csrf: store.csrf_token().to_string(),
-            cookie_header: store.build_cookie_header(is_eapi),
-            device_id: store.device_id().to_string(),
+        self.with_store(|store| {
+            // Pick up a login/logout performed by another boxpigma process (the
+            // TUI vs `boxpigma -d`) before signing this request.
+            store.sync_if_due();
+            RequestCookies {
+                csrf: store.csrf_token().to_string(),
+                cookie_header: store.build_cookie_header(is_eapi),
+                device_id: store.device_id().to_string(),
+            }
         })
     }
 

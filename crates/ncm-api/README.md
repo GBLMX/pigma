@@ -2086,3 +2086,7 @@ pub async fn download_song(
 | `flush_cookies` | `pub fn flush_cookies(&self)` | 手动将 Cookie 持久化到磁盘 |
 | `is_logged_in` | `pub fn is_logged_in(&self) -> bool` | 通过 `MUSIC_U` / `__csrf` Cookie 检查登录状态 |
 | `cookie_store` | `pub fn cookie_store(&self) -> &Arc<Mutex<CookieStore>>` | 访问内部 CookieStore |
+
+> `cookies.json` 由所有 boxpigma 进程共享（TUI 与 `boxpigma -d`），`CookieStore` 因此只是它的**缓存**：
+> 发请求、`is_logged_in`、写盘之前会自动 `sync_if_due`（250ms 内至多一次），承认别的进程写入的登录/登出；
+> `flush` 把自己的改动合并进文件后原子替换，拿不到锁也能安全合并。两个进程不需要重启就能看到对方的登录状态。

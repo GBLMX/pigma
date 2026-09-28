@@ -5,7 +5,18 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+/// Shortest interval between two freshness checks of the cookie file.
+///
+/// The file holds a handful of cookies, so a check is one small read; the
+/// interval only exists to keep callers that run per animation frame (login
+/// state, request preparation) from touching the disk on every call.
+const SYNC_INTERVAL: Duration = Duration::from_millis(250);
+
 const SAVE_INTERVAL: Duration = Duration::from_secs(10);
+
+/// The client fingerprint cookie. It is issued once and from then on owned by
+/// the file rather than by the process.
+const DEVICE_ID: &str = "deviceId";
 
 /// Generate a 52-character hexadecimal device fingerprint (matches the official client's
 /// `generateDeviceId`)
@@ -19,16 +30,30 @@ fn generate_device_id() -> String {
 }
 
 /// The persistent Cookie issued by the server after login plus the client-generated session
-/// identifiers
+/// identifiers.
+///
+/// The instance is a *cache* of `cookies.json`, not an authority over it: every
+/// boxpigma process (the TUI and `boxpigma -d`) shares that one file, so
+///
+/// * reads fold in what another instance has written since the last check
+///   ([`Self::sync_if_due`]), which makes a login or logout performed in one
+///   process visible in the others without a restart, and
+/// * writes re-read the file under a cross-process lock and apply only this
+///   instance's own changes ([`Self::dirty`]) on top of it, then replace it
+///   atomically (temp file + rename) so no concurrent reader can ever observe a
+///   truncated file.
+///
+/// A cookie this instance changed itself wins over the file until it has been
+/// flushed; everything else follows the file. That is what keeps the processes
+/// converging instead of fighting: a removal made elsewhere is adopted, not
+/// rolled back, and a key another instance added is never dropped just because
+/// this store had not seen it.
 pub struct CookieStore {
     /// Persistent cookies (from set-cookie, serialized to disk)
     cookies: HashMap<String, String>,
-    /// Cookie names that were already on disk when this store was created.
-    /// Used by [`Self::flush`] to write back only what this instance actually
-    /// changed, so a second concurrently-running instance cannot clobber
-    /// cookies it did not fetch.
-    loaded: HashSet<String>,
-    /// Cookie names this instance has set or removed since creation.
+    /// Cookie names this instance has set or removed since the last successful
+    /// write. Values come from `cookies`; a name that is dirty but absent from
+    /// `cookies` is a pending deletion.
     dirty: HashSet<String>,
     /// Session-level random identifiers (regenerated at each startup, not persisted)
     session: SessionCookies,
@@ -36,6 +61,8 @@ pub struct CookieStore {
     path: PathBuf,
     /// The extracted CSRF token
     csrf: String,
+    /// Time of the last freshness check
+    last_check: Instant,
     /// Time of the last write to disk
     last_save: Instant,
 }
@@ -120,24 +147,29 @@ impl Drop for FileLock {
 
 impl CookieStore {
     pub fn new(path: PathBuf) -> Self {
-        let persisted = read_persisted(&path).unwrap_or_default();
+        // A missing or unreadable file leaves the cache empty; a corrupt file is
+        // not deleted here, the first flush keeps a copy of it.
+        let mut cookies = read_persisted(&path)
+            .map(|persisted| persisted.cookies)
+            .unwrap_or_default();
 
-        let loaded = persisted.cookies.keys().cloned().collect();
-        let mut cookies = persisted.cookies;
-        // Device fingerprint: persisted and kept consistent across restarts (reduces the chance of triggering risk control)
-        if !cookies.contains_key("deviceId") {
-            cookies.insert("deviceId".to_string(), generate_device_id());
+        // Device fingerprint: generated once, persisted, and from then on owned
+        // by the file so that every instance sends the same one.
+        let mut dirty = HashSet::new();
+        if !cookies.contains_key(DEVICE_ID) {
+            cookies.insert(DEVICE_ID.to_string(), generate_device_id());
+            dirty.insert(DEVICE_ID.to_string());
         }
 
         let csrf = cookies.get("__csrf").cloned().unwrap_or_default();
 
         Self {
             cookies,
-            loaded,
-            dirty: HashSet::new(),
+            dirty,
             session: SessionCookies::new(),
             path,
             csrf,
+            last_check: Instant::now(),
             last_save: Instant::now(),
         }
     }
@@ -145,7 +177,7 @@ impl CookieStore {
     /// The current device fingerprint (52 hexadecimal characters)
     pub fn device_id(&self) -> &str {
         self.cookies
-            .get("deviceId")
+            .get(DEVICE_ID)
             .map(|s| s.as_str())
             .unwrap_or("")
     }
@@ -179,8 +211,63 @@ impl CookieStore {
         parts.join("; ")
     }
 
+    /// Fold in changes made by another instance, at most once per
+    /// [`SYNC_INTERVAL`]. Cheap enough for per-frame callers.
+    pub fn sync_if_due(&mut self) {
+        if self.last_check.elapsed() >= SYNC_INTERVAL {
+            self.sync_from_disk();
+        }
+    }
+
+    /// Fold the current content of the cookie file into this store.
+    ///
+    /// Every cookie this instance has not changed itself follows the file: a
+    /// value another process wrote is adopted, and a cookie that disappeared
+    /// from the file was removed by another process and is dropped here too.
+    /// This instance's own unsaved changes ([`Self::dirty`]) stay in memory
+    /// until [`Self::flush`] has written them.
+    pub fn sync_from_disk(&mut self) {
+        self.last_check = Instant::now();
+        let Some(disk) = read_persisted(&self.path).map(|persisted| persisted.cookies) else {
+            // Missing or corrupt file: keep the in-memory state. The first flush
+            // keeps a copy of an unreadable file before replacing it.
+            return;
+        };
+
+        self.adopt_device_id(&disk);
+
+        let mut adopted = 0usize;
+        for (name, value) in &disk {
+            if self.dirty.contains(name) {
+                continue;
+            }
+            if self.cookies.get(name) != Some(value) {
+                self.cookies.insert(name.clone(), value.clone());
+                adopted += 1;
+            }
+        }
+
+        // Cookies that are gone from the file were removed by another instance.
+        let dirty = &self.dirty;
+        let before = self.cookies.len();
+        self.cookies
+            .retain(|name, _| dirty.contains(name) || disk.contains_key(name));
+        let removed = before - self.cookies.len();
+
+        if adopted > 0 || removed > 0 {
+            log::debug!(
+                "cookies: adopted {adopted} value(s) and {removed} removal(s) from another instance"
+            );
+            self.adopt_csrf();
+        }
+    }
+
     /// Extract Set-Cookie from the response headers
     pub fn update_from_response(&mut self, headers: &reqwest::header::HeaderMap) {
+        // Fold in other instances' writes first, so the server's fresh values are
+        // applied on top of the current state instead of an outdated one.
+        self.sync_if_due();
+
         let mut changed = false;
 
         for set_cookie in headers.get_all("set-cookie").iter() {
@@ -225,67 +312,107 @@ impl CookieStore {
 
     /// Remove the specified cookie
     pub fn remove(&mut self, name: &str) {
+        // Reflect concurrent writes before recording our own removal, so both
+        // changes end up merged with the file instead of fighting over it.
+        self.sync_if_due();
         self.cookies.remove(name);
         self.dirty.insert(name.to_string());
     }
 
     /// Force a write to disk.
     ///
-    /// The current on-disk state is re-read and only this instance's changes
-    /// are applied on top of it, then the result is written atomically (temp
-    /// file + rename). This prevents a second concurrently-running instance
-    /// from clobbering cookies it did not fetch, and stops a concurrent reader
-    /// from ever observing a truncated/empty file.
+    /// The file is re-read under a cross-process lock and only this instance's
+    /// changes are applied on top of it, then the result replaces the file
+    /// atomically. Nothing is written when this instance has no pending change,
+    /// the file then already is the truth (and is adopted as the new cache).
     pub fn flush(&mut self) {
-        // Serialize with other instances (the TUI plus `boxpigma -d`): without
-        // this, two instances that flush inside the same read-modify-write
-        // window silently drop each other's freshly written keys. Best effort:
-        // if the lock cannot be taken, fall back to the unlocked merge.
+        // Serialize with the other instances (the TUI plus `boxpigma -d`):
+        // without this, two instances flushing inside the same read-modify-write
+        // window silently drop each other's freshly written keys. Best effort —
+        // if the lock cannot be taken, our own keys are still merged in.
         let _lock = FileLock::acquire(&self.path);
-        let merged = self.merged_for_disk();
-        match write_persisted(&self.path, &merged) {
-            Ok(()) => {
-                // Only ever grow: a key that disappeared from the file because
-                // another instance removed it must not look like one we created.
-                self.loaded.extend(merged.keys().cloned());
-                self.dirty.clear();
+
+        let on_disk = read_persisted(&self.path);
+        let readable = on_disk.is_some();
+        let mut next = on_disk
+            .map(|persisted| persisted.cookies)
+            .unwrap_or_default();
+
+        // `deviceId` belongs to the file: adopt the persisted fingerprint instead
+        // of replacing it with the one this instance generated.
+        self.adopt_device_id(&next);
+
+        // Without a readable file there is nothing to merge against: write the
+        // whole in-memory state. Otherwise write exactly our own changes.
+        let names: Vec<String> = if readable {
+            self.dirty.iter().cloned().collect()
+        } else {
+            self.cookies.keys().cloned().collect()
+        };
+        for name in &names {
+            match self.cookies.get(name) {
+                Some(value) => {
+                    next.insert(name.clone(), value.clone());
+                }
+                // Dirty but absent from the cache: a pending deletion wins over
+                // whatever the file still has.
+                None => {
+                    next.remove(name);
+                }
             }
-            Err(e) => log::warn!("failed to write cookie file {:?}: {}", self.path, e),
         }
+
+        let wrote = if readable && self.dirty.is_empty() {
+            // Nothing of ours to write; the file stays as it is.
+            false
+        } else {
+            if !readable && self.path.exists() {
+                back_up_unreadable(&self.path);
+            }
+            match write_persisted(&self.path, &next) {
+                Ok(()) => true,
+                Err(e) => {
+                    log::warn!("failed to write cookie file {:?}: {}", self.path, e);
+                    false
+                }
+            }
+        };
+
+        if wrote || readable {
+            // Adopt the file as the new cache: everything another instance wrote
+            // is now visible here, and a removal made elsewhere is not rolled
+            // back by our next flush.
+            self.cookies = next;
+            self.adopt_csrf();
+        }
+        if wrote {
+            self.dirty.clear();
+        }
+        self.last_check = Instant::now();
         self.last_save = Instant::now();
     }
 
-    /// Re-read the file and overlay only this instance's changes. A persisted
-    /// `deviceId` always wins over a locally generated one, so a store that
-    /// failed to load (e.g. started mid-write) cannot replace the fingerprint.
-    fn merged_for_disk(&self) -> HashMap<String, String> {
-        let Some(disk) = read_persisted(&self.path) else {
-            // No readable file (missing or corrupt): fall back to our full
-            // in-memory state, which also restores cookies if the file was
-            // deleted underneath us.
-            return self.cookies.clone();
-        };
-
-        let mut merged = disk.cookies;
-        let disk_has_device_id = merged.contains_key("deviceId");
-
-        for (name, value) in &self.cookies {
-            if name == "deviceId" && disk_has_device_id {
-                continue;
+    /// `deviceId` is issued once and then owned by the file: take the persisted
+    /// fingerprint and give up our own pending write for it, so two instances
+    /// that started at the same time end up sending the same one.
+    fn adopt_device_id(&mut self, disk: &HashMap<String, String>) {
+        if let Some(id) = disk.get(DEVICE_ID) {
+            if self.cookies.get(DEVICE_ID) != Some(id) {
+                self.cookies.insert(DEVICE_ID.to_string(), id.clone());
             }
-            if self.dirty.contains(name) || !self.loaded.contains(name) {
-                merged.insert(name.clone(), value.clone());
-            }
+            self.dirty.remove(DEVICE_ID);
         }
+    }
 
-        // Explicit removals win over anything still on disk.
-        for name in &self.dirty {
-            if !self.cookies.contains_key(name) {
-                merged.remove(name);
-            }
+    /// The cached CSRF token follows the last non-empty `__csrf` value seen, from
+    /// a response or from another instance's write that was adopted here.
+    fn adopt_csrf(&mut self) {
+        if let Some(value) = self.cookies.get("__csrf")
+            && !value.is_empty()
+            && *value != self.csrf
+        {
+            self.csrf = value.clone();
         }
-
-        merged
     }
 
     fn flush_if_stale(&mut self) {
@@ -301,6 +428,28 @@ fn read_persisted(path: &Path) -> Option<Persisted> {
     std::fs::read_to_string(path)
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
+}
+
+/// Move an unreadable cookie file aside so the flush that follows does not
+/// silently discard whatever it contained.
+fn back_up_unreadable(path: &Path) {
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let backup = path.with_extension(format!("corrupt-{stamp}"));
+    match std::fs::rename(path, &backup) {
+        Ok(()) => log::warn!(
+            "cookie file {:?} could not be parsed; kept a copy at {:?}",
+            path,
+            backup
+        ),
+        Err(e) => log::warn!(
+            "cookie file {:?} could not be parsed and could not be kept aside: {}",
+            path,
+            e
+        ),
+    }
 }
 
 /// Atomically write the persisted cookies to `path`.
@@ -378,6 +527,11 @@ mod tests {
         store.update_from_response(&h);
     }
 
+    fn write_cookies(path: &Path, cookies: HashMap<String, String>) {
+        let json = serde_json::to_string_pretty(&Persisted { cookies }).unwrap();
+        std::fs::write(path, json).unwrap();
+    }
+
     /// Another instance logs out: this stale instance must not roll that
     /// removal back on a later flush.
     #[test]
@@ -391,8 +545,7 @@ mod tests {
         // Simulate the other instance's logout: rewrite the file without MUSIC_U.
         let mut disk = read_cookies(&path).cookies;
         disk.remove("MUSIC_U");
-        let json = serde_json::to_string_pretty(&Persisted { cookies: disk }).unwrap();
-        std::fs::write(&path, json).unwrap();
+        write_cookies(&path, disk);
 
         s.flush();
         s.flush();
@@ -402,7 +555,70 @@ mod tests {
             "a stale instance rolled the other instance's logout back"
         );
         assert_eq!(second.get("__csrf").map(String::as_str), Some("cccc"));
+        assert!(
+            !s.cookies.contains_key("MUSIC_U"),
+            "the store kept a cookie that another instance removed"
+        );
         let _ = std::fs::remove_file(&path);
+    }
+
+    /// A login performed by another instance becomes visible here without a
+    /// restart.
+    #[test]
+    fn another_instances_login_is_adopted() {
+        let path = temp_cookie_path();
+        // B is already running, before anything has ever been written.
+        let mut b = CookieStore::new(path.clone());
+        assert!(!b.is_logged_in());
+
+        // A logs in and persists.
+        let mut a = CookieStore::new(path.clone());
+        set_cookie(&mut a, "MUSIC_U", "token");
+        set_cookie(&mut a, "__csrf", "csrf");
+        a.flush();
+
+        b.sync_from_disk();
+        assert!(b.is_logged_in(), "B did not notice A's login");
+        assert_eq!(b.csrf_token(), "csrf");
+        assert_eq!(
+            b.device_id(),
+            a.device_id(),
+            "the fingerprint must converge"
+        );
+        assert!(b.build_cookie_header(false).contains("MUSIC_U=token"));
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// A logout performed by another instance is adopted, and the stale instance
+    /// does not write the cookie back.
+    #[test]
+    fn another_instances_logout_is_adopted() {
+        let path = temp_cookie_path();
+        let mut a = CookieStore::new(path.clone());
+        set_cookie(&mut a, "MUSIC_U", "token");
+        set_cookie(&mut a, "__csrf", "csrf");
+        a.flush();
+
+        // B is already up and logged in.
+        let mut b = CookieStore::new(path.clone());
+        assert!(b.is_logged_in());
+
+        a.remove("MUSIC_U");
+        a.flush();
+
+        b.sync_from_disk();
+        assert!(
+            !b.cookies.contains_key("MUSIC_U"),
+            "B still holds the token"
+        );
+        b.flush();
+        let disk = read_cookies(&path).cookies;
+        assert!(
+            !disk.contains_key("MUSIC_U"),
+            "the stale instance resurrected the login"
+        );
+        assert_eq!(disk.get("__csrf").map(String::as_str), Some("csrf"));
+        let _ = std::fs::remove_file(path);
     }
 
     /// Two instances flushing at the same time must not drop each other's keys.
@@ -441,6 +657,11 @@ mod tests {
             "keys lost to a concurrent writer: {missing:?}"
         );
         assert!(disk.contains_key("deviceId"), "file must stay readable");
+        assert_eq!(
+            disk.get("deviceId").map(String::as_str),
+            Some(_a.device_id()),
+            "both instances must agree on the fingerprint"
+        );
         let _ = std::fs::remove_file(&path);
     }
 
@@ -465,9 +686,7 @@ mod tests {
         let mut cookies = HashMap::new();
         cookies.insert("MUSIC_U".to_string(), "test_token".to_string());
         cookies.insert("__csrf".to_string(), "csrf123".to_string());
-        let persisted = Persisted { cookies };
-        let json = serde_json::to_string_pretty(&persisted).unwrap();
-        std::fs::write(&path, &json).unwrap();
+        write_cookies(&path, cookies);
 
         let store = CookieStore::new(path.clone());
         assert!(store.is_logged_in());
@@ -479,12 +698,40 @@ mod tests {
     fn test_flush_persists_cookies() {
         let path = temp_cookie_path();
         let mut store = CookieStore::new(path.clone());
-        store.cookies.insert("key".to_string(), "value".to_string());
+        // The first flush creates the file with the generated fingerprint.
+        store.flush();
+        assert!(read_cookies(&path).cookies.contains_key(DEVICE_ID));
+
+        set_cookie(&mut store, "key", "value");
+        // A cookie this instance did not fetch is not ours to write.
+        store
+            .cookies
+            .insert("borrowed".to_string(), "v".to_string());
         store.flush();
 
-        let content = std::fs::read_to_string(&path).unwrap();
-        let loaded: Persisted = serde_json::from_str(&content).unwrap();
-        assert_eq!(loaded.cookies.get("key").unwrap(), "value");
+        let loaded = read_cookies(&path).cookies;
+        assert_eq!(loaded.get("key").map(String::as_str), Some("value"));
+        assert!(!loaded.contains_key("borrowed"));
+        assert!(loaded.contains_key(DEVICE_ID));
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// If the file disappears while this instance is running, the next flush
+    /// restores the in-memory state instead of writing an empty file.
+    #[test]
+    fn a_deleted_file_is_restored_from_memory() {
+        let path = temp_cookie_path();
+        let mut store = CookieStore::new(path.clone());
+        set_cookie(&mut store, "MUSIC_U", "token");
+        store.flush();
+
+        let _ = std::fs::remove_file(&path);
+        store.flush();
+
+        assert_eq!(
+            read_disk(&path).get("MUSIC_U").map(String::as_str),
+            Some("token")
+        );
         let _ = std::fs::remove_file(path);
     }
 
@@ -559,24 +806,21 @@ mod tests {
         read_persisted(path).map(|p| p.cookies).unwrap_or_default()
     }
 
+    /// A second instance must neither wipe a session it never fetched nor
+    /// replace the fingerprint stored in the file.
     #[test]
-    fn flush_does_not_clobber_another_instances_cookies() {
+    fn a_second_instance_does_not_clobber_the_session() {
         let path = temp_cookie_path();
 
         // Instance A logs in and persists a session.
         let mut a = CookieStore::new(path.clone());
-        a.cookies.insert("MUSIC_U".into(), "token".into());
-        a.dirty.insert("MUSIC_U".into());
+        set_cookie(&mut a, "MUSIC_U", "token");
         a.flush();
         let device = a.device_id().to_string();
 
-        // Instance B started while A was writing, so it loaded nothing: only a
-        // freshly generated deviceId. On shutdown it must not wipe A's login.
+        // Instance B starts (it sees A's file) and shuts down.
         let mut b = CookieStore::new(path.clone());
-        b.cookies.clear();
-        b.cookies.insert("deviceId".into(), "B".into());
-        b.loaded.clear();
-        b.dirty.clear();
+        assert_eq!(b.device_id(), device);
         b.flush();
 
         let disk = read_disk(&path);
@@ -591,6 +835,31 @@ mod tests {
             "a persisted deviceId must not be replaced by a generated one"
         );
 
+        // Instance C started while no file existed, so it generated a fingerprint
+        // of its own (like an instance that started mid-write): flushing must
+        // adopt A's instead of replacing it.
+        let _ = std::fs::remove_file(&path);
+        let mut c = CookieStore::new(path.clone());
+        assert_ne!(c.device_id(), device);
+        let mut restored = HashMap::new();
+        restored.insert("deviceId".to_string(), device.clone());
+        restored.insert("MUSIC_U".to_string(), "token".to_string());
+        write_cookies(&path, restored);
+
+        c.flush();
+        let disk = read_disk(&path);
+        assert_eq!(
+            disk.get("deviceId").map(String::as_str),
+            Some(device.as_str()),
+            "a generated deviceId replaced the persisted one"
+        );
+        assert_eq!(disk.get("MUSIC_U").map(String::as_str), Some("token"));
+        assert_eq!(
+            c.device_id(),
+            device,
+            "the store must adopt the file's fingerprint"
+        );
+
         let _ = std::fs::remove_file(path);
     }
 
@@ -598,9 +867,8 @@ mod tests {
     fn removal_is_persisted_without_dropping_unrelated_cookies() {
         let path = temp_cookie_path();
         let mut a = CookieStore::new(path.clone());
-        a.cookies.insert("MUSIC_U".into(), "token".into());
-        a.cookies.insert("__csrf".into(), "csrf".into());
-        a.dirty.extend(["MUSIC_U".into(), "__csrf".into()]);
+        set_cookie(&mut a, "MUSIC_U", "token");
+        set_cookie(&mut a, "__csrf", "csrf");
         a.flush();
 
         // A second instance logs out: only MUSIC_U is removed.
@@ -612,6 +880,39 @@ mod tests {
         assert!(!disk.contains_key("MUSIC_U"));
         assert_eq!(disk.get("__csrf").map(String::as_str), Some("csrf"));
 
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// An unparseable file is kept aside instead of being discarded.
+    #[test]
+    fn an_unreadable_file_is_kept_aside() {
+        let path = temp_cookie_path();
+        std::fs::write(&path, b"{ this is not json").unwrap();
+
+        let mut store = CookieStore::new(path.clone());
+        set_cookie(&mut store, "MUSIC_U", "token");
+        store.flush();
+
+        assert_eq!(
+            read_disk(&path).get("MUSIC_U").map(String::as_str),
+            Some("token")
+        );
+
+        let stem = path.file_stem().unwrap().to_string_lossy().into_owned();
+        let backup = std::fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path())
+            .find(|p| {
+                p.file_name()
+                    .is_some_and(|n| n.to_string_lossy().starts_with(&format!("{stem}.corrupt-")))
+            })
+            .expect("the unreadable file was discarded");
+        assert_eq!(
+            std::fs::read_to_string(&backup).unwrap(),
+            "{ this is not json"
+        );
+        let _ = std::fs::remove_file(&backup);
         let _ = std::fs::remove_file(path);
     }
 }
