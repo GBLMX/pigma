@@ -162,7 +162,8 @@ git cherry-pick <commit>                  # 一次一个，冲突面就限于这
 挑之前先看这个提交有没有碰到上表里的文件（**平台相关的提交一律不挑**：本仓库已删掉那些分支与依赖）：碰了就要按"本仓库版本优先"解一次冲突，并确认行为没有退化。挑完必须跑：
 
 ```bash
-cargo test --workspace --all-features && cargo clippy --workspace --all-targets
+cargo test --locked --workspace --all-features         # 与 CI 一致
+cargo clippy --workspace --all-targets -- -D warnings   # CI 把 clippy 警告当失败
 ```
 
 协议与 API 那一层（`crates/ncm-api`）的上游改动通常最值得挑 —— 它们对着的是线上服务。
@@ -171,10 +172,17 @@ cargo test --workspace --all-features && cargo clippy --workspace --all-targets
 
 当收集到足够的变更后，维护者会执行以下步骤发布新版本：
 
-1. 更新 `Cargo.toml` 中的版本号。
-2. 运行 `git cliff --unreleased --tag x.x.x --prepend CHANGELOG.md` 更新变更日志。
-3. 提交并打标签：`git tag vX.X.X`。
-4. 推送并触发 GitHub Release。
+1. **升版本号，三个文件一起改**：`Cargo.toml` 的 `version`、`Cargo.lock` 里 `name = "boxpigma"` 那条的 `version`（同一个值）、以及 `CHANGELOG.md` —— 把顶部的 `## [unreleased]` 段转正成 `## [x.y.z] - <日期>`，并在最上面留一个空的 `## [unreleased]`（与历史各版一致）。
+   `Cargo.lock` 不是可选项：`.github/workflows/release.yml` 用 `cargo build --locked` 构建，lock 与 manifest 版本不一致会让发布作业**当场失败**。
+2. 自检 lock 与 manifest 一致：`cargo check --workspace --locked`。
+3. 提交并打标签：`git commit -m "chore(release): x.y.z"`、`git tag vX.Y.Z`。
+4. 推送**分支与标签**：`git push origin main && git push origin vX.Y.Z`。Release workflow 由 `v[0-9]+.*` 触发，产出 `boxpigma-x86_64-unknown-linux-gnu.tar.gz`、`boxpigma-aarch64-unknown-linux-gnu.tar.gz` 与裸名的 `SHA256SUMS`。
+5. 资产产出后升 `PKGBUILD`：`pkgver` 与 `sha256sums`（取 x86_64 资产：`curl -sSL <asset> | sha256sum`，并与 `SHA256SUMS` 对齐），单独提交 `pkg: PKGBUILD 的版本与校验和升到已发布的 x.y.z`。校验和对不上时 `makepkg` 会拒绝构建。
+
+**CHANGELOG 与 Release 正文是两套东西**，不要用 `git cliff --prepend` 去写 CHANGELOG：
+
+- `CHANGELOG.md` 是**手写的散文**。`cliff.toml` 的模板产出的是 `- *(scope)* 摘要 (作者)` 这种精简形状，`--prepend` 会另起一个版本段、而把 `[unreleased]` 下已经写好的散文留在原地 —— 结果是两套风格并存、内容重复。
+- GitHub Release 页面上的正文由 workflow 自己生成：`git-cliff --latest --tag "$VERSION" -o release-notes.md`。
 
 ---
 
