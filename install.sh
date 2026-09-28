@@ -1,5 +1,5 @@
 #!/bin/sh
-# boxpigma 安装脚本（Linux / macOS）
+# boxpigma 安装脚本（Linux）
 #
 # 安装布局（版本化 + 原子切换）：
 #
@@ -107,8 +107,7 @@ detect_target() {
             fi
             target="$cpu-unknown-linux-gnu"
             ;;
-        Darwin) target="$cpu-apple-darwin" ;;
-        *) die "不支持的系统：$os —— Windows 请用 install.ps1" ;;
+        *) die "不支持的系统：$os —— 本项目只发布 Linux（glibc）产物" ;;
     esac
 
     printf '%s' "$target"
@@ -116,10 +115,9 @@ detect_target() {
 
 TARGET="$(detect_target)"
 
-# Linux 的 aarch64 产物由 cross 构建，其余是本地构建；两个平台的压缩包都是 tar.gz，
-# 里面只有一个叫 boxpigma 的文件。
+# 两个 Linux 目标的压缩包都是 tar.gz，里面只有一个叫 boxpigma 的文件。
 case "$TARGET" in
-    *-linux-gnu | *-apple-darwin) ASSET="boxpigma-$TARGET.tar.gz" ;;
+    *-linux-gnu) ASSET="boxpigma-$TARGET.tar.gz" ;;
     *) die "没有 $TARGET 对应的发布资产" ;;
 esac
 
@@ -166,11 +164,9 @@ fi
 # -------------------------------------------------------------- 布局相关工具 ----
 
 mtime_of() {
-    # 目录的修改时间（epoch 秒），GNU 与 BSD 的 stat 参数不一样。
+    # 目录的修改时间（epoch 秒）。
     if stat -c %Y "$1" >/dev/null 2>&1; then
         stat -c %Y "$1"
-    elif stat -f %m "$1" >/dev/null 2>&1; then
-        stat -f %m "$1"
     else
         printf '0'
     fi
@@ -232,12 +228,7 @@ switch_current() {
     new="$INSTALL_DIR/.current.$$"
     rm -f "$new" 2>/dev/null || true
     ln -s "releases/$name" "$new" || return 1
-    if mv -T "$new" "$CURRENT_LINK" 2>/dev/null; then
-        return 0
-    fi
-    # BSD/macOS 的 mv 没有 -T：退化成「先删后建」，中间只有一次 rename 的间隔。
-    rm -f "$CURRENT_LINK" 2>/dev/null || true
-    mv "$new" "$CURRENT_LINK" || return 1
+    mv -T "$new" "$CURRENT_LINK" 2>/dev/null || return 1
     return 0
 }
 
