@@ -1,13 +1,13 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use ratatui_image::picker::Picker;
+use ratatui_image::{FontSize, picker::Picker};
 use reqwest::Client;
 
 use super::App;
 use crate::{
     config::ThemeRegistry,
     state::{CommandItem, CommandPanel, palette_items},
-    utils::terminal::{ImageProtocol, choose_image_protocol},
+    utils::terminal::{ImageProtocol, choose_image_protocol, is_tuios_terminal},
 };
 
 /// Deadline for the connection phase (TCP + TLS, through the proxy when one is
@@ -27,6 +27,18 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 /// sequence and reads the reply, so a terminal (or a pipe) that never answers must not be
 /// able to keep the app from starting.
 const PICKER_QUERY_BUDGET: Duration = Duration::from_secs(2);
+
+/// How long to keep re-reading a tuios pane's pty when it reports no pixels.
+///
+/// tuios writes the pixel fields when the client lays the pane out, and a pane this
+/// process is starting in does not exist before that: `tuios new-window` hands the pty
+/// over first, and measured on 0.8.1 the pane reports 13x37 cells with 0x0 px at t=0 and
+/// its final size with the client's 10x22 px cell at t=0.34s. A pane that was already
+/// there — `boxpigma` typed into a shell — has the pixels on the first read.
+const TUIOS_CELL_SIZE_BUDGET: Duration = Duration::from_millis(500);
+
+/// Interval between those reads, one `ioctl` on `/dev/tty` each.
+const TUIOS_CELL_SIZE_POLL: Duration = Duration::from_millis(10);
 
 impl App {
     /// Build the command palette from the one command table.
@@ -67,6 +79,11 @@ impl App {
     /// `ask_the_terminal` is false when nothing is on the other end (the headless daemon,
     /// the one-shot CLI subcommands, tests, `boxpigma > file`): there is no reply to read,
     /// so asking would only block [`query_picker`] for its whole budget.
+    ///
+    /// A tuios pane is the one terminal that is asked nothing even though it is attached:
+    /// what it answers the query with is not a reply the query can read, and its pty
+    /// carries the cell size anyway ([`tuios_picker`]). Which protocol it gets needs no
+    /// answer either — `TUIOS_ENV` settles that in [`choose_image_protocol`].
     pub(super) fn build_picker(
         playerbar: &crate::config::PlayerbarConfig,
         ask_the_terminal: bool,
@@ -76,17 +93,20 @@ impl App {
         // A terminal that does not answer falls back to half blocks, which is what
         // upstream recommends: the fixed-cell-size constructors are deprecated, and a
         // guessed cell size would scale every cover wrongly anyway.
-        let mut picker = if ask_the_terminal {
-            query_picker().unwrap_or_else(Picker::halfblocks)
+        let tuios = ask_the_terminal && is_tuios_terminal(&|key| std::env::var(key).ok());
+        let (mut picker, queried) = if tuios {
+            (tuios_picker(), None)
+        } else if ask_the_terminal {
+            let picker = query_picker().unwrap_or_else(Picker::halfblocks);
+            let queried = match picker.protocol_type() {
+                ProtocolType::Kitty => Some(ImageProtocol::Kitty),
+                ProtocolType::Iterm2 => Some(ImageProtocol::ITerm2),
+                ProtocolType::Sixel => Some(ImageProtocol::Sixel),
+                _ => None,
+            };
+            (picker, queried)
         } else {
-            Picker::halfblocks()
-        };
-
-        let queried = match picker.protocol_type() {
-            ProtocolType::Kitty => Some(ImageProtocol::Kitty),
-            ProtocolType::Iterm2 => Some(ImageProtocol::ITerm2),
-            ProtocolType::Sixel => Some(ImageProtocol::Sixel),
-            _ => None,
+            (Picker::halfblocks(), None)
         };
 
         let tmux = picker.tmux_detected();
@@ -183,6 +203,71 @@ fn query_picker() -> Option<Picker> {
             None
         }
     }
+}
+
+/// The picker for a tuios pane, which cannot be asked and does not have to be.
+///
+/// tuios emulates the pane's terminal and redraws the kitty graphics it parses, so the
+/// protocol comes from `TUIOS_ENV` ([`choose_image_protocol`]) — no query involved. What
+/// the query would have answered, and what has to come from somewhere else, is the cell
+/// size: tuios replies `CSI ? 0 n` to the graphics query, and `ratatui-image`'s reply
+/// parser only ends the read on the standard `CSI 0 n`, so `Picker::from_query_stdio`
+/// never returns inside a pane — the worker parks in `read()` until the process exits and
+/// [`PICKER_QUERY_BUDGET`] buys nothing but a two second delay to a guessed cell size.
+///
+/// The pane's pty does know it: tuios writes the cell size of the client attached to the
+/// pane into `TIOCGWINSZ`'s pixel fields (0.8.1, measured: a pane of 18x6 cells reporting
+/// 180x132 px for a client whose cells are 10x22 px, exactly the size the daemon logs for
+/// that client). The fields arrive only once that client has laid the pane out, hence the
+/// re-reads — and no client at all means no cell size, where the library's guess is all
+/// there is.
+fn tuios_picker() -> Picker {
+    let deadline = Instant::now() + TUIOS_CELL_SIZE_BUDGET;
+
+    loop {
+        if let Some((width, height)) = measured_cell_size() {
+            log::debug!("covers: the tuios pane reports a {width}x{height} px cell");
+            return picker_at(FontSize::new(width, height));
+        }
+
+        if Instant::now() >= deadline {
+            break;
+        }
+
+        std::thread::sleep(TUIOS_CELL_SIZE_POLL);
+    }
+
+    log::debug!("covers: the tuios pane reported no cell size; using half blocks");
+    Picker::halfblocks()
+}
+
+/// The pane's cell size in pixels, if its pty reports one yet.
+fn measured_cell_size() -> Option<(u16, u16)> {
+    let size = crossterm::terminal::window_size().ok()?;
+    pane_cell_size(size.rows, size.columns, size.width, size.height)
+}
+
+/// The cell size in pixels out of `TIOCGWINSZ`: `width`/`height` are the pty's pixel
+/// dimensions, `columns`/`rows` the cells they are divided into. Zero on either side means
+/// the terminal reported no pixels (the fields are optional and most terminals leave them
+/// at zero), and anything that rounds down to nothing is not a cell size either.
+fn pane_cell_size(rows: u16, columns: u16, width: u16, height: u16) -> Option<(u16, u16)> {
+    if rows == 0 || columns == 0 {
+        return None;
+    }
+
+    let cell = (width / columns, height / rows);
+    (cell.0 > 0 && cell.1 > 0).then_some(cell)
+}
+
+/// A picker at a measured cell size.
+///
+/// [`Picker::from_fontsize`] is deprecated in favour of the query — but the query is
+/// exactly what a tuios pane cannot answer, and this is the only public constructor that
+/// takes a cell size instead of reading one.
+#[allow(deprecated)]
+fn picker_at(font_size: FontSize) -> Picker {
+    Picker::from_fontsize(font_size)
 }
 
 #[cfg(test)]
@@ -314,5 +399,33 @@ mod command_panel_tests {
         };
         assert!(ex.starts_with("theme "), "{ex}");
         crate::input::ex::ExCommand::parse(ex).expect("the submenu entry parses");
+    }
+}
+
+#[cfg(test)]
+mod picker_tests {
+    use super::*;
+
+    /// A pane of a real tuios client (0.8.1, measured): 18x6 cells, the client's cells
+    /// 10x22 px, and the pty reporting 180x132 px for them. This division is the whole
+    /// cell size a tuios pane gets, so getting it the wrong way round scales every cover
+    /// wrongly.
+    #[test]
+    fn the_cell_size_divides_the_pty_pixels_by_its_cells() {
+        assert_eq!(pane_cell_size(6, 18, 180, 132), Some((10, 22)));
+    }
+
+    /// Most terminals never fill the pixel fields in — a pty of the same size reporting
+    /// nothing, a degenerate one with no cells, and pixels too small to be a cell all
+    /// have to come back as "not a cell size" rather than as a division.
+    #[test]
+    fn a_pty_that_reports_no_pixels_has_no_cell_size() {
+        assert_eq!(pane_cell_size(34, 154, 0, 0), None, "no pixels reported");
+        assert_eq!(
+            pane_cell_size(0, 154, 2156, 1292),
+            None,
+            "no cells to divide by"
+        );
+        assert_eq!(pane_cell_size(6, 8, 3, 132), None, "narrower than a pixel");
     }
 }

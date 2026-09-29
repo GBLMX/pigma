@@ -1,5 +1,9 @@
 ## [unreleased]
 
+### 🐛 Bug Fixes
+
+- *(terminal)* **tuios 窗格里封面画不出来，启动还要白等两秒**：tuios（终端工作区管理器）和 herdr 一样把窗格里的终端**自己仿真**了 —— 它只解析 kitty 图形协议、再自己画到外层终端 —— 而窗格里的进程带着的是**外层**终端的变量（`TERM_PROGRAM`、`KITTY_PID` 都是外层的）。封面协议本应由「问终端」定，可 tuios 的回答是私有形式 `CSI ? 0 n`（标准是 `CSI 0 n`），`ratatui-image` 的回答解析器只认后者，于是 `Picker::from_query_stdio()` **永远不返回**：查询线程停在 `read()` 里直到进程退出，boxpigma 那 2 秒预算到点只换来一句 WARN 和半块字符画。现在 tuios 窗格内**不问**：据 `TUIOS_ENV`（tuios 在每个窗格都设）先于外层终端那条修正判定，一律用 kitty —— 与 1.6.1 的 herdr 同一套处理，因为窗格里的变量同样会骗过 `TERM_PROGRAM` 修正（daemon 从 WezTerm 起，窗格里就会读出 WezTerm）；格子尺寸改从窗格自己的 pty 读，tuios 把**客户端**格子的像素尺寸写进 `TIOCGWINSZ` 的像素字段（实测 0.8.1：18x6 格、客户端格子 10x22 px 的窗格报 180x132 px，与 daemon 日志里该客户端的 `cell=10x22 pixels` 一致），所以封面按真实格子缩放，而不是库的 10x20 猜测；pixel 字段要等客户端把窗格布局完才写进去（实测新建窗格 t=0 报 0x0、t=0.34s 才报 10x22），读不到时会重读，最多等 0.5 秒
+
 ## [1.6.3] - 2026-09-29
 
 ### 🐛 Bug Fixes

@@ -79,13 +79,18 @@ pub enum ImageProtocolChoice {
 /// `queried` is what the terminal answered when asked (the kitty graphics query, or
 /// the sixel flag in DA1). That answer is the only signal that tells a graphics-capable
 /// terminal apart from a shell that merely inherited the variables, so it is trusted
-/// ahead of anything read from the environment — with three exceptions:
+/// ahead of anything read from the environment — with four exceptions:
 ///
 /// * Herdr is not the terminal: it emulates each pane's terminal and draws the images
 ///   itself, so the covers have to be spoken to *it* — and herdr implements the kitty
 ///   graphics protocol only. Its panes still carry the outer terminal's `TERM_PROGRAM`
 ///   (WezTerm), which would otherwise get the iTerm2 correction below, a protocol herdr
 ///   never parses.
+/// * tuios is the same shape of lie. It parses the kitty graphics its panes emit and
+///   redraws them itself, while the panes keep the variables of whatever terminal the
+///   *daemon* was started from — `TERM_PROGRAM` included, which would otherwise get the
+///   iTerm2 correction below. Its own answer is not usable either: it replies `CSI ? 0 n`
+///   to the graphics query, a form the reply parser in `ratatui-image` never terminates on.
 /// * WezTerm, Rio and iTerm2 answer the kitty graphics query, but upstream's
 ///   compatibility matrix is explicit that only iTerm2's own protocol renders bug-free
 ///   there ("would support Sixel and Kitty, but only iTerm2 actually works bug-free").
@@ -114,6 +119,13 @@ pub fn choose_image_protocol(
     // draws the images itself. `TERM_PROGRAM` still names the terminal Herdr runs in, so
     // this has to come before the corrections below — herdr never looks at iTerm2 bytes.
     if is_herdr_terminal(&lookup) {
+        return Some(ImageProtocol::Kitty);
+    }
+
+    // tuios answers for its panes the way herdr does — it parses the kitty graphics they
+    // emit and redraws them itself — while the pane keeps naming the terminal the daemon
+    // was started from. So this has to stand ahead of the corrections below as well.
+    if is_tuios_terminal(&lookup) {
         return Some(ImageProtocol::Kitty);
     }
 
@@ -171,6 +183,17 @@ pub(super) fn is_kitty_terminal(lookup: &impl Fn(&str) -> Option<String>) -> boo
 /// graphics protocol the pane should speak, not about the terminal that ends up drawing.
 fn is_herdr_terminal(lookup: &impl Fn(&str) -> Option<String>) -> bool {
     lookup("HERDR_ENV").is_some() || lookup("HERDR_SOCKET_PATH").is_some()
+}
+
+/// Whether the pane is inside [tuios](https://github.com/Gaurav-Gosain/tuios), which sets
+/// `TUIOS_ENV` (and the pane's own id, socket and token) in every pane it spawns.
+///
+/// Like herdr, tuios is a workspace manager rather than a terminal: it emulates the pane's
+/// terminal and draws the images the pane emits itself, in the kitty graphics protocol
+/// only. So this is a fact about the graphics protocol the pane should speak, not about
+/// the terminal that ends up drawing.
+pub fn is_tuios_terminal(lookup: &impl Fn(&str) -> Option<String>) -> bool {
+    lookup("TUIOS_ENV").is_some() || lookup("TUIOS_PANE_ID").is_some()
 }
 
 fn sixel_available(lookup: &impl Fn(&str) -> Option<String>) -> bool {
@@ -414,6 +437,30 @@ mod terminal_mode_tests {
             auto(&env, None),
             Some(ImageProtocol::Kitty),
             "herdr's own answer is not needed: kitty is what it implements"
+        );
+    }
+
+    /// tuios is the same shape of lie as herdr — its panes carry the outer terminal's
+    /// variables, and what the pane answers the query with is not even a reply the query
+    /// can read — so the protocol has to be settled from `TUIOS_ENV` alone.
+    #[test]
+    fn tuios_panes_get_kitty_graphics_not_the_outer_terminals_protocol() {
+        let env = [
+            ("TERM", "xterm-256color"),
+            ("TERM_PROGRAM", "WezTerm"),
+            ("TUIOS_ENV", "1"),
+            ("TUIOS_PANE_ID", "9f0a1c1e"),
+            ("KITTY_PID", "45573"),
+        ];
+        assert_eq!(
+            auto(&env, Some(ImageProtocol::Kitty)),
+            Some(ImageProtocol::Kitty),
+            "tuios parses kitty graphics from its panes and redraws them outward"
+        );
+        assert_eq!(
+            auto(&env, None),
+            Some(ImageProtocol::Kitty),
+            "tuios's own answer is never read, and the leaked KITTY_PID is not what decides it"
         );
     }
 

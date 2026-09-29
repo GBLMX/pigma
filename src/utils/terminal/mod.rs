@@ -23,7 +23,7 @@ pub use background::{
 };
 pub use capability::{
     COLOR_MODE, ColorMode, CursorStyle, ImageProtocol, ImageProtocolChoice, choose_image_protocol,
-    color_mode_from,
+    color_mode_from, is_tuios_terminal,
 };
 pub use color::{rgb_to_16, rgb_to_256};
 pub use sequences::{

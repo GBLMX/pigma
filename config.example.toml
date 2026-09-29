@@ -202,8 +202,13 @@ spinning_cover = false
 # 终端，而窗格里的进程仍然带着**外层**终端的 TERM_PROGRAM。所以在 herdr 窗格里一律用 kitty
 # 协议，据 `HERDR_ENV` 判定，先于上面那条 WezTerm 修正。
 #
+# tuios 是同一类，只是更绕：它的窗格也不问终端——它把图形查询答成 `CSI ? 0 n`（`CSI 5 n` 的
+# 标准回复是 `CSI 0 n`，`ratatui-image` 读不出前者），查询线程会一直卡在 read() 上；格子尺寸
+# 改从窗格自己的 pty 拿（tuios 把客户端的格子尺寸写进 pty 的像素字段，但晚约 0.3 秒才写）。
+# 同样据环境变量判定（`TUIOS_ENV`），也先于上面那条 WezTerm 修正。
+#
 #   "auto"       —— 问终端（推荐）
-#   "kitty"      —— kitty 图形协议（kitty 0.28+ / ghostty / herdr 窗格等）
+#   "kitty"      —— kitty 图形协议（kitty 0.28+ / ghostty / herdr 与 tuios 窗格等）
 #   "iterm2"     —— iTerm2 内联图片协议（WezTerm / Rio / iTerm2）
 #   "sixel"      —— 六像素图（foot / mlterm / xterm -ti 340 ...）
 #   "halfblocks" —— 不用图形协议，用半块字符画（任何终端都能看）
